@@ -86,6 +86,38 @@ this benchmark-first probe has now cleared the bar for. The `set!` cursor
 remains a valid cheaper-to-prove fallback if the `uset` proof proves
 intractable, at ~0.8pp less throughput.
 
+## Proof progress — the core bisimulation `goCur_eq` is COMPLETE (2026-07-09)
+
+`goCur_eq` — the write-once-cursor decode agrees with `goTreeFreeU` — is now
+**fully proven, no `sorry`, no `decreasing_by`**. All 10 loop cases (refill,
+literal write/error, long-literal write/error/no-progress, EOB, invalid-length,
+back-reference) are discharged. This is the heaviest proof surface in the repo,
+the piece the issue's own framing said to pay for only after the win was
+confirmed.
+
+Key move: the first attempt used direct well-founded recursion, but a tactic
+theorem's `decreasing_by` does **not** receive the `by_cases`/`split` guard
+hypotheses (they are packed into the WF argument tuple), so the per-branch
+measure decreases — literal `len ≥ 1`, decode `consumed ≥ 1 bit` — were
+unprovable there. Rebuilding the proof over `goCur.induct` (functional
+induction) supplies each guard as a named case hypothesis and carries no
+termination obligation, exactly mirroring the existing `goTreeFreeU_eq`. The
+goal side stays in `goCur`'s native `entryAtU` form (so it unifies with each
+IH); only `href` is normalised to `entryAt` via `entryAtU_window_eq`, with the
+IH rebased by `hue` where a literal write is involved. The two write bridges
+(`set!_extract_eq_push`, `copyWithinAt_extract_eq_copyLoop`) and per-step room
+from `goTreeFreeU_size_mono` close each write case.
+
+Remaining: `inflateFast_eq` (the block-loop lift). The path is now clear and
+tractable — `Inflate.inflate = inflateLoopTreeFree` (`inflateRaw_eq_loop`,
+`rfl`), and `inflateLoopCur` mirrors `inflateLoopTreeFree` block-for-block
+(same `btype` dispatch, `decodeDynamicLengthsOnly`, `bfinal`/progress guards),
+differing only in the output representation. So the lift is a loop bisimulation
+(`inflateLoopCur.induct`) that applies `goCur_eq` for each Huffman block
+(through a `decodeHuffmanCurTables ↔ decodeHuffmanFastBufTables` bridge) and a
+`decodeStoredCur ↔ decodeStored` bridge for stored blocks, instantiated with
+the presized buffer and the exact-size contract.
+
 ## Proof progress (`Zip/Spec/InflateFastCorrect.lean`)
 
 With the win confirmed, the equivalence proof is started. The bisimulation
@@ -116,18 +148,20 @@ discharged per step by the reference's monotone growth.
 **Remaining (`sorry`, WIP — file is standalone, NOT imported into `Zip`, so
 production and CI carry no `sorry`):**
 - `inflateFast_eq` — the target: `Inflate.inflate data = .ok out →
-  Inflate.inflateFast data out.size = .ok out`. This is the last piece: the
-  `goCur` bisimulation (a 10-case induction threading the output invariant
-  `outPos = refOutput.size` and applying the two write bridges at the write
-  steps, with room discharged by `goTreeFree_size_mono`), the `goCurU` reduction
-  to `goCur`, and the block-loop lift. All the hard supporting lemmas are done;
-  this is the assembly.
+  Inflate.inflateFast data out.size = .ok out`. The `goCur` bisimulation is now
+  **done** (`goCur_eq`, above); what remains is the block-loop lift — a
+  bisimulation of `inflateLoopCur` against `inflateLoopTreeFree` (the reference,
+  since `Inflate.inflate = inflateLoopTreeFree` by `inflateRaw_eq_loop`) that
+  applies `goCur_eq` per Huffman block and a `decodeStoredCur ↔ decodeStored`
+  bridge per stored block, instantiated with the presized buffer + exact-size
+  contract.
 
 ## Quality metrics
 
 - sorry count (`grep -rc sorry Zip/`): 1 real `sorry`, in the standalone WIP
-  `Zip/Spec/InflateFastCorrect.lean` (`inflateFast_eq`), carrying a proof
-  roadmap. Everything it depends on is proved. The spikes themselves
+  `Zip/Spec/InflateFastCorrect.lean` (`inflateFast_eq` — the loop lift only;
+  `goCur_eq`, the core bisimulation, is `sorry`-free). Everything it depends on
+  is proved. The spikes themselves
   (`Zip/Native/InflateFast.lean`) carry **no `sorry`**. The file is not imported
   by `Zip`, so the production decoder and CI are `sorry`-free.
 - `lake build` + `lake exe test`: green.
