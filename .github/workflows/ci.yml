@@ -89,3 +89,35 @@ jobs:
 
       - name: Test bench package
         run: cd bench && lake -R test
+
+  animation-sync:
+    # The committed compress-Pareto animation must match what
+    # bench/pareto_history.py renders from the current latest.json git
+    # history. bench/run.sh regenerates it after every dashboard refresh, but a
+    # PR can still commit bench/results/latest.json without re-running that step
+    # (as #2821-#2825 did, leaving the README animation 5 frames stale). This
+    # check replays the history and fails if the committed SVG is out of date.
+    #
+    # No Lean build: pareto_history.py's SMIL-SVG output is pure-Python float
+    # math rounded to 1-2 dp, verified byte-identical across environments, so a
+    # bare python3 + matplotlib regenerate-and-diff is a reliable required check.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # pareto_history.py replays `git log` of latest.json — needs full history.
+          fetch-depth: 0
+
+      - name: Install matplotlib
+        run: pip install matplotlib
+
+      - name: Regenerate the animation from committed history
+        run: python3 bench/pareto_history.py
+
+      - name: Fail if the committed animation is stale
+        run: |
+          if ! git diff --exit-code bench/graphs/silesia_compress_pareto_history.svg; then
+            echo "::error::bench/graphs/silesia_compress_pareto_history.svg is out of sync with bench/results/latest.json." \
+                 "Run 'python3 bench/pareto_history.py' (or bench/run.sh) and commit the result."
+            exit 1
+          fi
