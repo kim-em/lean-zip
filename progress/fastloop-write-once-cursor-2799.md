@@ -121,16 +121,25 @@ differing only in the output representation.
   established through the `BufCorr` invariant (`refill_corr` / `consume_corr`,
   giving the `pos ≤ size` bound `goCur_eq` needs) — and by `goCur_eq` the same
   produced bytes, a prefix of the cursor buffer. Covers `btype ∈ {1, 2}`.
-- **Remaining** for `inflateFast_eq`:
-  1. A `decodeStoredCur ↔ decodeStored` bridge (`btype = 0`). `decodeStoredCur`
-     currently writes via a `for i in [:len]` loop whose opaque `forIn` cannot
-     be unfolded in proofs, so this first wants a refactor of that loop to
-     well-founded recursion, then the standard size/preservation/content
-     three-theorem pattern.
-  2. The loop bisimulation `inflateLoopCur.induct` against `inflateLoopTreeFree`,
-     applying the two block bridges and threading the cursor invariant
-     `refOut = buf.extract 0 outPos` with room from monotone growth.
-  3. Instantiation with the presized buffer + exact-size contract, chaining
+- **Done — the stored-block bridge** `decodeStoredCur_eq` (`btype = 0`).
+  `decodeStoredCur`'s copy was refactored from a `for i in [:len]` loop (opaque
+  `forIn`, unprovable) to well-founded `storedCopyLoop` (output byte-identical,
+  conformance green). Its three content lemmas are proved — `storedCopyLoop_size`,
+  `storedCopyLoop_getElem!` (written-window content), and `storedCopyLoop_extract`
+  (the placed bytes are the reference `buf.extract 0 outPos ++ bytes` as a cursor
+  prefix). The bridge then relates `decodeStoredCur` to `Inflate.decodeStored`:
+  identical reads and `BitReader` bookkeeping, max-size guard aligned via
+  `(buf.extract 0 outPos).size = outPos`.
+- **Remaining** for `inflateFast_eq` — the two block bridges above are the
+  reusable core; what is left is the assembly:
+  1. The loop bisimulation `inflateLoopCur.induct` against `inflateLoopTreeFree`
+     (`btype` dispatch is block-for-block identical), applying the two block
+     bridges and threading the cursor invariant `refOut = buf.extract 0 outPos`.
+     This needs the reference loop's output monotonicity (each block's output is
+     a prefix of the final, so intermediate `.size ≤ final .size ≤ buf.size`) and
+     preservation of the `BitReader` invariants (`bitOff < 8`, `bitPos ≤ size*8`)
+     across blocks.
+  2. Instantiation with the presized buffer + exact-size contract, chaining
      `inflate = inflateRaw = inflateLoopTreeFree`.
 
 ## Proof progress (`Zip/Spec/InflateFastCorrect.lean`)
