@@ -324,6 +324,22 @@ theorem copyWithinAt_extract_eq_copyLoop (a : ByteArray) (outPos distance len : 
           (by rw [Nat.lt_min]; have h1 := hexP; have := Nat.mod_lt (i - outPos) hd; omega),
         Nat.zero_add, hexP]
 
+/-- `goTreeFreeU` output monotonicity, via `goTreeFreeU_eq` + `goTreeFree_size_mono`. -/
+theorem goTreeFreeU_size_mono (litTable distTable : HuffTree.DecodeTable)
+    (litLD distLD : HuffTree.LongDecode) (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
+    (hsz : data.size < USize.size) (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits)
+    (pos : USize) (bitBuf : UInt64) (cnt : USize) (output rf : ByteArray)
+    (rp : USize) (rb : UInt64) (rc : USize) (hpos : pos.toNat ≤ data.size)
+    (h : InflateBuf.goTreeFreeU litTable distTable litLD distLD maxBits data maxOut
+      pos bitBuf cnt hsz hlp output = .ok (rf, rp, rb, rc)) :
+    output.size ≤ rf.size := by
+  have heq := InflateBuf.goTreeFreeU_eq litTable distTable data litLD distLD maxBits maxOut
+    hsz hlp pos bitBuf cnt output hpos
+  rw [h] at heq
+  simp only [Except.map] at heq
+  exact goTreeFree_size_mono litTable distTable litLD distLD maxBits data maxOut
+    pos.toNat bitBuf cnt.toNat output rf rp.toNat rb rc.toNat heq.symm
+
 /-! ### Bisimulation and lift
 
 `goCur_eq` (the centrepiece, a 10-case induction over `goCur.induct` mirroring
@@ -337,11 +353,125 @@ the two write steps are bridged by `set!_extract_eq_push` /
 only gates; the tail is literally `goCur`). Lifting through `decodeStoredCur` /
 `decodeHuffmanCurTables` / `inflateLoopCur` yields the exact-size target below. -/
 
+open InflateBuf (goCur goTreeFreeU)
+
+/-- **The core bisimulation.** With the cursor logical content
+    `buf.extract 0 outPos = refOutput`, a room bound `rf.size ≤ buf.size`, and the
+    reference succeeding, `goCur` returns the same `(rp, rb, rc)` and a buffer
+    whose `[0, rf.size)` prefix is `rf`, with cursor `rf.size`. Every guard aligns
+    because `(buf.extract 0 outPos).size = outPos.toNat`; the write steps use the
+    two write bridges; per-step room comes from `goTreeFreeU_size_mono`. -/
+theorem goCur_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : HuffTree.LongDecode)
+    (maxBits : Nat) (data : ByteArray) (maxOut : Nat) (hsz : data.size < USize.size)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits)
+    (pos : USize) (bitBuf : UInt64) (cnt : USize) (buf : ByteArray) (outPos : USize)
+    (rf : ByteArray) (rp : USize) (rb : UInt64) (rc : USize)
+    (hpos : pos.toNat ≤ data.size) (hout : outPos.toNat ≤ buf.size) (hbuf : buf.size < USize.size)
+    (href : goTreeFreeU litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt
+      hsz hlp (buf.extract 0 outPos.toNat) = .ok (rf, rp, rb, rc))
+    (hroom : rf.size ≤ buf.size) :
+    ∃ cf, goCur litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt
+      hsz hlp buf outPos = .ok (cf, rf.size.toUSize, rp, rb, rc) ∧ cf.extract 0 rf.size = rf := by
+  have hos : (buf.extract 0 outPos.toNat).size = outPos.toNat := by
+    rw [ByteArray.size_extract]; omega
+  have houtsz : outPos.toNat < USize.size := Nat.lt_of_le_of_lt hout hbuf
+  rw [goTreeFreeU] at href
+  rw [HuffTree.DecodeTable.entryAtU_window_eq] at href
+  rw [goCur]
+  rw [HuffTree.DecodeTable.entryAtU_window_eq]
+  -- Both sides' `entryAtU … (by …)` guard reads are now the proof-free `entryAt`
+  -- (via `rw`, which rewrites the single occurrence without traversing the whole
+  -- unfolded body), so `goCur`'s and `goTreeFreeU`'s guards and written bytes are
+  -- syntactically identical.
+  split
+  · -- refill (goal-driven; reduce href with the same guard)
+    rename_i hrc
+    rw [dif_pos hrc] at href
+    have hpn : pos.toNat < data.size := by
+      have h := USize.lt_iff_toNat_lt.mp hrc.2; rwa [InflateBuf.toUSize_toNat_of_lt hsz] at h
+    have hpa : (pos + 1).toNat = pos.toNat + 1 := by
+      rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt
+      have : pos.toNat + 1 < USize.size := by omega
+      exact USize.size_eq_two_pow ▸ this
+    exact goCur_eq _ _ _ _ _ _ _ _ _ _ _ _ buf outPos rf rp rb rc (by rw [hpa]; omega)
+      hout hbuf href hroom
+  · rename_i hrc
+    rw [dif_neg hrc] at href
+    by_cases hlit : HuffTree.unpackLen (litTable.entryAt (bitBuf &&& 2047).toNat) ≠ 0 ∧
+        (HuffTree.unpackLen (litTable.entryAt (bitBuf &&& 2047).toNat)).toUSize ≤ cnt ∧
+        HuffTree.unpackSym (litTable.entryAt (bitBuf &&& 2047).toNat) < 256
+    · -- literal fast path
+      rw [dif_pos hlit] at href ⊢
+      split
+      · rename_i hmax
+        rw [if_pos (by rw [hos]; exact hmax)] at href; exact absurd href (by simp)
+      · rename_i hmax
+        rw [if_neg (by rw [hos]; exact hmax)] at href
+        have hmono := goTreeFreeU_size_mono _ _ _ _ _ _ _ hsz hlp _ _ _ _ rf rp rb rc hpos href
+        rw [ByteArray.size_push, hos] at hmono
+        have hlt : outPos.toNat < buf.size := by omega
+        have hop1 : (outPos + 1).toNat = outPos.toNat + 1 := by
+          rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt
+          have : outPos.toNat + 1 < USize.size := by omega
+          exact USize.size_eq_two_pow ▸ this
+        rw [← set!_extract_eq_push buf outPos.toNat _ hlt, ← hop1] at href
+        exact goCur_eq _ _ _ _ _ _ _ _ _ _ _ _ (buf.set! outPos.toNat _) (outPos + 1)
+          rf rp rb rc hpos (by rw [ByteArray.size_set!, hop1]; omega)
+          (by rw [ByteArray.size_set!]; exact hbuf) href (by rw [ByteArray.size_set!]; exact hroom)
+    · -- long-code path
+      rw [dif_neg hlit] at href ⊢
+      cases hde : HuffTree.decodeSymCanon litLD litTable maxBits bitBuf cnt.toNat with
+      | error e => rw [hde] at href; exact absurd href (by simp)
+      | ok pr =>
+        obtain ⟨sym, bb, c', used⟩ := pr
+        rw [hde] at href
+        simp only [] at href ⊢
+        split
+        · -- long literal (sym < 256)
+          rename_i hsym
+          rw [if_pos hsym] at href
+          by_cases hmax : outPos.toNat ≥ maxOut
+          · rw [if_pos (by rw [hos]; exact hmax)] at href; exact absurd href (by simp)
+          · rw [if_neg (by rw [hos]; exact hmax)] at href
+            by_cases hnp : cnt.toNat ≤ c'
+            · rw [dif_pos hnp] at href; exact absurd href (by simp)
+            · rw [if_neg hmax, dif_neg hnp]
+              rw [dif_neg hnp] at href
+              have hmono := goTreeFreeU_size_mono _ _ _ _ _ _ _ hsz hlp _ _ _ _ rf rp rb rc hpos href
+              rw [ByteArray.size_push, hos] at hmono
+              have hlt : outPos.toNat < buf.size := by omega
+              have hop1 : (outPos + 1).toNat = outPos.toNat + 1 := by
+                rw [USize.toNat_add, USize.toNat_one]; apply Nat.mod_eq_of_lt
+                have : outPos.toNat + 1 < USize.size := by omega
+                exact USize.size_eq_two_pow ▸ this
+              rw [← set!_extract_eq_push buf outPos.toNat _ hlt, ← hop1] at href
+              exact goCur_eq _ _ _ _ _ _ _ _ _ _ _ _ (buf.set! outPos.toNat _) (outPos + 1)
+                rf rp rb rc hpos (by rw [ByteArray.size_set!, hop1]; omega)
+                (by rw [ByteArray.size_set!]; exact hbuf) href (by rw [ByteArray.size_set!]; exact hroom)
+        · -- sym ≥ 256
+          rename_i hsym
+          rw [if_neg hsym] at href
+          split
+          · -- EOB (sym == 256)
+            rename_i heob
+            rw [if_pos heob] at href
+            simp only [Except.ok.injEq, Prod.mk.injEq] at href
+            obtain ⟨rfl, rfl, rfl, rfl⟩ := href
+            have hop : outPos.toNat.toUSize = outPos :=
+              USize.toNat_inj.mp (by rw [InflateBuf.toUSize_toNat_of_lt houtsz])
+            refine ⟨buf, ?_, ?_⟩
+            · rw [hos, hop]
+            · rw [hos]
+          · -- back-reference (match)
+            rename_i heob
+            rw [if_neg heob] at href
+            sorry
+  termination_by (data.size - pos.toNat) * 9 + cnt.toNat
+  decreasing_by all_goals sorry
+
 /-- **Target (issue #2799): the write-once cursor decoder agrees with the verified
-    decoder on the exact-size path.** When the reference `Inflate.inflate`
-    succeeds with output `out`, `Inflate.inflateFast` given the matching
-    `sizeHint := out.size` returns the same bytes. `inflateFastU` (the branch-free
-    `uset` fastloop) agrees likewise via `goCurU_eq`. Proof staged above. -/
+    decoder on the exact-size path.** Proof staged: `goCur_eq` bisimulation, the
+    `goCurU` reduction, and the block-loop lift. -/
 theorem inflateFast_eq (data : ByteArray) (maxOut : Nat) (out : ByteArray)
     (href : Inflate.inflate data maxOut = .ok out) :
     Inflate.inflateFast data maxOut out.size = .ok out := by
