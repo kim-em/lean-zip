@@ -2189,6 +2189,63 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
       (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0
       (Array.emptyWithCapacity data.size)
 
+/-- Merged-array twin of `lz77ChainIterP.mainLoop` (the greedy tier, levels
+    1–3): identical control flow, but the chain state is the single combined
+    array `c` (prev ring at offset 0, hash table at offset `prevSize`), exactly
+    the layout `lz77LazyMergedLoop` uses on the lazy tier. The chain walk reads
+    the prev ring unchanged (`cand &&& 0x7FFF < prevSize`), so the combined
+    array is passed straight in where `prev` was; only the once-per-position
+    hash-table head read/insert takes a `+ prevSize` offset. The per-match
+    interior insertion goes through `updateHashesMergedGuarded` (one array in,
+    one array out, de-boxed `USize` walk inside), so no `(hashTable, prev)`
+    Prod is ever allocated, unpacked, or freed. Proven equal to
+    `lz77ChainIterP.mainLoop` (`greedyMergedLoop_eq` in
+    `Zip/Spec/LZ77MergedCorrect.lean`). -/
+def lz77GreedyMergedLoop (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap niceLen : Nat)
+    (c : Array Nat) (pos : Nat) (acc : Array UInt32) : Array UInt32 :=
+  if hlt : pos + 2 < data.size then
+    let h := lz77Greedy.hash3 data pos hashSize hlt
+    let head := headProbeGuarded c (prevSize + h)
+    let c := guardedSet c (prevSize + h) pos
+    let c := guardedSet c (pos &&& 0x7FFF) head
+    let maxLen := min 258 (data.size - pos)
+    have hmaxLenP : pos + maxLen ≤ data.size := by omega
+    let r := chainWalkGuardedPackedU data c windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
+    let matchLen := r % 512
+    let matchPos := r / 512
+    if hge : matchLen ≥ 3 then
+      if hle : pos + matchLen ≤ data.size then
+        have : data.size - (pos + matchLen) < data.size - pos := by omega
+        let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
+        lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + matchLen)
+          (acc.push (packTok (.reference matchLen (pos - matchPos))))
+      else
+        lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + 1)
+        (acc.push (packTok (.literal (data[pos]'(by omega)))))
+  else
+    trailingP data pos acc
+termination_by data.size - pos
+decreasing_by all_goals omega
+
+/-- Merged-array entry mirroring `lz77ChainIterP`: builds the combined
+    `prevSize + hashSize` array and runs `lz77GreedyMergedLoop`. Proven equal
+    to `lz77ChainIterP` (`lz77ChainIterPMerged_eq`). -/
+def lz77ChainIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) (niceLen : Nat := 258) :
+    Array UInt32 :=
+  if data.size < 3 then
+    trailingP data 0 #[]
+  else
+    let hashSize := 65536
+    let prevSize := min chainWinSize data.size
+    lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen
+      (.replicate (prevSize + hashSize) data.size) 0
+      (Array.emptyWithCapacity data.size)
+
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
   if h : i < tokens.size then

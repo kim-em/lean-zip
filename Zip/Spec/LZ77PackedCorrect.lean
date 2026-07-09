@@ -168,7 +168,8 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
   split
   · rw [lz77ChainLazyIterPMerged_eq]
     exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level)
-  · exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  · rw [lz77ChainIterPMerged_eq]
+    exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- The boxed view of the packed token stream is exactly `lzMatch`'s stream:
     stage B+ consumers of `lzMatchP` inherit every `lzMatch` contract through
@@ -180,7 +181,8 @@ theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
   · rw [lz77ChainLazyIterPMerged_eq]
     exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level)
       (by omega) (by omega)
-  · exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  · rw [lz77ChainIterPMerged_eq]
+    exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
       (by omega) (by omega)
 
 /-! ## Stages B+C: the packed base candidate equals the boxed one
