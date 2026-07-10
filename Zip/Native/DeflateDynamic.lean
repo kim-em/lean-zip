@@ -662,6 +662,13 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     so the deep-chain point fell inside the new frontier and L7 adopts the old
     L6 config wholesale. L8 keeps 512; past that the chain saturates.
 
+    **L2/L3 dropped to 8/16 in the greedy re-grid** (`l1-sweep2`, run after the
+    merged-greedy-loop and packed-emit landings shifted the tier's cost
+    balance): with the `niceLen` cutoff disabled (see there), (chain 8, cap 8)
+    matches the old L2's weighted-Silesia ratio exactly at +12% speed, and
+    (chain 16, cap 32) beats the old L3 on both axes — the old rows sat ~10%
+    below the greedy-band mixing frontier.
+
     Level 1 is the `deflate_fast` corner (#2726): depth `4` is exactly zlib
     `-1`'s `max_chain`. A tokens-held-constant attribution on Silesia (see
     `ZipL1Attrib`/`ZipL1Sweep`) showed L1 is emit-bound — the token walk +
@@ -677,8 +684,8 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     conservative point (+15% e2e at ratio 0.356, worst file +6.3%). -/
 def chainDepth (level : UInt8) : Nat :=
   if level ≤ 1 then 4
-  else if level ≤ 2 then 16
-  else if level ≤ 3 then 32
+  else if level ≤ 2 then 8
+  else if level ≤ 3 then 16
   else if level ≤ 4 then 64
   else if level ≤ 5 then 128
   else if level ≤ 7 then 64
@@ -693,12 +700,14 @@ def chainDepth (level : UInt8) : Nat :=
     counterproductive") no longer holds for the packed emit path — at chain depth
     4, `cap = 2` is +12% end-to-end vs `cap = 16` because the interior-insertion
     saving outweighs the slightly higher token count the worse ratio produces
-    (the emit walk is the bound, not the cap). The chain is a heuristic, so any
-    cap stays correct (`lz77ChainIter_resolves` holds ∀ cap). -/
+    (the emit walk is the bound, not the cap). L2/L3 dropped to 8/32 with the
+    greedy re-grid (`l1-sweep2`), paired with their new chain depths. The chain
+    is a heuristic, so any cap stays correct (`lz77ChainIter_resolves` holds
+    ∀ cap). -/
 def insertCap (level : UInt8) : Nat :=
   if level ≤ 1 then 2
-  else if level ≤ 2 then 32
-  else if level ≤ 3 then 64
+  else if level ≤ 2 then 8
+  else if level ≤ 3 then 32
   else 1000000000
 
 /-- Lazy `good_match` threshold (zlib-style): the lazy matcher skips the
@@ -721,10 +730,13 @@ def goodMatch (level : UInt8) : Nat :=
 /-- Per-level `niceLen` cutoff (libdeflate `nice_match_length`, `deflate_compress.c`):
     the chain walk stops as soon as the best match reaches this length, since a
     match this long is already good enough — burning the rest of the depth budget
-    to lengthen it further rarely pays for itself. L2/L3 keep libdeflate's values
-    (10/14, #2744); level 1 keeps `258` (no early-out) to leave the measured
-    `deflate_fast` corner (#2726) untouched — at chain depth 4 the walk is
-    already short, so a cutoff buys little there.
+    to lengthen it further rarely pays for itself. **L2/L3 disable the cutoff
+    since the greedy re-grid** (`l1-sweep2`, post merged-greedy-loop +
+    packed-emit landings): the libdeflate values (10/14, #2744) were costing
+    ~0.5pp weighted-Silesia ratio for speed better bought by shallowing the
+    chain instead — both old mid rows sat ~10% below the greedy-band mixing
+    frontier. Level 1 keeps `258` (no early-out) as before — at chain depth 4
+    the walk is already short, so a cutoff buys little there.
 
     The mid-band values were re-gridded for the #2737 remapped ladder
     (`mid-sweep --time`, Silesia): **L4 disables the cutoff** — at chain 64
@@ -743,10 +755,7 @@ def goodMatch (level : UInt8) : Nat :=
     cutoff never enters correctness — the chain is a heuristic re-verified at
     emission — so any value keeps the encoder contracts. -/
 def niceLen (level : UInt8) : Nat :=
-  if level ≤ 1 then 258
-  else if level ≤ 2 then 10
-  else if level ≤ 3 then 14
-  else if level ≤ 4 then 258
+  if level ≤ 4 then 258
   else if level ≤ 7 then 65
   else 258
 
