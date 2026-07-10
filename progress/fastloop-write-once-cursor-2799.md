@@ -86,6 +86,37 @@ this benchmark-first probe has now cleared the bar for. The `set!` cursor
 remains a valid cheaper-to-prove fallback if the `uset` proof proves
 intractable, at ~0.8pp less throughput.
 
+## Proof progress — `inflateFast_eq` is COMPLETE, `Zip/Spec/InflateFastCorrect.lean` is `sorry`-free (2026-07-10)
+
+The whole lift is proven. `inflateFast_eq`: whenever the verified
+`Inflate.inflate` yields `out`, the write-once cursor decoder run at the exact
+size hint `out.size` yields the same bytes. The full dependency chain, all
+`sorry`-free:
+
+1. `goCur_eq` — the core bisimulation (below), plus `goCur_size` (the cursor
+   preserves the buffer size).
+2. The two block bridges `decodeHuffmanCurTables_eq` (via `goCur_eq`) and
+   `decodeStoredCur_eq` (via the `storedCopyLoop` content lemmas — `decodeStoredCur`
+   was refactored from an opaque `for`-loop to WF `storedCopyLoop`), each also
+   concluding `cf.size = buf.size`.
+3. Reference-loop output monotonicity `inflateLoopTreeFree_size_mono` (per-block
+   growth via `goTreeFreeU_size_mono` / append, threaded through
+   `inflateLoopTreeFree.induct`; `bitOff < 8` is derived fresh each iteration, so
+   the IH need not carry it).
+4. The block-loop bisimulation `inflateLoopCur_eq` (via `inflateLoopCur.induct`):
+   `inflateLoopCur` re-represents `inflateLoopTreeFree` block-for-block, applying
+   the two bridges and threading the cursor invariant, with per-block room from
+   the monotonicity lemma and the fixed buffer size from `goCur_size` /
+   `storedCopyLoop_size`.
+5. `inflateFast_eq`: `Inflate.inflate = inflateLoopTreeFree` (`inflateRaw_eq_loop`),
+   then the loop bisimulation on the presized buffer, then the exact-size contract
+   (`cf.size = out.size`, so `cf = out`). Takes the honest addressability
+   hypotheses `data.size / out.size < USize.size` and `out.size ≤ maxOut` (the
+   wide-buffer cursor path's always-true-for-in-memory-`ByteArray`s conditions).
+
+`lake build` + `lake exe test` green. The file is standalone (not imported by
+`Zip`), so production and CI stay `sorry`-free regardless.
+
 ## Proof progress — the core bisimulation `goCur_eq` is COMPLETE (2026-07-09)
 
 `goCur_eq` — the write-once-cursor decode agrees with `goTreeFreeU` — is now
@@ -169,25 +200,16 @@ discharged per step by the reference's monotone growth.
   `getElem!_eq_data_toList`, `ext_getElem!`, `copyLoop_size`, and list
   `getElem!` append/`ofFn` helpers.
 
-**Remaining (`sorry`, WIP — file is standalone, NOT imported into `Zip`, so
-production and CI carry no `sorry`):**
-- `inflateFast_eq` — the target: `Inflate.inflate data = .ok out →
-  Inflate.inflateFast data out.size = .ok out`. The `goCur` bisimulation is now
-  **done** (`goCur_eq`, above); what remains is the block-loop lift — a
-  bisimulation of `inflateLoopCur` against `inflateLoopTreeFree` (the reference,
-  since `Inflate.inflate = inflateLoopTreeFree` by `inflateRaw_eq_loop`) that
-  applies `goCur_eq` per Huffman block and a `decodeStoredCur ↔ decodeStored`
-  bridge per stored block, instantiated with the presized buffer + exact-size
-  contract.
+**`inflateFast_eq` is now proven** (see the completion section at the top of this
+file). `Zip/Spec/InflateFastCorrect.lean` is entirely `sorry`-free.
 
 ## Quality metrics
 
-- sorry count (`grep -rc sorry Zip/`): 1 real `sorry`, in the standalone WIP
-  `Zip/Spec/InflateFastCorrect.lean` (`inflateFast_eq` — the loop lift only;
-  `goCur_eq`, the core bisimulation, is `sorry`-free). Everything it depends on
-  is proved. The spikes themselves
-  (`Zip/Native/InflateFast.lean`) carry **no `sorry`**. The file is not imported
-  by `Zip`, so the production decoder and CI are `sorry`-free.
+- sorry count (`grep -rc sorry Zip/`): **0**. `Zip/Spec/InflateFastCorrect.lean`
+  (the full correctness proof `goCur_eq` → block bridges → loop bisimulation →
+  `inflateFast_eq`) and the spikes (`Zip/Native/InflateFast.lean`) both carry no
+  `sorry`. The spec file is not imported by `Zip`, so the production decoder and
+  CI are `sorry`-free regardless.
 - `lake build` + `lake exe test`: green.
 
 ## What remains
