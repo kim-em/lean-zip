@@ -53,3 +53,15 @@ Lazy-tier outer-loop untag (mirrors #2827 at L4-L8; `lz77LazyMergedLoop` is
 5-9% `tokenFreqsP` walk), the value-equal fused huff+extra writer, USize
 emit-loop index, packing the fixed-Huffman tables like #2829 did the dynamic
 ones.
+
+## Round-3 verdict: lazy outer-loop hoisted guards — WASH (not landed)
+
+The first round-3 candidate (hoisted-guard/USize lazy outer loop, mirroring
+#2827 at L4-L8) was implemented and proven byte-identical, but a 5-rep pinned
+sandwich A/B (same-binary noise floors 0.3-0.7%) read dickens L5 −0.45%,
+mozilla L5 +0.79%, webster L7 +0.86% — a wash. The lazy loop's guarded
+accesses were already well-predicted branches; unlike the greedy tier
+(#2827), there was no Prod-per-match allocation left to delete. Branch
+preserved at `perf/lazy-outer-loop`. Lesson: the guard-shaving family is now
+exhausted on BOTH tiers — remaining L4-L8 speed lives in the chain walk
+itself, and remaining fast-band speed in the freq pass and writer fusion.
