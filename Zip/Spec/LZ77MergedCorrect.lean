@@ -603,6 +603,106 @@ private theorem mergedLoop_eq (data : ByteArray)
       · exact ih _ (by omega) _ _ _ _ _ hht' hps' hpv' rfl
     · simp only [hlt, ↓reduceDIte]
 
+set_option maxHeartbeats 1000000 in
+/-- The hoisted-guard `USize` lazy loop is byte-identical to the runtime-guarded
+    `lz77LazyMergedLoop`: every per-position op differs only by a value-preserving
+    bridge — `hash3U`/`hash3SingleU` compute exactly `hash3`/`hash3Single`'s
+    buckets (`hash3U_toNat`, `hash3SingleU_toNat`), and the proven-bounds
+    `getElem`/`Array.set` collapse to the `[]!`/`set!` the guarded `headProbeGuarded`/
+    `guardedSet` also collapse to. The seed, the two chain walks, the split-tier
+    insertion, and every token push are the *same* expressions, so after the
+    op-alignment the branch tree is in lockstep and each leaf closes by the
+    induction hypothesis (the array size invariants re-established through
+    `updateHashesMergedH3Guarded` fst/snd size). -/
+private theorem lazyMergedLoopU_eq (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (c h3tab : Array Nat) (pos : Nat) (acc : Array UInt32)
+    (hhs : 0 < hashSize) (hph : prevSize + hashSize ≤ c.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hh3 : 32768 ≤ h3tab.size)
+    (hsz : data.size < USize.size) (hphlt : prevSize + hashSize < USize.size) :
+    lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        c h3tab hhs hph hpv hh3 hsz hphlt pos acc =
+      lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        c h3tab pos acc := by
+  induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc c h3tab hph hh3 with
+  | _ n ih =>
+    unfold lz77LazyMergedLoopU lz77LazyMergedLoop
+    by_cases hlt : pos + 2 < data.size
+    · have hposU : (pos.toUSize).toNat = pos := toUSize_toNat_of_lt (by omega)
+      have hhsU : (hashSize.toUSize).toNat = hashSize := toUSize_toNat_of_lt (by omega)
+      have hpos1U : ((pos + 1).toUSize).toNat = pos + 1 := toUSize_toNat_of_lt (by omega)
+      have eget : ∀ (a : Array Nat) (i : Nat) (h : i < a.size), a[i]'h = a[i]! :=
+        fun a i h => (getElem!_pos a i h).symm
+      have eH : (hash3U data pos pos.toUSize hashSize.toUSize hposU hlt).toNat
+          = lz77Greedy.hash3 data pos hashSize hlt :=
+        hash3U_toNat data pos hashSize pos.toUSize hashSize.toUSize hposU hhsU hsz hlt
+      have eS : (hash3SingleU data pos pos.toUSize hposU hlt).toNat = hash3Single data pos hlt :=
+        hash3SingleU_toNat data pos pos.toUSize hposU hsz hlt
+      have eH2 : ∀ (hx : pos + 1 + 2 < data.size),
+          (hash3U data (pos + 1) (pos + 1).toUSize hashSize.toUSize hpos1U hx).toNat
+            = lz77Greedy.hash3 data (pos + 1) hashSize hx := fun hx =>
+        hash3U_toNat data (pos + 1) hashSize (pos + 1).toUSize hashSize.toUSize hpos1U hhsU hsz hx
+      simp only [hlt, ↓reduceDIte, eget, eH, eS, eH2, headProbeGuarded_eq, guardedSet_eq, set_eq_set!]
+      have hphc : prevSize + hashSize ≤
+          ((c.set! (prevSize + lz77Greedy.hash3 data pos hashSize hlt) pos).set!
+            (pos &&& 0x7FFF) (c[prevSize + lz77Greedy.hash3 data pos hashSize hlt]!)).size := by
+        rw [Array.size_set!, Array.size_set!]; exact hph
+      have hh3c : 32768 ≤
+          (if useH3 then h3tab.set! (hash3Single data pos hlt) pos else h3tab).size := by
+        split
+        · rw [Array.size_set!]; exact hh3
+        · exact hh3
+      split
+      · split
+        · split
+          · split
+            · -- goodMatch-T: `repeat' split` handles the branch tree — `split`
+              -- takes the seed-if before `lazyAcceptCost` (its condition nests
+              -- inside the accept condition), then `lazyAcceptCost`, `hle2`, and
+              -- possibly the (identical-on-both-sides) `useH3` store if. Every
+              -- leaf recurses after the fused interior insertion; the `first`
+              -- alternatives supply whichever shape the `useH3` split left the
+              -- singleton size fact in.
+              repeat' split
+              all_goals
+                exact ih _ (by omega) _ _ _ _
+                  (by rw [updateHashesMergedH3Guarded_fst_size]; exact hphc)
+                  (by rw [updateHashesMergedH3Guarded_snd_size]
+                      first
+                        | exact hh3c
+                        | (rw [Array.size_set!]; exact hh3)
+                        | exact hh3) rfl
+            · -- goodMatch-F (gated): no lookahead probe, straight to the insertion.
+              exact ih _ (by omega) _ _ _ _
+                (by rw [updateHashesMergedH3Guarded_fst_size]; exact hphc)
+                (by rw [updateHashesMergedH3Guarded_snd_size]; exact hh3c) rfl
+          · exact ih _ (by omega) _ _ _ _ hphc hh3c rfl
+        · exact ih _ (by omega) _ _ _ _ hphc hh3c rfl
+      · exact ih _ (by omega) _ _ _ _ hphc hh3c rfl
+    · simp only [hlt, ↓reduceDIte]
+
+/-- The hoisted-guard dispatcher equals the runtime-guarded loop: the guard-hit
+    branch is `lazyMergedLoopU_eq`; both guard-miss fallbacks are `lz77LazyMergedLoop`
+    definitionally. -/
+private theorem lazyMergedLoopGuarded_eq (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (c h3tab : Array Nat) (pos : Nat) (acc : Array UInt32) :
+    lz77LazyMergedLoopGuarded data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        c h3tab pos acc =
+      lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        c h3tab pos acc := by
+  unfold lz77LazyMergedLoopGuarded
+  split
+  · rename_i hg
+    split
+    · rename_i hu
+      have hsz : data.size < USize.size := by rw [← hu.1]; exact USize.toNat_lt_two_pow_numBits _
+      have hphlt : prevSize + hashSize < USize.size := by rw [← hu.2]; exact USize.toNat_lt_two_pow_numBits _
+      exact lazyMergedLoopU_eq data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        c h3tab pos acc hg.1 hg.2.1 hg.2.2.1 hg.2.2.2 hsz hphlt
+    · rfl
+  · rfl
+
 /-- Greedy-tier lockstep equality (the twin of `mergedLoop_eq` minus the lazy
     branch and the hash3 seed): `lz77GreedyMergedLoop` on `prev ++ hashTable`
     is `lz77ChainIterP.mainLoop` on the separate arrays. -/
@@ -675,7 +775,7 @@ theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize inse
   split
   · rfl
   · dsimp only
-    rw [← Array.replicate_append_replicate]
+    rw [lazyMergedLoopGuarded_eq, ← Array.replicate_append_replicate]
     exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
       goodMatch niceLen lazyDepth useH3 (Array.replicate 65536 data.size)
       (Array.replicate (min chainWinSize data.size) data.size) (Array.replicate 32768 data.size) 0 _

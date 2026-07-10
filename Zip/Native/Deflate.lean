@@ -797,6 +797,12 @@ where
 @[inline] def guardedSet {α : Type} (a : Array α) (i : Nat) (v : α) : Array α :=
   if h : i < a.size then a.set i v h else a.set! i v
 
+/-- `guardedSet` preserves the array size (both the proven `set` and the
+    panic-checked `set!` are same-size writes). -/
+@[simp] theorem guardedSet_size {α : Type} (a : Array α) (i : Nat) (v : α) :
+    (guardedSet a i v).size = a.size := by
+  unfold guardedSet; split <;> simp
+
 /-- The circular `prev`-buffer window: a fixed 32768-entry (= 32 KiB DEFLATE
     window) ring of absolute positions, indexed by the low 15 bits of a
     position (`pos &&& 0x7FFF`, zlib's scheme). Memory is O(window) not
@@ -2093,6 +2099,141 @@ decreasing_by
   else
     (updateHashesMergedGuarded data hashSize prevSize c pos j matchLen insertCap, h3tab)
 
+/-! ### Insertion-walk size preservation
+
+The hoisted-guard lazy outer loop (`lz77LazyMergedLoopU`) threads the combined
+array size hypothesis `prevSize + hashSize ≤ c.size` and the singleton size
+`32768 ≤ h3tab.size` across iterations. Every interior-insertion walk preserves
+both sizes (all writes are same-size `set`/`set!`/`uset`), so these lemmas
+re-establish the invariant after each `updateHashesMergedH3Guarded` step. -/
+
+/-- `updateHash3` preserves the singleton table size. -/
+theorem updateHash3_size (data : ByteArray) (h3tab : Array Nat)
+    (pos j matchLen insertCap : Nat) :
+    (updateHash3 data h3tab pos j matchLen insertCap).size = h3tab.size := by
+  fun_induction updateHash3 data h3tab pos j matchLen insertCap <;> simp_all
+
+/-- `updateHashesMerged` preserves the combined array size. -/
+theorem updateHashesMerged_size (data : ByteArray) (hashSize prevSize : Nat)
+    (c : Array Nat) (pos j matchLen insertCap : Nat) :
+    (updateHashesMerged data hashSize prevSize c pos j matchLen insertCap).size = c.size := by
+  fun_induction updateHashesMerged data hashSize prevSize c pos j matchLen insertCap <;> simp_all
+
+/-- `updateHashesMergedFast` preserves the combined array size. -/
+theorem updateHashesMergedFast_size (data : ByteArray) (hashSize prevSize : Nat)
+    (c : Array Nat) (pos j matchLen insertCap : Nat)
+    (hhs : 0 < hashSize) (hph : prevSize + hashSize ≤ c.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) :
+    (updateHashesMergedFast data hashSize prevSize c pos j matchLen insertCap hhs hph hpv).size = c.size := by
+  fun_induction updateHashesMergedFast data hashSize prevSize c pos j matchLen insertCap hhs hph hpv <;>
+    simp_all [Array.size_set]
+
+/-- `updateHashesMergedFastU` preserves the combined array size. -/
+theorem updateHashesMergedFastU_size (data : ByteArray) (hashSize prevSize pos : Nat)
+    (c : Array Nat) (hhs : 0 < hashSize) (hph : prevSize + hashSize ≤ c.size)
+    (hpv : min chainWinSize data.size ≤ prevSize)
+    (hsz : data.size < USize.size) (hphlt : prevSize + hashSize < USize.size)
+    (posU prevSizeU hashSizeU rem2U capU : USize)
+    (hposU : posU.toNat = pos) (hpsU : prevSizeU.toNat = prevSize)
+    (hhsU : hashSizeU.toNat = hashSize) (hrem2U : rem2U.toNat = data.size - pos - 2)
+    (jU matchLenU : USize) :
+    (updateHashesMergedFastU data hashSize prevSize pos c hhs hph hpv hsz hphlt
+        posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U jU matchLenU).size = c.size := by
+  fun_induction updateHashesMergedFastU data hashSize prevSize pos c hhs hph hpv hsz hphlt
+      posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U jU matchLenU <;>
+    simp_all
+
+/-- `updateHashesMergedH3FastU` preserves the combined array size (`.1`). -/
+theorem updateHashesMergedH3FastU_fst_size (data : ByteArray) (hashSize prevSize pos : Nat)
+    (c h3tab : Array Nat) (hhs : 0 < hashSize) (hph : prevSize + hashSize ≤ c.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hh3 : 32768 ≤ h3tab.size)
+    (hsz : data.size < USize.size) (hphlt : prevSize + hashSize < USize.size)
+    (posU prevSizeU hashSizeU rem2U capU : USize)
+    (hposU : posU.toNat = pos) (hpsU : prevSizeU.toNat = prevSize)
+    (hhsU : hashSizeU.toNat = hashSize) (hrem2U : rem2U.toNat = data.size - pos - 2)
+    (jU matchLenU : USize) :
+    (updateHashesMergedH3FastU data hashSize prevSize pos c h3tab hhs hph hpv hh3 hsz hphlt
+        posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U jU matchLenU).1.size = c.size := by
+  fun_induction updateHashesMergedH3FastU data hashSize prevSize pos c h3tab hhs hph hpv hh3 hsz hphlt
+      posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U jU matchLenU <;>
+    simp_all
+
+/-- `updateHashesMergedH3FastU` preserves the singleton table size (`.2`). -/
+theorem updateHashesMergedH3FastU_snd_size (data : ByteArray) (hashSize prevSize pos : Nat)
+    (c h3tab : Array Nat) (hhs : 0 < hashSize) (hph : prevSize + hashSize ≤ c.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hh3 : 32768 ≤ h3tab.size)
+    (hsz : data.size < USize.size) (hphlt : prevSize + hashSize < USize.size)
+    (posU prevSizeU hashSizeU rem2U capU : USize)
+    (hposU : posU.toNat = pos) (hpsU : prevSizeU.toNat = prevSize)
+    (hhsU : hashSizeU.toNat = hashSize) (hrem2U : rem2U.toNat = data.size - pos - 2)
+    (jU matchLenU : USize) :
+    (updateHashesMergedH3FastU data hashSize prevSize pos c h3tab hhs hph hpv hh3 hsz hphlt
+        posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U jU matchLenU).2.size = h3tab.size := by
+  fun_induction updateHashesMergedH3FastU data hashSize prevSize pos c h3tab hhs hph hpv hh3 hsz hphlt
+      posU prevSizeU hashSizeU rem2U capU hposU hpsU hhsU hrem2U jU matchLenU <;>
+    simp_all
+
+/-- `updateHashesMergedGuarded` preserves the combined array size (all three
+    dispatch branches are size-preserving walks). -/
+theorem updateHashesMergedGuarded_size (data : ByteArray) (hashSize prevSize : Nat)
+    (c : Array Nat) (pos j matchLen insertCap : Nat) :
+    (updateHashesMergedGuarded data hashSize prevSize c pos j matchLen insertCap).size = c.size := by
+  unfold updateHashesMergedGuarded
+  split
+  · rename_i hg
+    split
+    · rename_i hu
+      have hsz : data.size < USize.size := by rw [← hu.1]; exact USize.toNat_lt_two_pow_numBits _
+      have hphlt : prevSize + hashSize < USize.size := by rw [← hu.2.1]; exact USize.toNat_lt_two_pow_numBits _
+      exact updateHashesMergedFastU_size data hashSize prevSize pos c hg.1 hg.2.1 hg.2.2 hsz hphlt
+        pos.toUSize prevSize.toUSize hashSize.toUSize (data.size - pos - 2).toUSize insertCap.toUSize
+        hu.2.2.1 (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+        (toUSize_toNat_of_lt (by omega)) j.toUSize matchLen.toUSize
+    · exact updateHashesMergedFast_size data hashSize prevSize c pos j matchLen insertCap hg.1 hg.2.1 hg.2.2
+  · exact updateHashesMerged_size data hashSize prevSize c pos j matchLen insertCap
+
+/-- The fused split-tier insertion preserves the combined array size (`.1`). -/
+theorem updateHashesMergedH3Guarded_fst_size (useH3 : Bool) (data : ByteArray)
+    (hashSize prevSize : Nat) (c h3tab : Array Nat) (pos j matchLen insertCap : Nat) :
+    (updateHashesMergedH3Guarded useH3 data hashSize prevSize c h3tab pos j matchLen insertCap).1.size = c.size := by
+  unfold updateHashesMergedH3Guarded
+  by_cases hu3 : useH3
+  · rw [if_pos hu3]
+    split
+    · rename_i hg
+      split
+      · rename_i hu
+        have hsz : data.size < USize.size := by rw [← hu.1]; exact USize.toNat_lt_two_pow_numBits _
+        have hphlt : prevSize + hashSize < USize.size := by rw [← hu.2.1]; exact USize.toNat_lt_two_pow_numBits _
+        exact updateHashesMergedH3FastU_fst_size data hashSize prevSize pos c h3tab hg.1 hg.2.1 hg.2.2.1
+          hg.2.2.2 hsz hphlt pos.toUSize prevSize.toUSize hashSize.toUSize (data.size - pos - 2).toUSize
+          insertCap.toUSize hu.2.2.1 (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+          (toUSize_toNat_of_lt (by omega)) j.toUSize matchLen.toUSize
+      · exact updateHashesMergedFast_size data hashSize prevSize c pos j matchLen insertCap hg.1 hg.2.1 hg.2.2.1
+    · exact updateHashesMerged_size data hashSize prevSize c pos j matchLen insertCap
+  · rw [if_neg hu3]; exact updateHashesMergedGuarded_size data hashSize prevSize c pos j matchLen insertCap
+
+/-- The fused split-tier insertion preserves the singleton table size (`.2`). -/
+theorem updateHashesMergedH3Guarded_snd_size (useH3 : Bool) (data : ByteArray)
+    (hashSize prevSize : Nat) (c h3tab : Array Nat) (pos j matchLen insertCap : Nat) :
+    (updateHashesMergedH3Guarded useH3 data hashSize prevSize c h3tab pos j matchLen insertCap).2.size = h3tab.size := by
+  unfold updateHashesMergedH3Guarded
+  by_cases hu3 : useH3
+  · rw [if_pos hu3]
+    split
+    · rename_i hg
+      split
+      · rename_i hu
+        have hsz : data.size < USize.size := by rw [← hu.1]; exact USize.toNat_lt_two_pow_numBits _
+        have hphlt : prevSize + hashSize < USize.size := by rw [← hu.2.1]; exact USize.toNat_lt_two_pow_numBits _
+        exact updateHashesMergedH3FastU_snd_size data hashSize prevSize pos c h3tab hg.1 hg.2.1 hg.2.2.1
+          hg.2.2.2 hsz hphlt pos.toUSize prevSize.toUSize hashSize.toUSize (data.size - pos - 2).toUSize
+          insertCap.toUSize hu.2.2.1 (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+          (toUSize_toNat_of_lt (by omega)) j.toUSize matchLen.toUSize
+      · exact updateHash3_size data h3tab pos j matchLen insertCap
+    · exact updateHash3_size data h3tab pos j matchLen insertCap
+  · rw [if_neg hu3]
+
 /-- Merged-array twin of `lz77ChainLazyIterP.mainLoop`: identical control flow,
     but the chain state is the single combined array `c` (prev ring at offset 0,
     hash table at offset `prevSize`). The per-position insertion goes through
@@ -2173,9 +2314,181 @@ def lz77LazyMergedLoop (data : ByteArray)
 termination_by data.size - pos
 decreasing_by all_goals omega
 
+/-- Hoisted-guard `USize` twin of `lz77LazyMergedLoop`: the merged-array size
+    hypothesis (`prevSize + hashSize ≤ c.size`), the singleton size
+    (`32768 ≤ h3tab.size`), and the addressability witness (`data.size <
+    USize.size`) are established once by `lz77LazyMergedLoopGuarded` and threaded
+    across iterations, so the per-position head insertion pays **no** runtime
+    bounds branch: the bucket read and both writes are proven-bounds
+    `getElem`/`Array.set`, the two per-position hashes go through
+    `hash3U`/`hash3SingleU` (no `data.size` addressability round-trip), and the
+    hash3-singleton store is a proven-bounds `set`. Control flow, arithmetic
+    (`min 258 …`, `r % 512`, `r / 512`, position increments), and the calls to
+    `h3Seed`/`chainWalkGuardedPackedU`/`updateHashesMergedH3Guarded` are byte-for-byte
+    those of `lz77LazyMergedLoop`, so the lockstep equality proof
+    (`lazyMergedLoopU_eq`) stays structural. -/
+def lz77LazyMergedLoopU (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (c h3tab : Array Nat)
+    (hhs : 0 < hashSize) (hph : prevSize + hashSize ≤ c.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hh3 : 32768 ≤ h3tab.size)
+    (hsz : data.size < USize.size) (hphlt : prevSize + hashSize < USize.size)
+    (pos : Nat) (acc : Array UInt32) : Array UInt32 :=
+  if hlt : pos + 2 < data.size then
+    let posU : USize := pos.toUSize
+    have hposU : posU.toNat = pos := toUSize_toNat_of_lt (by omega)
+    let hashSizeU : USize := hashSize.toUSize
+    have hhsU : hashSizeU.toNat = hashSize := toUSize_toNat_of_lt (by omega)
+    let h := (hash3U data pos posU hashSizeU hposU hlt).toNat
+    have hhlt : h < hashSize := hash3U_toNat_lt data pos hashSize posU hashSizeU hposU hlt hhsU hhs
+    have hb : prevSize + h < c.size := by omega
+    let head := c[prevSize + h]'hb
+    have hmask : (pos &&& 0x7FFF) < c.size := by
+      have h1 := winMask_lt pos
+      have h2 := Nat.and_le_left (n := pos) (m := 0x7FFF)
+      simp only [chainWinSize] at h1 hpv; omega
+    let c := (c.set (prevSize + h) pos hb).set (pos &&& 0x7FFF) head
+      (by rw [Array.size_set]; exact hmask)
+    have hphc : prevSize + hashSize ≤ c.size := by
+      show prevSize + hashSize ≤ ((_ : Array Nat).set _ _ _).size
+      rw [Array.size_set, Array.size_set]; exact hph
+    let seed := h3Seed useH3 data h3tab windowSize pos hlt
+    have hstb : (hash3SingleU data pos posU hposU hlt).toNat < h3tab.size :=
+      Nat.lt_of_lt_of_le (hash3SingleU_toNat_lt data pos posU hposU hlt) hh3
+    have hh3c0 : 32768 ≤ (if useH3 then h3tab.set (hash3SingleU data pos posU hposU hlt).toNat pos hstb
+        else h3tab).size := by
+      split <;> (try rw [Array.size_set]) <;> exact hh3
+    let h3tab := if useH3 then h3tab.set (hash3SingleU data pos posU hposU hlt).toNat pos hstb else h3tab
+    have hh3c : 32768 ≤ h3tab.size := hh3c0
+    let maxLen := min 258 (data.size - pos)
+    have hmaxLenP : pos + maxLen ≤ data.size := by omega
+    let r := chainWalkGuardedPackedU data c windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+    let matchLen := r % 512
+    let matchPos := r / 512
+    if hge : matchLen ≥ 3 then
+      if hle : pos + matchLen ≤ data.size then
+        if h3lt : pos + 3 < data.size then
+          if matchLen < goodMatch then
+            let pos1U : USize := (pos + 1).toUSize
+            have hpos1U : pos1U.toNat = pos + 1 := toUSize_toNat_of_lt (by omega)
+            let h2 := (hash3U data (pos + 1) pos1U hashSizeU hpos1U (by omega)).toNat
+            have hh2lt : h2 < hashSize := hash3U_toNat_lt data (pos + 1) hashSize pos1U hashSizeU hpos1U (by omega) hhsU hhs
+            have hb2 : prevSize + h2 < c.size := by omega
+            let head2 := c[prevSize + h2]'hb2
+            let maxLen2 := min 258 (data.size - (pos + 1))
+            have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            let cutoff2 := min niceLen maxLen2
+            let seed := if matchLen < cutoff2 then matchLen else 0
+            let r2 :=
+              chainWalkGuardedPackedU data c windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth seed 0
+            let matchLen2 := r2 % 512
+            let matchPos2 := r2 / 512
+            if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                let p := updateHashesMergedH3Guarded useH3 data hashSize prevSize c h3tab pos 1 (matchLen2 + 1) insertCap
+                lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+                  p.1 p.2 hhs
+                  (by rw [show p.1.size = c.size from
+                        updateHashesMergedH3Guarded_fst_size useH3 data hashSize prevSize c h3tab pos 1 (matchLen2 + 1) insertCap]
+                      exact hphc)
+                  hpv
+                  (by rw [show p.2.size = h3tab.size from
+                        updateHashesMergedH3Guarded_snd_size useH3 data hashSize prevSize c h3tab pos 1 (matchLen2 + 1) insertCap]
+                      exact hh3c)
+                  hsz hphlt (pos + 1 + matchLen2)
+                  (acc.push (packTok (.literal (data[pos]'(by omega)))) |>.push
+                    (packTok (.reference matchLen2 (pos + 1 - matchPos2))))
+              else
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let p := updateHashesMergedH3Guarded useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap
+                lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+                  p.1 p.2 hhs
+                  (by rw [show p.1.size = c.size from
+                        updateHashesMergedH3Guarded_fst_size useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap]
+                      exact hphc)
+                  hpv
+                  (by rw [show p.2.size = h3tab.size from
+                        updateHashesMergedH3Guarded_snd_size useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap]
+                      exact hh3c)
+                  hsz hphlt (pos + matchLen)
+                  (acc.push (packTok (.reference matchLen (pos - matchPos))))
+            else
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let p := updateHashesMergedH3Guarded useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap
+              lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+                p.1 p.2 hhs
+                (by rw [show p.1.size = c.size from
+                      updateHashesMergedH3Guarded_fst_size useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap]
+                    exact hphc)
+                hpv
+                (by rw [show p.2.size = h3tab.size from
+                      updateHashesMergedH3Guarded_snd_size useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap]
+                    exact hh3c)
+                hsz hphlt (pos + matchLen)
+                (acc.push (packTok (.reference matchLen (pos - matchPos))))
+          else
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            let p := updateHashesMergedH3Guarded useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap
+            lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+              p.1 p.2 hhs
+              (by rw [show p.1.size = c.size from
+                    updateHashesMergedH3Guarded_fst_size useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap]
+                  exact hphc)
+              hpv
+              (by rw [show p.2.size = h3tab.size from
+                    updateHashesMergedH3Guarded_snd_size useH3 data hashSize prevSize c h3tab pos 1 matchLen insertCap]
+                  exact hh3c)
+              hsz hphlt (pos + matchLen)
+              (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+            c h3tab hhs hphc hpv hh3c hsz hphlt (pos + matchLen)
+            (acc.push (packTok (.reference matchLen (pos - matchPos))))
+      else
+        have : data.size - (pos + 1) < data.size - pos := by omega
+        lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+          c h3tab hhs hphc hpv hh3c hsz hphlt (pos + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      have : data.size - (pos + 1) < data.size - pos := by omega
+      lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        c h3tab hhs hphc hpv hh3c hsz hphlt (pos + 1)
+        (acc.push (packTok (.literal (data[pos]'(by omega)))))
+  else
+    trailingP data pos acc
+termination_by data.size - pos
+decreasing_by all_goals omega
+
+/-- One runtime guard establishes the hoisted-loop invariant for the whole
+    compression: the size hypotheses (`0 < hashSize`, `prevSize + hashSize ≤
+    c.size`, `min chainWinSize data.size ≤ prevSize`, `32768 ≤ h3tab.size`) and a
+    single addressability round-trip (`data.size` and `prevSize + hashSize` both
+    representable as `USize`, never failing for the fixed production arrays) then
+    unlock the de-boxed `lz77LazyMergedLoopU`. The fallback is the runtime-guarded
+    `lz77LazyMergedLoop` (dead in practice). Proven equal to `lz77LazyMergedLoop`
+    (`lazyMergedLoopGuarded_eq`). -/
+@[inline] def lz77LazyMergedLoopGuarded (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (c h3tab : Array Nat) (pos : Nat) (acc : Array UInt32) : Array UInt32 :=
+  if hg : 0 < hashSize ∧ prevSize + hashSize ≤ c.size ∧
+      min chainWinSize data.size ≤ prevSize ∧ 32768 ≤ h3tab.size then
+    if hu : data.size.toUSize.toNat = data.size ∧
+        (prevSize + hashSize).toUSize.toNat = prevSize + hashSize then
+      have hsz : data.size < USize.size := by rw [← hu.1]; exact USize.toNat_lt_two_pow_numBits _
+      have hphlt : prevSize + hashSize < USize.size := by rw [← hu.2]; exact USize.toNat_lt_two_pow_numBits _
+      lz77LazyMergedLoopU data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+        c h3tab hg.1 hg.2.1 hg.2.2.1 hg.2.2.2 hsz hphlt pos acc
+    else
+      lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3 c h3tab pos acc
+  else
+    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3 c h3tab pos acc
+
 /-- Merged-array entry mirroring `lz77ChainLazyIterP`: builds the combined
-    `prevSize + hashSize` array and runs `lz77LazyMergedLoop`. Proven equal to
-    `lz77ChainLazyIterP` (`lz77ChainLazyIterPMerged_eq`). -/
+    `prevSize + hashSize` array and runs the lazy loop through
+    `lz77LazyMergedLoopGuarded` (one guard, then the hoisted-guard `USize` body).
+    Proven equal to `lz77ChainLazyIterP` (`lz77ChainLazyIterPMerged_eq`). -/
 def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
     (lazyDepth : Nat := maxChain) (useH3 : Bool := false) :
@@ -2185,7 +2498,7 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
-    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+    lz77LazyMergedLoopGuarded data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
       (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0
       (Array.emptyWithCapacity data.size)
 
