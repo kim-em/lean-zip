@@ -1,5 +1,7 @@
 import Zip.Native.Deflate
 import Zip.Native.DeflateFreqs
+import Zip.Native.DeflateFreqsFused
+import Zip.Spec.DeflateFreqsFusedCorrect
 import Zip.Native.DeflateParse
 import Zip.Spec.DeflateEncodeDynamic
 import Zip.Spec.DeflateStoredCorrect
@@ -1614,6 +1616,30 @@ def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
   else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
 
+/-- `deflateRawBaseP` with the whole-stream frequencies supplied as a parameter
+    instead of recomputed via `tokenFreqsP ptokens` — the emit twin of
+    `deflateRawBasePPrepF`. Used by `deflateRawBaseF` to consume the frequencies
+    the fused matcher already produced. At `f = tokenFreqsP ptokens` this is
+    definitionally `deflateRawBaseP` (`deflateRawBasePF_tokenFreqsP`). -/
+def deflateRawBasePF (data : ByteArray) (ptokens : Array UInt32)
+    (f : Array Nat × Array Nat) : ByteArray :=
+  let lens := dynamicCodeLengths f.1 f.2
+  let plan := dynHeaderCodes lens.1 lens.2
+  have hcl : plan.clCodes.size ≥ 19 :=
+    Nat.le_of_eq (dynHeaderCodes_clCodes_size lens.1 lens.2).symm
+  let fixedBytes := fixedBlockBytes f.1 f.2
+  let dynBytes := dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
+  let storedBytes := storedBlockBytes data
+  if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
+  else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
+  else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+
+/-- `deflateRawBasePF` at the whole-stream frequencies is `deflateRawBaseP`. -/
+theorem deflateRawBasePF_tokenFreqsP (data : ByteArray) (ptokens : Array UInt32) :
+    deflateRawBasePF data ptokens (tokenFreqsP ptokens) = deflateRawBaseP data ptokens :=
+  rfl
+
 /-- The base candidate *sized and prepared* from one shared token pass: the
     winner's flushed byte size (the same stored / fixed / dynamic comparison
     `deflateRawBaseP` makes internally) **paired with** a thunk that emits it. The
@@ -1685,6 +1711,30 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
 
 theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseP data (lzMatchP data level) = deflateRawBase data level := rfl
+
+/-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**:
+    the fused matcher (`lz77ChainIterPMergedF`) produces the packed tokens and
+    their `tokenFreqsP` histograms together, and the base sizing/emit consumes
+    those frequencies directly (`deflateRawBasePF`) instead of re-walking the
+    token array with a second `tokenFreqsP`. Byte-identical to `deflateRawBase`
+    on the greedy tier (`deflateRawBaseF_eq`). -/
+def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
+  let (ptokens, litF, distF) :=
+    lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  deflateRawBasePF data ptokens (litF.val, distF.val)
+
+/-- On the greedy tier (`level ≤ 3`, i.e. `¬ 4 ≤ level`) the fused base candidate
+    is byte-identical to `deflateRawBase`: the fused matcher returns exactly the
+    plain matcher's tokens and `tokenFreqsP` (`lz77ChainIterPMergedF_eq`), and at
+    those frequencies `deflateRawBasePF` is `deflateRawBaseP`. -/
+theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ level)) :
+    deflateRawBaseF data level = deflateRawBase data level := by
+  have hlz : lzMatchP data level =
+      lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level) := by
+    unfold lzMatchP; rw [if_neg h]
+  unfold deflateRawBaseF deflateRawBase
+  rw [hlz, lz77ChainIterPMergedF_eq]
+  exact deflateRawBasePF_tokenFreqsP data _
 
 theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     (choose : Array LZ77Token → List Nat) (level : UInt8) :
@@ -2073,6 +2123,13 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
           let basePrep := deflateRawBasePPrepF data ptokens obsFreqs.2
           if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
       withObs.2 ()
-  else deflateRawBase data level
+  else if 4 ≤ level then deflateRawBase data level
+  else
+    -- Greedy tier (levels 1–3): fuse the whole-stream `tokenFreqsP` walk into the
+    -- matcher pass. `deflateRawBaseF` produces the tokens and their frequencies in
+    -- one pass and sizes/emits the base candidate from them, byte-identical to
+    -- `deflateRawBase data level` (`deflateRawBaseF_eq`) — it removes the separate
+    -- re-read of the (possibly cache-spilling) token array (#freq-fusion).
+    deflateRawBaseF data level
 
 end Zip.Native.Deflate
