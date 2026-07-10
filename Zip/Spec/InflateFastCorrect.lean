@@ -587,6 +587,93 @@ theorem goCur_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : Huf
                       (by rw [copyWithinAt_size]; exact hbuf) rf rp rb rc href
                       (by rw [copyWithinAt_size]; exact hroom)
 
+set_option maxRecDepth 8192 in
+/-- **`goCur` preserves the buffer size** (it only ever `set!`s / `copyWithinAt`s
+    into the fixed buffer, or returns it at end-of-block). Needed so the loop lift
+    can thread the room bound and the exact-size contract. -/
+theorem goCur_size (litTable distTable : HuffTree.DecodeTable) (litLD distLD : HuffTree.LongDecode)
+    (maxBits : Nat) (data : ByteArray) (maxOut : Nat) (hsz : data.size < USize.size)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits) :
+    ∀ (pos : USize) (bitBuf : UInt64) (cnt : USize) (buf : ByteArray) (outPos : USize)
+      (cf : ByteArray) (c2 rp : USize) (rb : UInt64) (rc : USize),
+    goCur litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt hsz hlp buf outPos
+      = .ok (cf, c2, rp, rb, rc) → cf.size = buf.size := by
+  intro pos bitBuf cnt buf outPos
+  induction pos, bitBuf, cnt, buf, outPos using goCur.induct
+    (litTable := litTable) (litLD := litLD) (maxBits := maxBits) (data := data)
+    (maxOut := maxOut) (hsz := hsz) (hlp := hlp) with
+  | case1 pos bitBuf cnt buf outPos hrc ih =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_pos hrc] at h; exact ih cf c2 rp rb rc h
+  | case2 pos bitBuf cnt buf outPos hrc ent hlit hmax =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_neg hrc, dif_pos hlit, if_pos hmax] at h
+    exact absurd h (by simp)
+  | case3 pos bitBuf cnt buf outPos hrc ent hlit hmax ih =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_neg hrc, dif_pos hlit, if_neg hmax] at h
+    have := ih cf c2 rp rb rc h; rwa [ByteArray.size_set!] at this
+  | case4 pos bitBuf cnt buf outPos hrc ent hlit e hde =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_neg hrc, dif_neg hlit, hde] at h
+    exact absurd h (by simp)
+  | case5 pos bitBuf cnt buf outPos hrc ent hlit sym bb c' used hde hsym hmax =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_neg hrc, dif_neg hlit, hde] at h
+    simp only [] at h; rw [if_pos hsym, if_pos hmax] at h; exact absurd h (by simp)
+  | case6 pos bitBuf cnt buf outPos hrc ent hlit cnt0 sym bb c' used hde hsym hmax hnp =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_neg hrc, dif_neg hlit, hde] at h
+    simp only [] at h; rw [if_pos hsym, if_neg hmax, dif_pos hnp] at h; exact absurd h (by simp)
+  | case7 pos bitBuf cnt buf outPos hrc ent hlit cnt0 sym bb c' used hde hsym hmax hnp ih =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_neg hrc, dif_neg hlit, hde] at h
+    simp only [] at h; rw [if_pos hsym, if_neg hmax, dif_neg hnp] at h
+    have := ih cf c2 rp rb rc h; rwa [ByteArray.size_set!] at this
+  | case8 pos bitBuf cnt buf outPos hrc ent hlit sym bb c' used hde hsym heob =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_neg hrc, dif_neg hlit, hde] at h
+    simp only [] at h; rw [if_neg hsym, if_pos heob] at h
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h; obtain ⟨rfl, _⟩ := h; rfl
+  | case9 pos bitBuf cnt buf outPos hrc ent hlit sym bb c' used hde hsym hneob idx hidx =>
+    intro cf c2 rp rb rc h; rw [goCur, dif_neg hrc, dif_neg hlit, hde] at h
+    simp only [] at h
+    rw [if_neg hsym, if_neg hneob, dif_pos (show sym.toNat - 257 ≥ Inflate.lengthBase.size from hidx)] at h
+    exact absurd h (by simp)
+  | case10 pos bitBuf cnt buf outPos hrc ent hlit cnt0 sym bb c' used hde hsym hneob idx hh base ih =>
+    intro cf c2 rp rb rc h
+    have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
+    rw [goCur, dif_neg hrc, dif_neg hlit, hde] at h
+    simp only [if_neg hsym, if_neg hneob, dif_neg hhc, bind, Except.bind] at h
+    cases htb : InflateBuf.takeBits bb c'
+        (Inflate.lengthExtra[sym.toNat - 257]'(by
+          simp only [Inflate.lengthExtra_size]
+          simp only [Inflate.lengthBase_size, ge_iff_le, Nat.not_le] at hhc; omega)).toNat with
+    | error e => rw [htb] at h; exact absurd h (by simp)
+    | ok pe =>
+      obtain ⟨eb, bb2, c2'⟩ := pe; rw [htb] at h; simp only [] at h
+      cases hde2 : HuffTree.decodeSymCanon distLD distTable maxBits bb2 c2' with
+      | error e => rw [hde2] at h; exact absurd h (by simp)
+      | ok pd =>
+        obtain ⟨dsym, bb3, c3, dused⟩ := pd; rw [hde2] at h; simp only [] at h
+        by_cases hdidx : dsym.toNat ≥ Inflate.distBase.size
+        · rw [dif_pos hdidx] at h; exact absurd h (by simp)
+        · rw [dif_neg hdidx] at h; try simp only [bind, Except.bind] at h
+          cases htb2 : InflateBuf.takeBits bb3 c3
+              (Inflate.distExtra[dsym.toNat]'(by
+                try simp only [Inflate.distBase_size, ge_iff_le, Nat.not_le] at hdidx
+                try simp only [Inflate.distExtra_size]
+                omega)).toNat with
+          | error e => rw [htb2] at h; exact absurd h (by simp)
+          | ok pd2 =>
+            obtain ⟨deb, bb4, c4⟩ := pd2; rw [htb2] at h; simp only [] at h
+            by_cases hz : Inflate.distBase[dsym.toNat].toNat + deb = 0
+            · rw [dif_pos hz] at h; exact absurd h (by simp)
+            · rw [dif_neg hz] at h
+              by_cases hds : Inflate.distBase[dsym.toNat].toNat + deb > outPos.toNat
+              · rw [dif_pos hds] at h; exact absurd h (by simp)
+              · rw [dif_neg hds] at h
+                by_cases hmax : outPos.toNat + (Inflate.lengthBase[sym.toNat - 257].toNat + eb) > maxOut
+                · rw [if_pos hmax] at h; exact absurd h (by simp)
+                · rw [if_neg hmax] at h
+                  by_cases hnp : cnt.toNat ≤ c4
+                  · rw [dif_pos hnp] at h; exact absurd h (by simp)
+                  · rw [dif_neg hnp] at h
+                    have := ih eb dsym hdidx deb bb4 c4 hnp cf c2 rp rb rc h
+                    rwa [copyWithinAt_size] at this
+
 /-! ### Stored-block bridge -/
 
 /-- `getElem!` of a `ByteArray` append, split at the boundary. -/
