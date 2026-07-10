@@ -26,22 +26,29 @@ Both need a **big-enough buffer** (`buf.size ≥ final reference size`), which i
 carried through the induction and discharged at each step by the reference's
 monotone output growth (`goTreeFree_size_mono`).
 
-Status: **work in progress** (issue #2799). Proved, `sorry`-free:
+Status: **complete** (issue #2799) — this file is `sorry`-free. The chain, in
+dependency order:
 * the write bridges `set!_extract_eq_push` / `copyWithinAt_extract_eq_copyLoop`
   and reference monotonicity `goTreeFree_size_mono`, with all supporting
   `copyWithinAtGo` content lemmas and `getElem!` infrastructure;
 * the **core bisimulation `goCur_eq`** — the write-once cursor decode agrees
-  with `goTreeFreeU` — a 10-case functional induction over `goCur.induct`;
+  with `goTreeFreeU` — a 10-case functional induction over `goCur.induct`, plus
+  `goCur_size` (the cursor preserves the buffer size);
 * both **block bridges**: `decodeHuffmanCurTables_eq` (Huffman blocks, via
   `goCur_eq`) and `decodeStoredCur_eq` (stored blocks, via the `storedCopyLoop`
-  content lemmas).
+  content lemmas), each also concluding `cf.size = buf.size`;
+* reference-loop output monotonicity `inflateLoopTreeFree_size_mono`;
+* the **block-loop bisimulation `inflateLoopCur_eq`** — `inflateLoopCur`
+  re-represents `inflateLoopTreeFree` block-for-block, applying the two bridges
+  and threading `refOutput = buf.extract 0 outPos`;
+* the target **`inflateFast_eq`**: whenever `Inflate.inflate` yields `out`, the
+  write-once cursor decoder run at the exact size hint `out.size` yields the same
+  bytes (`Inflate.inflate = inflateLoopTreeFree` by `inflateRaw_eq_loop`, then the
+  loop bisimulation on the presized buffer, then the exact-size contract makes
+  `cf = out`).
 
-The single remaining `sorry` is the top-level `inflateFast_eq`, which now needs
-only the block-loop lift: a bisimulation of `inflateLoopCur` against
-`inflateLoopTreeFree` (`= Inflate.inflate` by `inflateRaw_eq_loop`) applying the
-two block bridges, then instantiation with the presized buffer + exact-size
-contract. This file is standalone — not imported by `Zip` — so `Inflate.inflate`
-and CI stay `sorry`-free.
+This file is standalone — not imported by `Zip` — so `Inflate.inflate` and CI
+stay `sorry`-free regardless.
 -/
 
 namespace Zip.Native
@@ -1086,7 +1093,7 @@ theorem inflateLoopCur_eq (maxOut dataSize : Nat) (hdd : dataSize < USize.size) 
     outPos ≤ buf.size → rf.size ≤ buf.size →
     Inflate.inflateLoopTreeFree br (buf.extract 0 outPos) maxOut dataSize = .ok (rf, endPos) →
     ∃ cf, InflateBuf.inflateLoopCur br buf outPos maxOut dataSize = .ok (cf, rf.size, endPos)
-      ∧ cf.extract 0 rf.size = rf := by
+      ∧ cf.extract 0 rf.size = rf ∧ cf.size = buf.size := by
   intro br buf outPos
   induction br, buf, outPos using InflateBuf.inflateLoopCur.induct (dataSize := dataSize) with
   | case1 br buf outPos ih =>
@@ -1141,7 +1148,7 @@ theorem inflateLoopCur_eq (maxOut dataSize : Nat) (hdd : dataSize < USize.size) 
                else if _h : br'.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
                     else if _h : dataSize * 8 < br'.bitPos then throw "Inflate: bit position out of range"
                     else InflateBuf.inflateLoopCur br' cf' refOut'.size maxOut dataSize)
-                = .ok (cf, rf.size, endPos) ∧ cf.extract 0 rf.size = rf := by
+                = .ok (cf, rf.size, endPos) ∧ cf.extract 0 rf.size = rf ∧ cf.size = buf.size := by
       intro refOut' cf' br' hext hcsize hds' ht
       have hmono := refmono refOut' br' hds' ht
       by_cases hbf : (bfinal == 1) = true
@@ -1149,7 +1156,7 @@ theorem inflateLoopCur_eq (maxOut dataSize : Nat) (hdd : dataSize < USize.size) 
         simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at ht
         obtain ⟨hrfeq, hendeq⟩ := ht
         exact ⟨cf', by simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq, hrfeq, hendeq],
-          by rw [← hrfeq]; exact hext⟩
+          by rw [← hrfeq]; exact hext, hcsize⟩
       · rw [if_neg hbf] at ht ⊢
         by_cases hg1 : br'.bitPos ≤ br.bitPos
         · rw [dif_pos hg1] at ht; exact absurd ht (by simp)
@@ -1158,9 +1165,10 @@ theorem inflateLoopCur_eq (maxOut dataSize : Nat) (hdd : dataSize < USize.size) 
           · rw [dif_pos hg2] at ht; exact absurd ht (by simp)
           · rw [dif_neg hg2] at ht ⊢
             rw [← hext] at ht
-            exact ih cf' refOut'.size br' hg1 hg2 rf endPos (by rw [hds']; omega) hds'
-              (by rw [hcsize]; exact hbuf) (by rw [hcsize]; exact Nat.le_trans hmono hroom)
-              (by rw [hcsize]; exact hroom) ht
+            obtain ⟨cf'', h1, h2, h3⟩ := ih cf' refOut'.size br' hg1 hg2 rf endPos
+              (by rw [hds']; omega) hds' (by rw [hcsize]; exact hbuf)
+              (by rw [hcsize]; exact Nat.le_trans hmono hroom) (by rw [hcsize]; exact hroom) ht
+            exact ⟨cf'', h1, h2, by rw [h3]; exact hcsize⟩
     have hbtv : btype = 0 ∨ btype = 1 ∨ btype = 2 ∨ btype = 3 := by
       have hb4 : btype.toNat < 4 := Inflate.readBits_lt (n := 2) (by omega) hrb2
       rcases (show btype.toNat = 0 ∨ btype.toNat = 1 ∨ btype.toNat = 2 ∨ btype.toNat = 3 from by omega)
@@ -1219,12 +1227,51 @@ theorem inflateLoopCur_eq (maxOut dataSize : Nat) (hdd : dataSize < USize.size) 
     · -- reserved
       exact absurd href (by simp [bind, Except.bind])
 
+set_option maxHeartbeats 1000000 in
 /-- **Target (issue #2799): the write-once cursor decoder agrees with the verified
-    decoder on the exact-size path.** Proof staged: `goCur_eq` bisimulation, the
-    `goCurU` reduction, and the block-loop lift. -/
+    decoder on the exact-size path.** Whenever the verified tree-free decoder
+    `Inflate.inflate` produces `out`, the write-once cursor decoder run with the
+    exact size hint `out.size` produces the same bytes. The hypotheses
+    `data.size < USize.size` / `out.size < USize.size` are addressability (always
+    true for in-memory `ByteArray`s — the wide-buffer branch the cursor takes),
+    and `out.size ≤ maxOut` holds for any output the bounded reference produced.
+
+    Chains `Inflate.inflate = inflateLoopTreeFree` (`inflateRaw_eq_loop`), the loop
+    bisimulation `inflateLoopCur_eq` on the presized buffer, then the exact-size
+    contract (`cf.size = out.size`, so `cf = out`). -/
 theorem inflateFast_eq (data : ByteArray) (maxOut : Nat) (out : ByteArray)
+    (hds : data.size < USize.size) (hosz : out.size < USize.size) (hle : out.size ≤ maxOut)
     (href : Inflate.inflate data maxOut = .ok out) :
     Inflate.inflateFast data maxOut out.size = .ok out := by
-  sorry
+  have hpsz : (ByteArray.presize out.size).size = out.size := by
+    simp only [ByteArray.presize, ByteArray.size, Array.size_replicate]
+  -- Reference `inflate` → tree-free block loop over the empty output.
+  rw [Inflate.inflate] at href
+  obtain ⟨pr, hraw, hret⟩ := bindOk' href
+  obtain ⟨out', endPos⟩ := pr
+  simp only [pure, Except.pure, Except.ok.injEq] at hret; rw [hret] at hraw
+  rw [Inflate.inflateRaw_eq_loop] at hraw
+  have hemp : ByteArray.emptyWithCapacity 0 = (ByteArray.presize out.size).extract 0 0 := by
+    apply ByteArray.ext_getElem!
+    · rw [ByteArray.size_extract]; simp
+    · intro i hi; simp at hi
+  rw [hemp] at hraw
+  -- Loop bisimulation on the presized buffer.
+  obtain ⟨cf, hcur, hext, hcsize⟩ := inflateLoopCur_eq maxOut data.size hds
+    { data := data, pos := 0, bitOff := 0 } (ByteArray.presize out.size) 0 out endPos
+    (by simp [ZipCommon.BitReader.bitPos]) rfl (by rw [hpsz]; exact hosz) (by omega)
+    (Nat.le_of_eq hpsz.symm) hraw
+  have hcfsz : cf.size = out.size := by rw [hcsize, hpsz]
+  have hcfout : cf = out := by
+    apply ByteArray.ext_getElem! hcfsz
+    intro i hi
+    rw [← hext, ByteArray.getElem!_extract _ 0 _ i (by rw [hcfsz] at hi; omega), Nat.zero_add]
+  -- `inflateFast` runs the same loop and passes the exact-size check.
+  rw [Inflate.inflateFast, Inflate.inflateRawFast]
+  simp only [bind, Except.bind]
+  rw [if_neg (by omega : ¬ out.size > maxOut)]
+  simp only [bind, Except.bind, hcur]
+  rw [if_neg (by rw [hcfsz]; simp)]
+  simp only [pure, Except.pure, hcfout]
 
 end Zip.Native
