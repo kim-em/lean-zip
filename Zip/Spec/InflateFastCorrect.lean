@@ -760,7 +760,7 @@ theorem decodeStoredCur_eq (br : ZipCommon.BitReader) (buf : ByteArray) (outPos 
     (href : Inflate.decodeStored br (buf.extract 0 outPos) maxOut = .ok (rf, rbr))
     (hroom : rf.size ≤ buf.size) :
     ∃ cf, InflateBuf.decodeStoredCur br buf outPos maxOut = .ok (cf, rf.size, rbr)
-          ∧ cf.extract 0 rf.size = rf := by
+          ∧ cf.extract 0 rf.size = rf ∧ cf.size = buf.size := by
   have hos : (buf.extract 0 outPos).size = outPos := by rw [ByteArray.size_extract]; omega
   rw [Inflate.decodeStored] at href
   rw [InflateBuf.decodeStoredCur]
@@ -804,9 +804,10 @@ theorem decodeStoredCur_eq (br : ZipCommon.BitReader) (buf : ByteArray) (outPos 
             have hrfsz : (buf.extract 0 outPos ++ bytes).size = outPos + len.toNat := by
               rw [ByteArray.size_append, hos, hbsz]
             simp only [hc1, hc2, h3, bind, Except.bind, ↓reduceIte] at ⊢
-            refine ⟨InflateBuf.storedCopyLoop buf bytes outPos 0 len.toNat, ?_, ?_⟩
+            refine ⟨InflateBuf.storedCopyLoop buf bytes outPos 0 len.toNat, ?_, ?_, ?_⟩
             · rw [if_neg (by decide : ¬(false = true)), hrfsz]
             · rw [hrfsz, storedCopyLoop_extract buf bytes outPos len.toNat hbsz (by omega)]
+            · rw [storedCopyLoop_size]
 
 theorem decodeHuffmanCurTables_eq (br : ZipCommon.BitReader) (buf : ByteArray) (outPos : Nat)
     (litTable distTable : HuffTree.DecodeTable) (litLD distLD : HuffTree.LongDecode) (maxOut : Nat)
@@ -819,7 +820,7 @@ theorem decodeHuffmanCurTables_eq (br : ZipCommon.BitReader) (buf : ByteArray) (
     (hroom : rf.size ≤ buf.size) :
     ∃ cf, InflateBuf.decodeHuffmanCurTables br buf outPos
             litTable distTable litLD distLD maxOut hlp = .ok (cf, rf.size, rbr)
-          ∧ cf.extract 0 rf.size = rf := by
+          ∧ cf.extract 0 rf.size = rf ∧ cf.size = buf.size := by
   have hos : (buf.extract 0 outPos).size = outPos := by rw [ByteArray.size_extract]; omega
   have houtsz : outPos < USize.size := Nat.lt_of_le_of_lt hout hbuf
   have hsz : br.data.size.toUSize.toNat = br.data.size := InflateBuf.toUSize_toNat_of_lt hds
@@ -861,7 +862,10 @@ theorem decodeHuffmanCurTables_eq (br : ZipCommon.BitReader) (buf : ByteArray) (
       o p b c
       (by rw [InflateBuf.toUSize_toNat_of_lt houtsz]; exact hgtf) hroom
     obtain ⟨cf, hcf, hext⟩ := hgc
-    refine ⟨cf, ?_, hext⟩
+    have hcsize := goCur_size litTable distTable litLD distLD 15 br.data maxOut hds hlp
+      pos0.toUSize (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff).toUSize buf outPos.toUSize
+      cf _ _ _ _ hcf
+    refine ⟨cf, ?_, hext, hcsize⟩
     rw [hcf]
     simp only [bind, Except.bind, Except.ok.injEq, Prod.mk.injEq,
       InflateBuf.toUSize_toNat_of_lt hrfsz, and_self]
