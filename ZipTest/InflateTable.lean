@@ -159,4 +159,36 @@ def canonicalTests : IO Unit := do
           s!"[{label}] fast canonical table differs from spec canonical table at slot {bad}")
   IO.println s!"    {checks} length vectors: canonical (spec + fast) build matches tree build"
 
+/-- Differential check for the libdeflate-style subtable long-code path (#2801):
+    the production `decodeSymCanon` (11-bit root table + boxing-free `subLookup`
+    subtable fallback for >`fastBits` codes) decodes every buffer identically to the
+    canonical tree `decodeSym` — same symbol, consumed bits, and error behaviour.
+    This is the runtime witness of `subLookup_ok_iff_walkCanonical` /
+    `decodeSymCanon_ok_iff_decodeSym`; it exercises the 12-15-bit subtable slots the
+    root table misses, across every code-length regime including the near-EOF
+    "not enough bits" fallback (small `cnt`). -/
+def subtableTests : IO Unit := do
+  IO.println "  InflateTable subtable tests (subLookup fallback vs tree decodeSym)..."
+  let mut s : UInt64 := 0x5375_6254_6162_6c65
+  let cnts := #[0, 1, 5, 11, 12, 13, 14, 15, 20, 40, 56]
+  let mut checks : Nat := 0
+  for (label, lengths) in lengthVectors do
+    match HuffTree.fromLengths lengths 15 with
+    | .error _ => pure ()  -- skip invalid length sets
+    | .ok tree =>
+      -- the production build: root fast table augmented in place with inline
+      -- subtable offsets, plus the flat `subs`
+      let tf := HuffTree.buildTreeFreeWithCount lengths (HuffTree.countLengthsFast lengths 15) 15
+      for _ in [:4000] do
+        s := xorshift64 s
+        let buf := s
+        for cnt in cnts do
+          let a := (HuffTree.decodeSymCanon tf.2 tf.1 15 buf cnt).toOption
+          let b := (Zip.Native.InflateBuf.decodeSym tree tf.1 buf cnt).toOption
+          unless a == b do
+            throw (IO.userError
+              s!"[{label}] decodeSymCanon (subtable) ≠ tree decodeSym at buf={buf} cnt={cnt}")
+          checks := checks + 1
+  IO.println s!"    {checks} (length-vector × buffer × cnt) subtable decodes matched tree walk"
+
 end ZipTest.InflateTable

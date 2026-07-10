@@ -48,6 +48,7 @@ def main : IO Unit := do
   ZipTest.NativeInflate.tests
   ZipTest.InflateTable.tests
   ZipTest.InflateTable.canonicalTests
+  ZipTest.InflateTable.subtableTests
   ZipTest.NativeGzip.tests
   ZipTest.NativeIntegration.tests
   ZipTest.NativeScale.tests
