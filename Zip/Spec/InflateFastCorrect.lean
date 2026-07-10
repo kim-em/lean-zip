@@ -1072,6 +1072,153 @@ theorem inflateLoopTreeFree_size_mono (maxOut dataSize : Nat)
     · -- reserved
       exact absurd href (by simp [bind, Except.bind])
 
+set_option maxRecDepth 4096 in
+set_option maxHeartbeats 1000000 in
+/-- **The block-loop bisimulation.** The cursor block loop `inflateLoopCur`
+    re-represents the reference `inflateLoopTreeFree` (which is `Inflate.inflate`,
+    `inflateRaw_eq_loop`): identical `btype` dispatch and `BitReader` bookkeeping,
+    each block bridged by `decodeStoredCur_eq` / `decodeHuffmanCurTables_eq`,
+    threading the cursor invariant `refOutput = buf.extract 0 outPos` with room
+    from `inflateLoopTreeFree_size_mono`. -/
+theorem inflateLoopCur_eq (maxOut dataSize : Nat) (hdd : dataSize < USize.size) :
+    ∀ (br : ZipCommon.BitReader) (buf : ByteArray) (outPos : Nat) (rf : ByteArray) (endPos : Nat),
+    br.bitPos ≤ br.data.size * 8 → br.data.size = dataSize → buf.size < USize.size →
+    outPos ≤ buf.size → rf.size ≤ buf.size →
+    Inflate.inflateLoopTreeFree br (buf.extract 0 outPos) maxOut dataSize = .ok (rf, endPos) →
+    ∃ cf, InflateBuf.inflateLoopCur br buf outPos maxOut dataSize = .ok (cf, rf.size, endPos)
+      ∧ cf.extract 0 rf.size = rf := by
+  intro br buf outPos
+  induction br, buf, outPos using InflateBuf.inflateLoopCur.induct (dataSize := dataSize) with
+  | case1 br buf outPos ih =>
+    intro rf endPos hbp hds hbuf hout hroom href
+    have hos : (buf.extract 0 outPos).size = outPos := by rw [ByteArray.size_extract]; omega
+    rw [Inflate.inflateLoopTreeFree] at href
+    obtain ⟨p1, hrb1, href⟩ := bindOk' href; obtain ⟨bfinal, br₁⟩ := p1; simp only [] at href
+    obtain ⟨p2, hrb2, href⟩ := bindOk' href; obtain ⟨btype, br₂⟩ := p2; simp only [] at href
+    have hbo₂ : br₂.bitOff < 8 := InflateBuf.readBits_bitOff_lt_pos (by omega) hrb2
+    have hple : br.pos ≤ br.data.size := by
+      have := hbp; simp only [ZipCommon.BitReader.bitPos] at this; omega
+    have hpos : br.bitOff = 0 ∨ br.pos < br.data.size := by
+      have := hbp; simp only [ZipCommon.BitReader.bitPos] at this
+      rcases Nat.lt_or_ge br.pos br.data.size with h | h
+      · exact Or.inr h
+      · exact Or.inl (by omega)
+    obtain ⟨_, hp₁, hl₁⟩ := ZipCommon.readBits_inv br br₁ 1 bfinal hrb1 hpos hple
+    obtain ⟨hd₂, hp₂, hl₂⟩ := ZipCommon.readBits_inv br₁ br₂ 2 btype hrb2 hp₁ hl₁
+    have hdata₂ : br₂.data.size = dataSize := by
+      rw [ZipCommon.readBits_data_eq br₁ br₂ 2 btype hrb2,
+        ZipCommon.readBits_data_eq br br₁ 1 bfinal hrb1]; exact hds
+    have hbp₂ : br₂.bitPos ≤ br₂.data.size * 8 := by
+      simp only [ZipCommon.BitReader.bitPos]; rcases hp₂ with h' | h' <;> omega
+    -- The reference block output is a prefix of the final `rf` (via loop mono).
+    have refmono : ∀ (o' : ByteArray) (b' : ZipCommon.BitReader), b'.data.size = dataSize →
+        (if bfinal == 1 then pure (o', b'.alignToByte.pos)
+         else if _h : b'.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+              else if _h : dataSize * 8 < b'.bitPos then throw "Inflate: bit position out of range"
+              else Inflate.inflateLoopTreeFree b' o' maxOut dataSize) = .ok (rf, endPos) →
+        o'.size ≤ rf.size := by
+      intro o' b' hds' ht
+      by_cases hbf : (bfinal == 1) = true
+      · rw [if_pos hbf] at ht; simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at ht
+        exact Nat.le_of_eq (congrArg ByteArray.size ht.1)
+      · rw [if_neg hbf] at ht
+        by_cases hg1 : b'.bitPos ≤ br.bitPos
+        · rw [dif_pos hg1] at ht; exact absurd ht (by simp)
+        · rw [dif_neg hg1] at ht
+          by_cases hg2 : dataSize * 8 < b'.bitPos
+          · rw [dif_pos hg2] at ht; exact absurd ht (by simp)
+          · rw [dif_neg hg2] at ht
+            exact inflateLoopTreeFree_size_mono maxOut dataSize hdd b' o' rf endPos
+              (by rw [hds']; omega) hds' ht
+    -- The shared tail: from the block's cursor result, finish or recurse.
+    have htailcur : ∀ (refOut' cf' : ByteArray) (br' : ZipCommon.BitReader),
+        cf'.extract 0 refOut'.size = refOut' → cf'.size = buf.size → br'.data.size = dataSize →
+        (if bfinal == 1 then pure (refOut', br'.alignToByte.pos)
+         else if _h : br'.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+              else if _h : dataSize * 8 < br'.bitPos then throw "Inflate: bit position out of range"
+              else Inflate.inflateLoopTreeFree br' refOut' maxOut dataSize) = .ok (rf, endPos) →
+        ∃ cf, (if bfinal == 1 then pure (cf', refOut'.size, br'.alignToByte.pos)
+               else if _h : br'.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+                    else if _h : dataSize * 8 < br'.bitPos then throw "Inflate: bit position out of range"
+                    else InflateBuf.inflateLoopCur br' cf' refOut'.size maxOut dataSize)
+                = .ok (cf, rf.size, endPos) ∧ cf.extract 0 rf.size = rf := by
+      intro refOut' cf' br' hext hcsize hds' ht
+      have hmono := refmono refOut' br' hds' ht
+      by_cases hbf : (bfinal == 1) = true
+      · rw [if_pos hbf] at ht ⊢
+        simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at ht
+        obtain ⟨hrfeq, hendeq⟩ := ht
+        exact ⟨cf', by simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq, hrfeq, hendeq],
+          by rw [← hrfeq]; exact hext⟩
+      · rw [if_neg hbf] at ht ⊢
+        by_cases hg1 : br'.bitPos ≤ br.bitPos
+        · rw [dif_pos hg1] at ht; exact absurd ht (by simp)
+        · rw [dif_neg hg1] at ht ⊢
+          by_cases hg2 : dataSize * 8 < br'.bitPos
+          · rw [dif_pos hg2] at ht; exact absurd ht (by simp)
+          · rw [dif_neg hg2] at ht ⊢
+            rw [← hext] at ht
+            exact ih cf' refOut'.size br' hg1 hg2 rf endPos (by rw [hds']; omega) hds'
+              (by rw [hcsize]; exact hbuf) (by rw [hcsize]; exact Nat.le_trans hmono hroom)
+              (by rw [hcsize]; exact hroom) ht
+    have hbtv : btype = 0 ∨ btype = 1 ∨ btype = 2 ∨ btype = 3 := by
+      have hb4 : btype.toNat < 4 := Inflate.readBits_lt (n := 2) (by omega) hrb2
+      rcases (show btype.toNat = 0 ∨ btype.toNat = 1 ∨ btype.toNat = 2 ∨ btype.toNat = 3 from by omega)
+        with h' | h' | h' | h'
+      · exact Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))
+      · exact Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl)))
+      · exact Or.inr (Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+      · exact Or.inr (Or.inr (Or.inr (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+    rw [InflateBuf.inflateLoopCur]
+    simp only [hrb1, hrb2, bind, Except.bind]
+    simp only [bind, Except.bind] at href
+    rcases hbtv with rfl | rfl | rfl | rfl
+    · -- stored
+      obtain ⟨pb, hblock, htl⟩ := bindOk' href; obtain ⟨refOut', br'⟩ := pb; simp only [] at htl
+      have hbroom : refOut'.size ≤ buf.size :=
+        Nat.le_trans (refmono refOut' br' (by
+          obtain ⟨hd', _, _⟩ := Zip.Native.decodeStored_inv br₂ br' _ refOut' maxOut hblock
+          rw [hd']; exact hdata₂) htl) hroom
+      obtain ⟨hd', _, _⟩ := Zip.Native.decodeStored_inv br₂ br' _ refOut' maxOut hblock
+      obtain ⟨cf', hcur, hext', hcsize'⟩ :=
+        decodeStoredCur_eq br₂ buf outPos maxOut hout refOut' br' hblock hbroom
+      rw [hcur]; simp only [bind, Except.bind]
+      exact htailcur refOut' cf' br' hext' hcsize' (by rw [hd']; exact hdata₂) htl
+    · -- fixed Huffman
+      obtain ⟨pb, hblock, htl⟩ := bindOk' href; obtain ⟨refOut', br'⟩ := pb; simp only [] at htl
+      rw [Inflate.decodeHuffmanFastBufFixed] at hblock
+      have hbr := decodeHuffmanFastBufTables_br br₂ _ _ _ _ _ maxOut _
+        (by rw [hdata₂]; exact hdd) refOut' br' hblock
+      have hbroom : refOut'.size ≤ buf.size :=
+        Nat.le_trans (refmono refOut' br' (by rw [hbr.1]; exact hdata₂) htl) hroom
+      obtain ⟨cf', hcur, hext', hcsize'⟩ :=
+        decodeHuffmanCurTables_eq br₂ buf outPos _ _ _ _ maxOut _
+          (by rw [hdata₂]; exact hdd) hbo₂ hbp₂ hout hbuf refOut' br' hblock hbroom
+      rw [hcur]; simp only [bind, Except.bind]
+      exact htailcur refOut' cf' br' hext' hcsize' (by rw [hbr.1]; exact hdata₂) htl
+    · -- dynamic Huffman
+      obtain ⟨pdt, hdt, href⟩ := bindOk' href; obtain ⟨litLens, distLens, br₃⟩ := pdt; try simp only [] at href
+      obtain ⟨pb, hblock, htl⟩ := bindOk' href; obtain ⟨refOut', br'⟩ := pb; simp only [] at htl
+      obtain ⟨hdyntrees, _, _, _, _⟩ := Inflate.decodeDynamicTrees_of_lengthsOnly hdt
+      obtain ⟨hd₃, hp₃, hl₃⟩ := Zip.Native.decodeDynamicTrees_inv br₂ br₃ _ _ hdyntrees hp₂ hl₂
+      have hbo₃ := InflateBuf.decodeDynamicTrees_bitOff_pres hbo₂ hdyntrees
+      have hdata₃ : br₃.data.size = dataSize := by rw [hd₃]; exact hdata₂
+      have hbp₃ : br₃.bitPos ≤ br₃.data.size * 8 := by
+        simp only [ZipCommon.BitReader.bitPos]; rcases hp₃ with h' | h' <;> omega
+      rw [InflateBuf.decodeHuffmanFastBufTreeFree] at hblock
+      have hbr := decodeHuffmanFastBufTables_br br₃ _ _ _ _ _ maxOut _
+        (by rw [hdata₃]; exact hdd) refOut' br' hblock
+      have hbroom : refOut'.size ≤ buf.size :=
+        Nat.le_trans (refmono refOut' br' (by rw [hbr.1]; exact hdata₃) htl) hroom
+      obtain ⟨cf', hcur, hext', hcsize'⟩ :=
+        decodeHuffmanCurTables_eq br₃ buf outPos _ _ _ _ maxOut _
+          (by rw [hdata₃]; exact hdd) hbo₃ hbp₃ hout hbuf refOut' br' hblock hbroom
+      simp only [hdt, bind, Except.bind]
+      rw [hcur]; simp only [bind, Except.bind]
+      exact htailcur refOut' cf' br' hext' hcsize' (by rw [hbr.1]; exact hdata₃) htl
+    · -- reserved
+      exact absurd href (by simp [bind, Except.bind])
+
 /-- **Target (issue #2799): the write-once cursor decoder agrees with the verified
     decoder on the exact-size path.** Proof staged: `goCur_eq` bisimulation, the
     `goCurU` reduction, and the block-loop lift. -/
