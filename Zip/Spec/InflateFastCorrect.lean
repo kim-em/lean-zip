@@ -965,7 +965,19 @@ theorem inflateLoopTreeFree_size_mono (maxOut dataSize : Nat)
     · -- dynamic Huffman
       obtain ⟨pdt, hdt, href⟩ := bindOk' href; obtain ⟨litLens, distLens, br₃⟩ := pdt; try simp only [] at href
       obtain ⟨pb, hblock, htl⟩ := bindOk' href; obtain ⟨output', br'⟩ := pb
-      sorry
+      obtain ⟨hdyntrees, _, _, _, _⟩ := Inflate.decodeDynamicTrees_of_lengthsOnly hdt
+      obtain ⟨hd₃, hp₃, hl₃⟩ := Zip.Native.decodeDynamicTrees_inv br₂ br₃ _ _ hdyntrees hp₂ hl₂
+      have hbo₃ := InflateBuf.decodeDynamicTrees_bitOff_pres hbo₂ hdyntrees
+      have hdata₃ : br₃.data.size = dataSize := by rw [hd₃]; exact hdata₂
+      have hbp₃ : br₃.bitPos ≤ br₃.data.size * 8 := by
+        simp only [ZipCommon.BitReader.bitPos]; rcases hp₃ with h' | h' <;> omega
+      rw [InflateBuf.decodeHuffmanFastBufTreeFree] at hblock
+      have hbr := decodeHuffmanFastBufTables_br br₃ output _ _ _ _ maxOut _
+        (by rw [hdata₃]; exact hdd) output' br' hblock
+      have hmn := decodeHuffmanFastBufTables_size_mono br₃ output _ _ _ _ maxOut _
+        (by rw [hdata₃]; exact hdd) hbo₃ hbp₃ output' br' hblock
+      simp only [] at htl
+      exact htail output' br' hmn (by rw [hbr.1]; exact hdata₃) htl
     · -- reserved
       exact absurd href (by simp [bind, Except.bind])
 
