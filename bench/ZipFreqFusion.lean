@@ -184,18 +184,74 @@ def analyzeFile (name : String) (data : ByteArray) (iters reps : Nat) : IO Unit 
   IO.println s!"    reps alone={aloneT.reverse} fused={fusedT.reverse} sep={sepT.reverse}"
   IO.println ""
 
-def main (args : List String) : IO Unit := do
-  let reps := (args[1]? |>.bind (·.toNat?)).getD 4
-  let paths := match args.head? with
-    | some p => [p]
-    | none => ["bench/corpora/silesia/mozilla"]
-  IO.println s!"# Stage-0 freq-fusion ceiling probe (reps={reps})"
+/-! ## Stage-1 production A/B: unfused `deflateRawBase` vs fused `deflateRawBaseF`
+
+Both full-compress paths exist in-code (`deflateRawBase` is the pre-fusion path,
+still used at levels 4-5; `deflateRawBaseF` is what `deflateRaw` now dispatches to
+at levels 1-3), so this A/B isolates the fusion on the whole compress inside one
+binary, with a same-binary noise floor (unfused timed twice). -/
+
+@[noinline] def opBaseOld (data : ByteArray) (level : UInt8) (salt : Nat) : Nat :=
+  (deflateRawBase data level).size + (salt &&& 1)
+
+@[noinline] def opBaseNew (data : ByteArray) (level : UInt8) (salt : Nat) : Nat :=
+  (deflateRawBaseF data level).size + (salt &&& 1)
+
+def analyzeProd (name : String) (data : ByteArray) (level : UInt8) (iters reps : Nat) : IO Unit := do
+  let size := data.size
+  -- Byte-identity: the fused path must equal the unfused path exactly.
+  let oldB := deflateRawBase data level
+  let newB := deflateRawBaseF data level
+  let identical := oldB == newB
+  IO.println s!"  {name} L{level}: {size} bytes -> {oldB.size} compressed; byteIdentical={identical}"
+  unless identical do IO.eprintln s!"  !! BYTE MISMATCH on {name} L{level}"
+  let mut oldT : List Nat := []
+  let mut newT : List Nat := []
+  let mut nf   : List Nat := []   -- noise floor: unfused timed a second time
+  for _ in [:reps] do
+    oldT := (← timeOp iters (fun s => opBaseOld data level s)) :: oldT
+    newT := (← timeOp iters (fun s => opBaseNew data level s)) :: newT
+    nf   := (← timeOp iters (fun s => opBaseOld data level s)) :: nf
+  let oldNs := medianNs oldT
+  let newNs := medianNs newT
+  let nfNs := medianNs nf
+  let speedup : Float :=
+    if newNs == 0 then 0.0 else ((oldNs.toFloat - newNs.toFloat) / oldNs.toFloat) * 100.0
+  let nfPct : Float :=
+    if oldNs == 0 then 0.0 else (((oldNs : Int) - (nfNs : Int)).natAbs.toFloat / oldNs.toFloat) * 100.0
+  IO.println s!"    unfused (deflateRawBase) : {oldNs} ns  ({round1 (mbps size oldNs)} MB/s)"
+  IO.println s!"    fused   (deflateRawBaseF): {newNs} ns  ({round1 (mbps size newNs)} MB/s)"
+  IO.println s!"    noise floor (unfused #2) : {nfNs} ns  (|old-nf| = {round1 nfPct}% of old)"
+  IO.println s!"    fusion speedup           : {round1 speedup}% of total compress"
+  IO.println s!"    reps old={oldT.reverse} new={newT.reverse} nf={nf.reverse}"
   IO.println ""
-  for p in paths do
-    let path := System.FilePath.mk p
-    unless ← path.pathExists do
-      IO.eprintln s!"not found: {path}"
-      continue
+
+def main (args : List String) : IO Unit := do
+  match args.head? with
+  | some "prod" =>
+    -- freq-fusion prod <file> <level> [reps]
+    let file := args[1]!
+    let level := (args[2]? |>.bind (·.toNat?)).getD 1 |>.toUInt8
+    let reps := (args[3]? |>.bind (·.toNat?)).getD 3
+    let path := System.FilePath.mk file
+    unless ← path.pathExists do IO.eprintln s!"not found: {path}"; return
     let data ← IO.FS.readBinFile path
     let iters := if data.size ≤ 262144 then 20 else if data.size ≤ 4194304 then 3 else 2
-    analyzeFile (path.fileName.getD p) data iters reps
+    IO.println s!"# Stage-1 production A/B (reps={reps})"
+    IO.println ""
+    analyzeProd (path.fileName.getD file) data level iters reps
+  | _ =>
+    let reps := (args[1]? |>.bind (·.toNat?)).getD 4
+    let paths := match args.head? with
+      | some p => [p]
+      | none => ["bench/corpora/silesia/mozilla"]
+    IO.println s!"# Stage-0 freq-fusion ceiling probe (reps={reps})"
+    IO.println ""
+    for p in paths do
+      let path := System.FilePath.mk p
+      unless ← path.pathExists do
+        IO.eprintln s!"not found: {path}"
+        continue
+      let data ← IO.FS.readBinFile path
+      let iters := if data.size ≤ 262144 then 20 else if data.size ≤ 4194304 then 3 else 2
+      analyzeFile (path.fileName.getD p) data iters reps
