@@ -198,6 +198,28 @@ extern_lib libbytearray_wide_ffi pkg := do
   let name := nameToStaticLib "bytearray_wide_ffi"
   buildStaticLib (pkg.staticLibDir / name) #[ffiO]
 
+-- Write-once cursor primitives for the fastloop decoder (issue #2799):
+-- presize (zero-filled buffer) + copy_within_at (in-place LZ77 copy at a
+-- cursor). No external library, always compiled.
+input_file inflate_fast_ffi.c where
+  path := "c" / "inflate_fast_ffi.c"
+  text := true
+
+target inflate_fast_ffi.o pkg : FilePath := do
+  let srcJob ← inflate_fast_ffi.c.fetch
+  let oFile := pkg.buildDir / "c" / "inflate_fast_ffi.o"
+  -- -O2/-DNDEBUG + LTO for the same reason as extend_within_ffi: hot in-place
+  -- fill/store whose lean.h helpers only inline away under optimization, bounds
+  -- carried by the Lean-side reference body (+ conformance sweeps).
+  let hardArgs := #["-O2", "-DNDEBUG"] ++ (← ltoFlags) ++
+    if Platform.isWindows then #[] else #["-fPIC"]
+  buildLeanO oFile srcJob #[] hardArgs
+
+extern_lib libinflate_fast_ffi pkg := do
+  let ffiO ← inflate_fast_ffi.o.fetch
+  let name := nameToStaticLib "inflate_fast_ffi"
+  buildStaticLib (pkg.staticLibDir / name) #[ffiO]
+
 lean_lib ZipTest where
   globs := #[.submodules `ZipTest]
 

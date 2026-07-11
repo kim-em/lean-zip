@@ -253,6 +253,61 @@ and #2795 needs no re-run after #2811 lands unless a post-#2811 profile shows
 `lean_byte_array_push` becoming a materially larger self-time share of the
 rebalanced decode.
 
+**#2799 verdict (2026-07-08): fastloop / write-once cursor decode — confirmed a
+real end-to-end throughput win, +6.2% geomean on the pre-registered libdeflate
+streams, the proof is now justified.** The follow-up probe to #2795 (which killed
+the *store-call*-removal motivation and demanded #2799 rest on what it
+*additionally* removes: the per-literal size-bump/guard bookkeeping and bounds
+discipline). Two spikes in a quarantined `Zip/Native/InflateFast.lean` (NOT on
+any production path; `Inflate.inflate` unchanged), exact-size path only
+(`sizeHint` = true decompressed length, pre-extended once via
+`ByteArray.presize`; back-references written in place at the cursor via a new
+`ByteArray.copyWithinAt` FFI primitive):
+
+- **`goCur` (set! cursor):** `goTreeFreeU` with `output.push` → `set!` at an
+  `outPos` cursor; input side byte-identical, isolating the output-write cost.
+- **`goCurU` (uset fastloop — the actual #2799 shape):** a per-symbol margin
+  guard `outPos + 299 ≤ output.size` gating a branch-free body with proven-bounds
+  `uset` literals (real omega proof from the margin, **no `sorry`**) and no
+  per-literal max-size check; the <299-byte tail delegates to `goCur`.
+
+**Absolute end-to-end decode throughput** (`inflate-profile` MB/s, loop-only
+timing so startup/sanity excluded, best-of-5, averaged over two sweeps <1%
+spread; **libdeflate level-6 streams** — the dense pre-registered workload;
+libdeflate built via `shell.nix` + `LIBDEFLATE_LDFLAGS=-ldeflate`; this machine):
+
+| file | mix | native | set! | uset | libdeflate |
+|---|---|---|---|---|---|
+| dickens (10.2M text) | literal-heavy | 280.7 | 299.0 (+6.5%) | **304.0 (+8.3%)** | 994 |
+| x-ray (8.5M image) | literal-heavy | 182.2 | 192.4 (+5.6%) | **193.0 (+5.9%)** | 595 |
+| nci (33.6M chem) | match-heavy | 903.2 | 940.2 (+4.1%) | **943.2 (+4.4%)** | 2033 |
+| **geomean gain** | | | **+5.4%** | **+6.2%** | — |
+
+The win is **microarchitectural** — eliminating the realloc/regrow churn on the
+growing `push` buffer and the RC traffic on its header, not an instruction-count
+reduction (instruction counts were flat-to-up and ±4% layout-sensitive, so they
+are not the metric; throughput is). **Stated per the probe's decision rule:** the
+architecture is real, correct (byte-identical on all corpora + block types + RLE,
+guarded by `ZipTest/InflateFast.lean`), and lands **in the ballpark of #2799's
+pre-registered 7–10%** — literal-heavy `dickens` +8.3% is inside the band,
+match-heavy `nci` +4.4% is the low end, exactly the predicted shape. `uset` adds
+~0.8pp geomean over the plain `set!` cursor, concentrated on `dickens` (+1.7pp)
+where dropping the per-literal bounds/max-size checks pays.
+
+**Consequence:** the win justifies proceeding to the equivalence proof (the
+heaviest proof surface in the repo: write-once cursor equivalence through the
+exact-size buffer + the 299-margin invariant), which this benchmark-first probe
+has cleared the bar for; the `set!` cursor is a valid cheaper-to-prove fallback
+at ~0.8pp less. **Correction to an earlier draft of this entry:** a first pass
+measured on zlib streams with a whole-process `perf stat` cycle count and
+reported only −3.5% cycles ("half the estimate", "do not prove"). That was wrong
+— the cycle count carried the ±4% layout artifact and the one-time sanity decode;
+the clean best-of-5 loop-only throughput on the pre-registered libdeflate streams
+above is the number that stands. The reproducible probe (both spikes, FFI
+primitives, conformance test, `decode-fast{,-u}` + `decode-ld` modes) is landed
+by this PR, quarantined (not re-exported by `Zip`); `Inflate.inflate` is
+untouched and #2799's full production-integration scope stays open.
+
 **W5.P1 comparative component profile (2026-06-12, perf, alice29, per-compressor
 windows, normalized to compressor-attributable samples; nix/Lean startup noise
 excluded; miniz attribution degraded — inline monolith):**

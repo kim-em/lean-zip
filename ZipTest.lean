@@ -15,6 +15,7 @@ import ZipTest.CompressFixtures
 import ZipTest.Utf8Fixtures
 import ZipTest.NativeChecksum
 import ZipTest.NativeInflate
+import ZipTest.InflateFast
 import ZipTest.NativeGzip
 import ZipTest.NativeIntegration
 import ZipTest.NativeScale
@@ -46,6 +47,7 @@ def main : IO Unit := do
   ZipTest.Utf8Fixtures.tests
   ZipTest.NativeChecksum.tests
   ZipTest.NativeInflate.tests
+  ZipTest.InflateFast.tests
   ZipTest.InflateTable.tests
   ZipTest.InflateTable.canonicalTests
   ZipTest.InflateTable.subtableTests
