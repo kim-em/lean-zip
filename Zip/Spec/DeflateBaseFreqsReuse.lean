@@ -97,7 +97,7 @@ theorem deflateRawBasePPrepF_obsFreqs (data : ByteArray) (toks : Array UInt32) (
       = deflateRawBasePPrep data toks := by
   rw [deflateObsSplitSizedFreqsP_snd, deflateRawBasePPrepF_tokenFreqsP]
 
-/-- **Byte-identity of the reuse dispatch.** The levels-6–8 size-arbitrated pair
+/-- **Byte-identity of the reuse dispatch.** The levels-5–8 size-arbitrated pair
     selected by the frequency-reusing dispatch is the *same prepared pair* the
     original dispatch selected: identical prepared sizes, identical tie, identical
     emit thunk. The base candidate reuses the split-sizing frequencies, but nothing

@@ -1,18 +1,31 @@
 import Zip
 
-/-! # gate-sweep — intermediate lazy-gate (`goodMatch`) + probe-depth sweep at the split tier
+/-! # gate-sweep — lazy-gate/probe-depth sweep, now regridding the L5 slot
 
-The #2737 `mid-sweep` grid only ever tried `goodMatch ∈ {8, 259}` (full gating
-vs. disabled). This sweep probes the *intermediate* gate values at the L6 split
-config: with the gate at `g`, a first match of length ≥ `g` skips the lazy
-`pos+1` lookahead walk entirely — on match-rich files that deletes a large
-fraction of the second chain walks for a ratio cost that shrinks as `g` grows.
-Also grids the lazy probe depth (`lazyDepth`, production `chain/2`; #2781
-suggests `/4`) and deeper chains re-paired with a gate.
+Originally the intermediate `goodMatch` sweep at the L6 split config (#2781/
+#2824 grid history preserved in git). This revision points the same harness at
+the **L5 slot**: the committed dashboard has L5 (single-block, chain 128, gate
+off, probe /2, no singleton) 15.6% *inside* the L4↔L6 mixing line — it predates
+the hash3-singleton (#2824), gm/ld re-grid (#2825), and greedy re-grid (#2830)
+landings. The grid pits cheaper single-block points against shallow split-tier
+points (with and without the hash3 singleton) for the L5 ratio band.
 
-Ratio rows go through the *exact* production L6–L8 dispatch (sized prep,
-base-vs-obs-split arbitration — the same code `deflateRaw` runs), so `out`
-is byte-for-byte what the shipped encoder would emit at that config.
+Each `Cfg` now carries a `split` flag: `split = true` rows go through the
+*exact* production L6–L8 dispatch (sized prep, base-vs-obs-split arbitration —
+the same code `deflateRaw` runs at the split tier); `split = false` rows go through the
+production single-block base path (`deflateRawBasePPrep`, forced — exactly
+`deflateRawBaseP`, the L4–L5 dispatch), so `out` is byte-for-byte what the
+shipped encoder would emit at that config. The grid includes the pre-re-grid
+production L4, L5, and L6 knob rows as anchors: the old L5 was the
+certification row (byte-identical to `deflateRaw · 5` on pre-re-grid master,
+checked per-file against the extra `prod-deflateRaw-l5` ratio row), and L4/L6
+let the mixing line be computed in this harness's own units.
+
+Verdict (landed as the L5 re-grid): `split-noh3-c24-gm64-ld6` — every deeper
+single-block point stayed 3-4% inside the L4↔L6 blend, every split point
+cleared it, and c24/gm64/ld6 peaked at +4% with the old L5's speed at −0.53pp
+weighted ratio. Since that landing, `prod-deflateRaw-l5` matches the
+`split-noh3-c24-gm64-ld6` row (production L5) rather than `prod-l5-single-*`.
 
     <file>,<label>,<inBytes>,<outBytes>
 
@@ -33,34 +46,48 @@ structure Cfg where
   nl : Nat
   lazyD : Nat
   h3 : Bool := false
+  split : Bool := true
 
-/-- The grid: production L6 first (the certification row — must reproduce the
-    shipped L6 bytes), then gate values, probe depths, and deeper chains. -/
+/-- The grid: the production L5 row first (the certification row — single-block,
+    must reproduce the shipped L5 bytes), the production L4/L6 rows as mixing-line
+    anchors, then the L5-slot candidates: cheaper single-block points, shallow
+    split points without the singleton, and shallow split points with it. -/
 def cfgs : List Cfg := [
-  ⟨"h3-prod-c64-gm259-ld32",  64, 259, 65, 32, true⟩,
-  ⟨"noh3-c64-gm259-ld32",     64, 259, 65, 32, false⟩,
-  ⟨"h3-ld16",                 64, 259, 65, 16, true⟩,
-  ⟨"h3-gm64",                 64,  64, 65, 32, true⟩,
-  ⟨"h3-gm64-ld16",            64,  64, 65, 16, true⟩,
-  ⟨"h3-gm32-ld16",            64,  32, 65, 16, true⟩,
-  ⟨"h3-c48-gm259-ld24",       48, 259, 65, 24, true⟩,
-  ⟨"h3-c48-gm64-ld16",        48,  64, 65, 16, true⟩,
-  ⟨"h3-c96-gm259-ld48",       96, 259, 65, 48, true⟩,
-  ⟨"h3-ld8",                  64, 259, 65,  8, true⟩,
-  ⟨"h3-gm64-ld8",             64,  64, 65,  8, true⟩ ]
+  ⟨"prod-l5-single-c128-gm259-ld64", 128, 259,  65, 64, false, false⟩,
+  ⟨"prod-l4-single-c64-gm8-ld32",     64,   8, 258, 32, false, false⟩,
+  ⟨"prod-l6-split-h3-c64-gm64-ld8",   64,  64,  65,  8, true,  true⟩,
+  ⟨"single-c64-gm259-ld32",           64, 259,  65, 32, false, false⟩,
+  ⟨"single-c96-gm64-ld24",            96,  64,  65, 24, false, false⟩,
+  ⟨"single-c128-gm64-ld16",          128,  64,  65, 16, false, false⟩,
+  ⟨"split-noh3-c32-gm64-ld8",         32,  64,  65,  8, false, true⟩,
+  ⟨"split-noh3-c48-gm64-ld12",        48,  64,  65, 12, false, true⟩,
+  ⟨"split-noh3-c64-gm32-ld8",         64,  32,  65,  8, false, true⟩,
+  ⟨"split-h3-c32-gm64-ld8",           32,  64,  65,  8, true,  true⟩,
+  ⟨"split-h3-c48-gm64-ld12",          48,  64,  65, 12, true,  true⟩,
+  ⟨"split-h3-c24-gm32-ld6",           24,  32,  65,  6, true,  true⟩,
+  -- Edge extension: the first grid's best margin sat at its shallowest no-h3
+  -- chain (c32), so probe one step past the edge in both singleton modes.
+  ⟨"split-noh3-c24-gm64-ld6",         24,  64,  65,  6, false, true⟩,
+  ⟨"split-noh3-c16-gm64-ld4",         16,  64,  65,  4, false, true⟩,
+  ⟨"split-h3-c16-gm64-ld4",           16,  64,  65,  4, true,  true⟩ ]
 
-/-- One config through the exact production split-tier dispatch (the L6–L7
-    arm of `deflateRaw`: sized preps, obs-split arbitration, winner emitted). -/
+/-- One config through the exact production dispatch for its mode: `split = true`
+    is the split-tier arm of `deflateRaw` (sized preps, obs-split arbitration,
+    winner emitted); `split = false` is the single-block lazy-base arm (`deflateRawBasePPrep`
+    forced — definitionally `deflateRawBaseP`). -/
 def runCfg (cfg : Cfg) (data : ByteArray) : Nat :=
   let ptokens := lz77ChainLazyIterPMerged data cfg.chain 32768 1000000000 cfg.gm cfg.nl cfg.lazyD cfg.h3
-  let cuts := chooseSplitsHeuristicP ptokens data.size
-  let withObs : Nat × (Unit → ByteArray) :=
-    if cuts.isEmpty then deflateRawBasePPrep data ptokens
-    else
-      let obsFreqs := deflateObsSplitSizedFreqsP data ptokens cuts
-      let basePrep := deflateRawBasePPrepF data ptokens obsFreqs.2
-      if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
-  (withObs.2 ()).size
+  if cfg.split then
+    let cuts := chooseSplitsHeuristicP ptokens data.size
+    let withObs : Nat × (Unit → ByteArray) :=
+      if cuts.isEmpty then deflateRawBasePPrep data ptokens
+      else
+        let obsFreqs := deflateObsSplitSizedFreqsP data ptokens cuts
+        let basePrep := deflateRawBasePPrepF data ptokens obsFreqs.2
+        if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
+    (withObs.2 ()).size
+  else
+    ((deflateRawBasePPrep data ptokens).2 ()).size
 
 def timeMain (paths : List String) : IO Unit := do
   let mut files : List ByteArray := []
@@ -83,6 +110,9 @@ def ratioMain (paths : List String) : IO Unit := do
   for path in paths do
     let data ← IO.FS.readBinFile path
     let name := (path.splitOn "/").getLastD path
+    -- Certification reference: the *actual* production level-5 output (through
+    -- `deflateRaw`, prescan included) — the `prod-l5-single-*` row must match it.
+    IO.println s!"{name},prod-deflateRaw-l5,{data.size},{(Zip.Native.Deflate.deflateRaw data 5).size}"
     for cfg in cfgs do
       IO.println s!"{name},{cfg.label},{data.size},{runCfg cfg data}"
       (← IO.getStdout).flush
