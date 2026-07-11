@@ -14,7 +14,7 @@ Proves the unified roundtrip theorem for `deflateRaw`:
 `deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is a stored
 block; level ≥ 1 runs the single-block cost-model dispatch `deflateRawBase`
 (stored / fixed / dynamic, all sized from one hash-chain token pass, emitting
-only the smallest); levels 6–8 additionally compare the cross-block
+only the smallest); levels 5–8 additionally compare the cross-block
 shared-window split at the observation-divergence boundaries (#2737) against
 that base via `pickSmaller`, so the split is a first-class candidate that can
 only ever win; and levels 9/10 compare the near-optimal / exact-DP candidates
@@ -128,7 +128,7 @@ set_option maxRecDepth 8000 in
     This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
     `maxOutputSize` large enough to hold the input. The incompressible pre-scan
     and the level-0 path both dispatch to `deflateStoredPure` directly; the
-    cost-model stored fallback is covered by `deflateRawBase`; the level-6–8
+    cost-model stored fallback is covered by `deflateRawBase`; the level-5–8
     size-arbitrated split (`emitSmallerBy`, #2753) and level-9/10 optimal
     candidates each emit one of concretely-roundtripping blocks. -/
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
@@ -199,10 +199,10 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
               exact inflate_pickSmaller _ _ data maxOutputSize
                 (inflate_deflateRawBase data level _ hsize)
                 (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
-          · -- levels 6–8: obs-split candidate, `hwithObs`
+          · -- levels 5–8: obs-split candidate, `hwithObs`
             exact hwithObs _ rfl
       · split
-        · -- levels 4–5: the lazy-tier base candidate, unchanged
+        · -- level 4: the lazy-tier base candidate, unchanged
           exact inflate_deflateRawBase data level _ hsize
         · -- levels 1–3: fused greedy base candidate, byte-identical to
           -- `deflateRawBase` (`deflateRawBaseF_eq`)
@@ -353,10 +353,10 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
                   bits = contentBits ++ padding ∧ padding.length < 8)
                 _ _ (deflateRawBase_pad data level)
                 (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
-          · -- levels 6–8
+          · -- levels 5–8
             exact hwithObs _ rfl
       · split
-        · -- levels 4–5: lazy-tier base, unchanged
+        · -- level 4: lazy-tier base, unchanged
           exact deflateRawBase_pad data level
         · -- levels 1–3: fused greedy base (`deflateRawBaseF_eq`)
           rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
@@ -585,10 +585,10 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
                     remaining.length < 8)
                 _ _ (deflateRawBase_goR_pad data level)
                 (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
-          · -- levels 6–8
+          · -- levels 5–8
             exact hwithObs _ rfl
       · split
-        · -- levels 4–5: lazy-tier base, unchanged
+        · -- level 4: lazy-tier base, unchanged
           exact deflateRawBase_goR_pad data level
         · -- levels 1–3: fused greedy base (`deflateRawBaseF_eq`)
           rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]

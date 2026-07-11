@@ -651,10 +651,16 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
 
     The mid-band values are the `mid-sweep` optimum for the #2737 ladder
     (Silesia grid over chain × `goodMatch` × split, then interleaved pinned
-    timing): L4 = 64 (with the lazy gate, the old L5 point), L5 = 128 (gate
-    off — `goodMatch` buys more ratio per cycle than deepening the chain, so
-    L5 = (128, gate off) dominates the old L7 = (256, gate off)). **L6's depth
-    drops back to 64 on purpose**: the split tier starts there, and at equal
+    timing): L4 = 64 (with the lazy gate, the old L5 point). **L5 = 24 since
+    the L5 re-grid** (`gate-sweep`, run after the hash3 singleton #2824, gm/ld
+    re-grid #2825, and greedy re-grid #2830 landings): the old L5 = (128,
+    single-block, gate off) had fallen ~14% inside the L4↔L6 mixing line — the
+    recent landings made the split tier so much cheaper that a shallow-chain
+    *split* point (chain 24, gate 64, probe /4, no singleton) matches the old
+    L5's speed while banking −0.53pp weighted-Silesia ratio (0.3302 → 0.3249),
+    +4% above the blend; every deeper single-block point stayed inside it.
+    **L6's depth drops back to 64 on purpose** (the split tier historically
+    started there): at equal
     cycles the observation-divergence split + a shallow chain beats a deep
     chain without the split — the block-split, not the chain, is L6's budget.
     **L7 also sits at 64 since the post-singleton re-grid** (the hash3
@@ -689,7 +695,7 @@ def chainDepth (level : UInt8) : Nat :=
   else if level ≤ 2 then 8
   else if level ≤ 3 then 16
   else if level ≤ 4 then 64
-  else if level ≤ 5 then 128
+  else if level ≤ 5 then 24
   else if level ≤ 7 then 64
   else if level ≤ 8 then 512
   else 1024
@@ -719,14 +725,17 @@ def insertCap (level : UInt8) : Nat :=
 
     Only L4 keeps the full gate (#2737 `mid-sweep`): disabling it gains ~16bp of
     Silesia geomean ratio at *any* chain depth — more ratio per cycle than
-    deepening the chain — so every level from 5 up spends its first budget
-    increment here. **Exception: L6 gates at 64 since the hash3-singleton
+    deepening the chain. **Exception: L6 gates at 64 since the hash3-singleton
     re-grid** — with the singleton paying the ratio bill, (gate 64, ld/8)
     buys +8% weighted speed for +0.09pp, the point that strictly dominates
-    miniz_oxide L6; L7 keeps the gate off and the old L6 ratio point. -/
+    miniz_oxide L6; L7 keeps the gate off and the old L6 ratio point.
+    **L5 also gates at 64 since the L5 re-grid** (`gate-sweep`, see
+    `chainDepth`): the winning shallow split point pairs the intermediate gate
+    with its chain-24 walk — at that depth the gate's skipped lookahead probes
+    are most of the lazy tier's marginal cost. -/
 def goodMatch (level : UInt8) : Nat :=
   if level ≤ 4 then 8
-  else if level == 6 then 64
+  else if level ≤ 6 then 64
   else 259
 
 /-- Per-level `niceLen` cutoff (libdeflate `nice_match_length`, `deflate_compress.c`):
@@ -763,7 +772,7 @@ def niceLen (level : UInt8) : Nat :=
 
 /-- Lazy lookahead probe depth (libdeflate `deflate_compress.c`): the second
     `chainWalk` at `pos+1` runs at *half* the `pos` walk's `chainDepth`, not full
-    depth. Since the `goodMatch` gate is disabled at L5+ (`goodMatch = 259`), every
+    depth. Since the `goodMatch` gate is disabled at L7+ (`goodMatch = 259`), every
     matched position otherwise pays two full-depth chain walks; libdeflate probes
     its first lookahead at half depth (and its second at quarter) and still holds
     better ratios than us, so the deferral quality a half-depth probe gives up is
@@ -774,14 +783,19 @@ def niceLen (level : UInt8) : Nat :=
     `goodMatch = 64` gate it buys +8% weighted-Silesia speed for +0.09pp on a
     tier where the hash3 singleton already banked −0.28pp — the resulting
     (0.3205, ~36.5 MB/s) point strictly dominates miniz_oxide L6. L7 (the old
-    L6 config) stays at `/2`.
+    L6 config) stays at `/2`. **L5 probes at `/4` since the L5 re-grid**
+    (`gate-sweep`, see `chainDepth`): the winning (chain 24, gate 64) split
+    point took its probe at 6 — deep enough to keep the deferral wins the
+    gate lets through, half the cost of the `/2` default.
 
     Only levels ≥ 4 (the lazy `deflate_slow` tier) consult this; the greedy
     matcher (1–3) has no lookahead. Depth is a pure heuristic — the chain is
     re-verified at emission (`chainWalk_spec` holds for any fuel) — so any value
     keeps the encoder contracts. -/
 def lazyDepth (level : UInt8) : Nat :=
-  if level == 6 then chainDepth level / 8 else chainDepth level / 2
+  if level == 5 then chainDepth level / 4
+  else if level == 6 then chainDepth level / 8
+  else chainDepth level / 2
 
 /-- Enable the hash3 length-3 singleton at the split tier (levels 6–8). Our
     lazy matcher walks hash4-keyed chains only, so length-3 matches are invisible
@@ -789,8 +803,10 @@ def lazyDepth (level : UInt8) : Nat :=
     this is our whole weighted-ratio deficit to miniz_oxide L6. The singleton
     probe (`h3Seed`, TOO_FAR-capped) restores them at −0.28pp corpus-weighted
     Silesia ratio for ≤~5% matcher speed. L1–L5 keep the probe-free loops (the
-    #2742 verdict against probing the fast band stands); L9/L10 already carry
-    their own singleton in the cache build. -/
+    #2742 verdict against probing the fast band stands, and the L5 re-grid
+    retested the singleton at L5's shallow split points — every h3 row fell
+    below the no-h3 frontier there); L9/L10 already carry their own singleton
+    in the cache build. -/
 def useH3Level (level : UInt8) : Bool := decide (6 ≤ level ∧ level ≤ 8)
 
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
@@ -1242,7 +1258,7 @@ def deflateDynamicBlocksSharedSized (data : ByteArray) (toks : Array LZ77Token) 
 The libdeflate-style divergence heuristic and the shared-window block emitter,
 both walking the `packTok`-encoded `UInt32` stream directly — the packed twins
 of `chooseSplitsHeuristic` and `emitSharedBlocksAt`. This is what lets the
-mid-band levels (6–8) afford per-block Huffman trees at all: the per-block
+mid-band levels (5–8) afford per-block Huffman trees at all: the per-block
 frequency pass runs on `tokenFreqsP` (dense packed tables) and the emit on
 `emitTokensWithCodesP`, so the split candidate never materializes boxed
 `LZ77Token`s and never touches the `findTableCode` linear scans. At level 8 the
@@ -1538,7 +1554,7 @@ def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : Array UInt32)
     (`deflateObsSplitSizedFreqsP_snd`), the whole-stream histogram the base
     candidate needs — derived here by folding the per-block frequencies the
     sizing pass already built, instead of a second whole-stream `tokenFreqsP`
-    walk. `deflateRaw` (levels 6–8, cuts non-empty) forces this once and feeds
+    walk. `deflateRaw` (levels 5–8, cuts non-empty) forces this once and feeds
     component 2 to `deflateRawBasePPrepF`. -/
 def deflateObsSplitSizedFreqsP (data : ByteArray) (toks : Array UInt32)
     (cuts : List Nat) : (Nat × (Unit → ByteArray)) × (Array Nat × Array Nat) :=
@@ -1672,7 +1688,7 @@ theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : Array UInt32) :
 
 /-- `deflateRawBasePPrep` with the whole-stream frequencies supplied as a
     parameter instead of recomputed via `tokenFreqsP ptokens` (#2772). When the
-    levels-6–8 split has cuts, `deflateRaw` passes the frequencies the split-sizing
+    levels-5–8 split has cuts, `deflateRaw` passes the frequencies the split-sizing
     pass already summed (`deflateObsSplitSizedFreqsP`'s component 2, provably
     `tokenFreqsP ptokens`), so the base candidate skips the second whole-stream
     frequency walk. At `f = tokenFreqsP ptokens` this is definitionally
@@ -1950,7 +1966,7 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     (The zlib/FFI bindings are a separate 0–9 path and are unchanged.)
 
     Level 0 = stored; levels 1–5 run the single-block cost-model dispatch
-    (`deflateRawBase`); levels 6–8 (#2737) additionally try the cross-block
+    (`deflateRawBase`); levels 5–8 (#2737, L5 since the L5 re-grid) additionally try the cross-block
     (shared-window) split candidate — one whole-file match pass, token stream
     partitioned per block, references cross block boundaries — with the
     partition chosen by the packed observation-divergence heuristic
@@ -2033,17 +2049,21 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     guarantees we never regress below the base. All branches are
     roundtrip-verified.
 
-    The split tier starts at level 6 (#2737; previously level ≥ 8, and before
-    that ≥ 7 — see #2698 for that history): with the boundaries chosen by the
-    cheap streaming heuristic and the whole split pipeline on packed tokens,
-    the candidates are **sized with their per-block trees captured**
-    (`deflateRawBasePPrep` / `deflateDynamicBlocksSharedAtSizedP`) and only the
-    winner is emitted (#2753), reusing the trees the sizing pass already built —
-    so exactly one emit pass runs instead of two (three at L8). Levels 4–5 stay
-    single-block on purpose — they carry the old mid-band's high-speed points
-    (even a size-only split pass would push them off that territory), while
-    levels 6–8 spend the same cycles on per-block trees instead of deeper
-    chains. Levels 1–3 (`deflate_fast`, emit-bound) stay single-block greedy.
+    The split tier starts at level 5 (the L5 re-grid; previously level ≥ 6 per
+    #2737, before that ≥ 8, and before that ≥ 7 — see #2698 for that history):
+    with the boundaries chosen by the cheap streaming heuristic and the whole
+    split pipeline on packed tokens, the candidates are **sized with their
+    per-block trees captured** (`deflateRawBasePPrep` /
+    `deflateDynamicBlocksSharedAtSizedP`) and only the winner is emitted
+    (#2753), reusing the trees the sizing pass already built — so exactly one
+    emit pass runs instead of two (three at L8). Level 4 stays single-block on
+    purpose — it carries the old mid-band's high-speed point (even a size-only
+    split pass would push it off that territory). L5 joined the split tier in
+    the re-grid: post-#2824/#2825/#2830 the old single-block L5 sat ~14%
+    inside the L4↔L6 mixing line, and a shallow split point (chain 24, gate
+    64, probe /4, no singleton) matches its speed at −0.53pp weighted-Silesia
+    ratio — the split's per-block trees buy more than the deep chain did.
+    Levels 1–3 (`deflate_fast`, emit-bound) stay single-block greedy.
 
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
     short-circuited on the first compressible region) and, on unambiguously
@@ -2055,7 +2075,7 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
 def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if incompressiblePrescan data then deflateStoredPure data
-  else if 6 ≤ level then
+  else if 5 ≤ level then
     -- One *packed* matcher pass shared by the base and shared-split candidates
     -- (the matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
     -- Both candidates consume the packed words end-to-end (freqs *and* emit):
@@ -2091,7 +2111,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
         pickSmaller (deflateRawBaseP data ptokens)
           (deflateDynamicBlocksOptimalWindowed data sharedTokChunk)
     else
-      -- Levels 6–8: base vs cross-block shared-window split at the
+      -- Levels 5–8: base vs cross-block shared-window split at the
       -- observation-divergence boundaries (#2737),
       -- **size-arbitrated** (#2753). Both candidates are *prepared* — sized to
       -- their flushed byte count with per-block trees captured
