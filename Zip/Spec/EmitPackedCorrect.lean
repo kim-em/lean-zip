@@ -281,15 +281,25 @@ private theorem packCodeEntry_write (bw : BitWriter) (e : UInt16 × UInt8) :
     bv_decide
   rw [packCodeEntry_len, hcode, BitWriter.writeRevCode_eq]
 
+/-- The extra-bit count of any code word is a byte field (`&&& 0xFF`), so it is
+    always below 256 — the bound `writeRevCodeExtra_eq` needs to stay faithful. -/
+private theorem codeExtra_lt_256 (w : UInt32) : codeExtra w < 256 := by
+  unfold codeExtra
+  have h : (w >>> 8) &&& 0xFF < 256 := by bv_decide
+  simpa using UInt32.lt_iff_toNat_lt.mp h
+
 /-- The packed-table reference emit is the pair-table one over `packCodeTab`:
     identical branch structure, each table read recovered by
-    `packCodeEntry_code`/`packCodeEntry_len`. -/
+    `packCodeEntry_code`/`packCodeEntry_len`, and each fused huff+extra write
+    unfused back to the two-call form (`writeRevCodeExtra_eq`, whose byte-field
+    extra-count bound is `codeExtra_lt_256`). -/
 private theorem emitRefWithCodesPT_eq (bw : BitWriter)
     (litCodes distCodes : Array (UInt16 × UInt8)) (w : UInt32) :
     emitRefWithCodesPT bw (packCodeTab litCodes) (packCodeTab distCodes) w =
       emitRefWithCodesP bw litCodes distCodes w := by
   unfold emitRefWithCodesPT emitRefWithCodesP
-  simp only [packCodeTab, Array.size_map, Array.getElem_map, packCodeEntry_write]
+  simp only [packCodeTab, Array.size_map, Array.getElem_map, packCodeEntry_write,
+    BitWriter.writeRevCodeExtra_eq, codeExtra_lt_256]
   rfl
 
 /-- The packed-table emit loop is the pair-table one over `packCodeTab`, for

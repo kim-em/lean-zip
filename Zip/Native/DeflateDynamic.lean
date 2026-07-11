@@ -156,14 +156,12 @@ def packCodeTab (t : Array (UInt16 × UInt8)) : Array UInt32 :=
   let idx := codeIdx lw
   if hlitlt : idx + 257 < litT.size then
     let e := litT[idx + 257]
-    let bw := bw.writeRevCode e.toUInt16 (e >>> 16).toUInt8
-    let bw := bw.writeBits (codeExtra lw) (codeVal lw)
+    let bw := bw.writeRevCodeExtra e.toUInt16 (e >>> 16).toUInt8 (codeExtra lw) (codeVal lw)
     let dw := distCodeWord ((w &&& 0xFFFF).toNat)
     let dIdx := codeIdx dw
     if hdistlt : dIdx < distT.size then
       let de := distT[dIdx]
-      let bw := bw.writeRevCode de.toUInt16 (de >>> 16).toUInt8
-      bw.writeBits (codeExtra dw) (codeVal dw)
+      bw.writeRevCodeExtra de.toUInt16 (de >>> 16).toUInt8 (codeExtra dw) (codeVal dw)
     else bw
   else bw
 

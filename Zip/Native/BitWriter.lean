@@ -404,6 +404,85 @@ theorem writeRevCode_eq (bw : BitWriter) (code : UInt16) (len : UInt8) :
     generalize reverse16 code = r
     bv_decide]
 
+/-- Fused `writeRevCode` + `writeBits`: write a pre-reversed Huffman code of
+    `len` bits immediately followed by `extraCount` extra bits from `extraVal`,
+    as one accumulator merge whenever the combined field fits below the flush
+    threshold (the common case in the emit loop — a length/distance symbol plus
+    its extra bits). Equal to `(bw.writeRevCode rev len).writeBits extraCount
+    extraVal` (`writeRevCodeExtra_eq`); the flush-crossing case falls back to
+    the exact two-call composition so the `data`/pending split stays identical. -/
+@[inline] def writeRevCodeExtra (bw : BitWriter) (rev : UInt16) (len : UInt8)
+    (extraCount : Nat) (extraVal : UInt32) : BitWriter :=
+  let totalU : UInt32 := bw.bitCount.toUInt32 + len.toUInt32 + extraCount.toUInt32
+  if totalU < 32 then
+    let masked : UInt64 := extraVal.toUInt64 % (1 <<< extraCount.toUInt64)
+    let acc : UInt64 :=
+      (bw.bitBuf ||| (rev.toUInt64 <<< bw.bitCount.toUInt64))
+        ||| (masked <<< (bw.bitCount.toUInt64 + len.toUInt64))
+    ⟨bw.data, acc, totalU.toUInt8⟩
+  else
+    (bw.writeRevCode rev len).writeBits extraCount extraVal
+
+/-- `writeRevCode` below the flush threshold: when `bitCount + len < 32` no byte
+    drains, so the code's bits merge straight into the accumulator. -/
+theorem writeRevCode_noflush (bw : BitWriter) (rev : UInt16) (len : UInt8)
+    (h : bw.bitCount.toNat + len.toNat < 32) :
+    bw.writeRevCode rev len =
+      ⟨bw.data, bw.bitBuf ||| (rev.toUInt64 <<< bw.bitCount.toUInt64),
+        (bw.bitCount.toUInt32 + len.toUInt32).toUInt8⟩ := by
+  unfold writeRevCode
+  have htot : (bw.bitCount.toUInt32 + len.toUInt32).toNat = bw.bitCount.toNat + len.toNat := by
+    rw [UInt32.toNat_add, UInt8.toNat_toUInt32, UInt8.toNat_toUInt32, Nat.mod_eq_of_lt (by omega)]
+  rw [if_neg]
+  intro hge
+  have := UInt32.le_iff_toNat_le.mp hge
+  simp only [htot, UInt32.reduceToNat] at this
+  omega
+
+/-- The fused `writeRevCodeExtra` is the two-call `writeRevCode`/`writeBits`
+    composition. The `extraCount < 256` bound (every DEFLATE extra-bit count is
+    a byte field, `codeExtra ≤ 255`) keeps the `UInt32` field-total faithful so
+    the fast-path guard `totalU < 32` reflects the true pending count; below it
+    neither sub-write drains a byte, so both fields land in one accumulator. -/
+theorem writeRevCodeExtra_eq (bw : BitWriter) (rev : UInt16) (len : UInt8)
+    (extraCount : Nat) (extraVal : UInt32) (hext : extraCount < 256) :
+    bw.writeRevCodeExtra rev len extraCount extraVal =
+      (bw.writeRevCode rev len).writeBits extraCount extraVal := by
+  have hbc := UInt8.toNat_lt bw.bitCount
+  have hln := UInt8.toNat_lt len
+  have htotU : (bw.bitCount.toUInt32 + len.toUInt32 + extraCount.toUInt32).toNat
+      = bw.bitCount.toNat + len.toNat + extraCount := by
+    rw [UInt32.toNat_add, UInt32.toNat_add, UInt8.toNat_toUInt32, UInt8.toNat_toUInt32,
+      Nat.toUInt32_eq, UInt32.toNat_ofNat']
+    omega
+  simp only [writeRevCodeExtra]
+  split
+  next hlt =>
+    -- Fast path: the field total is below the flush threshold.
+    have hltN : bw.bitCount.toNat + len.toNat + extraCount < 32 := by
+      have := UInt32.lt_iff_toNat_lt.mp hlt
+      simpa [htotU] using this
+    rw [writeBits_def, writeRevCode_noflush bw rev len (by omega)]
+    -- writeBits on the no-flush writer, its `flushBatched` stays below threshold.
+    have hbc' : ((bw.bitCount.toUInt32 + len.toUInt32).toUInt8).toNat = bw.bitCount.toNat + len.toNat := by
+      rw [UInt32.toNat_toUInt8, UInt32.toNat_add, UInt8.toNat_toUInt32, UInt8.toNat_toUInt32,
+        Nat.mod_eq_of_lt (by omega), Nat.mod_eq_of_lt (by omega)]
+    unfold flushBatched
+    rw [if_neg (by simp only [hbc', flushThreshold]; omega)]
+    -- Both sides are `⟨bw.data, acc, count⟩`; match the accumulator and count.
+    have hshift : ((bw.bitCount.toUInt32 + len.toUInt32).toUInt8).toUInt64
+        = bw.bitCount.toUInt64 + len.toUInt64 := by
+      apply UInt64.toNat_inj.mp
+      rw [UInt64.toNat_add, UInt8.toNat_toUInt64, UInt8.toNat_toUInt64, UInt8.toNat_toUInt64,
+        hbc', Nat.mod_eq_of_lt (by omega)]
+    congr 1
+    · rw [hshift]
+    · apply UInt8.toNat_inj.mp
+      dsimp only
+      rw [UInt32.toNat_toUInt8, htotU, hbc', Nat.toUInt8_eq, UInt8.toNat_ofNat']
+  next hge =>
+    rfl
+
 /-- Flush all pending bits, padding the final partial byte with zeros. Drains
     every whole pending byte (`bitCount` may hold up to 31 bits under batching),
     then the final partial byte. Returns the final ByteArray. -/
