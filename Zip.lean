@@ -43,6 +43,8 @@ import Zip.Native.BitWriter
 import Zip.Native.Deflate
 import Zip.Native.DeflateDynamic
 import Zip.Native.DeflateFreqs
+import Zip.Native.DeflateFreqsFused
+import Zip.Spec.DeflateFreqsFusedCorrect
 import Zip.Native.DeflateParse
 import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.LZ77OptimalCorrect

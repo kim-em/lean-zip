@@ -356,6 +356,10 @@ lean_exe «gate-sweep» where
 lean_exe «huff-bench» where
   root := `ZipHuffBench
 
+@[default_target]
+lean_exe «freq-fusion» where
+  root := `ZipFreqFusion
+
 -- Single-decoder inflate profiling driver: `decode` mode runs native inflate
 -- alone, so a `perf record` of that process attributes cleanly (see bench/README.md).
 @[default_target]

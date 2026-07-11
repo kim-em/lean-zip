@@ -201,7 +201,13 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
                 (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
           · -- levels 6–8: obs-split candidate, `hwithObs`
             exact hwithObs _ rfl
-      · exact inflate_deflateRawBase data level _ hsize
+      · split
+        · -- levels 4–5: the lazy-tier base candidate, unchanged
+          exact inflate_deflateRawBase data level _ hsize
+        · -- levels 1–3: fused greedy base candidate, byte-identical to
+          -- `deflateRawBase` (`deflateRawBaseF_eq`)
+          rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
+          exact inflate_deflateRawBase data level _ hsize
 
 /-- Padding decomposition for the compressed-block dispatch. -/
 theorem deflateCompressed_pad (data : ByteArray) (level : UInt8) :
@@ -349,7 +355,12 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
                 (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
           · -- levels 6–8
             exact hwithObs _ rfl
-      · exact deflateRawBase_pad data level
+      · split
+        · -- levels 4–5: lazy-tier base, unchanged
+          exact deflateRawBase_pad data level
+        · -- levels 1–3: fused greedy base (`deflateRawBaseF_eq`)
+          rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
+          exact deflateRawBase_pad data level
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
     the level 2-4 path and the level ≥ 5 fixed candidate (both `= deflateLazy`). -/
@@ -576,6 +587,11 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
                 (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
           · -- levels 6–8
             exact hwithObs _ rfl
-      · exact deflateRawBase_goR_pad data level
+      · split
+        · -- levels 4–5: lazy-tier base, unchanged
+          exact deflateRawBase_goR_pad data level
+        · -- levels 1–3: fused greedy base (`deflateRawBaseF_eq`)
+          rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
+          exact deflateRawBase_goR_pad data level
 
 end Zip.Native.Deflate
