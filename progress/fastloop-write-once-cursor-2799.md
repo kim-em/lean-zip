@@ -117,6 +117,19 @@ size hint `out.size` yields the same bytes. The full dependency chain, all
 `lake build` + `lake exe test` green. The file is standalone (not imported by
 `Zip`), so production and CI stay `sorry`-free regardless.
 
+**Rebased onto master and CI-green (2026-07-11).** Master (`#2819`) evolved the
+reference decoder to libdeflate-style subtables — the separate fixed tables /
+`buildLongDecodeWithCount` were replaced by `buildTreeFreeWithCount` (a
+`DecodeTable × LongDecode` pair). Because `goCur_eq`, both block bridges, and
+`goCur_size` are all *generic* in the decode table (they only need
+`packed.size = 2^fastBits`), the entire correctness proof survived untouched. The
+only adaptation was mechanical: the cursor spike's `inflateLoopCur` /
+`inflateLoopCurU` now build tables via `buildTreeFreeWithCount` (matching the
+reference `inflateLoopTreeFree`), with `maxRecDepth`/`maxHeartbeats` raised on the
+loop defs since that construction is deeper to elaborate inline. The full branch —
+proof + spike + benchmarks — is green on CI (build-and-test, bench, animation-sync,
+check) rebased on top of master.
+
 ## Proof progress — the core bisimulation `goCur_eq` is COMPLETE (2026-07-09)
 
 `goCur_eq` — the write-once-cursor decode agrees with `goTreeFreeU` — is now
