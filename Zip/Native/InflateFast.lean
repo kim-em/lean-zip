@@ -380,6 +380,8 @@ def decodeHuffmanCurTablesU (br : BitReader) (output : ByteArray) (outPos : Nat)
   else
     throw "Inflate: input too large for cursor decode"
 
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 2000000 in
 /-- Tree-free block loop at a cursor (mirror of `Inflate.inflateLoopTreeFree`),
     threading the `outPos` write cursor, through the `set!` cursor. -/
 def inflateLoopCur (br : BitReader) (output : ByteArray) (outPos : Nat)
@@ -392,18 +394,16 @@ def inflateLoopCur (br : BitReader) (output : ByteArray) (outPos : Nat)
       pure (o, p, b)
     | 1 =>
       decodeHuffmanCurTables br₂ output outPos
-        Inflate.fixedLitTable Inflate.fixedDistTable Inflate.fixedLitLD Inflate.fixedDistLD maxOut
-        (HuffTree.buildTableCanonicalFastWithCount_size Inflate.fixedLitLengths Inflate.fixedLitCount 15)
+        Inflate.fixedLitTF.1 Inflate.fixedDistTF.1 Inflate.fixedLitTF.2 Inflate.fixedDistTF.2 maxOut
+        (HuffTree.buildTreeFreeWithCount_size Inflate.fixedLitLengths Inflate.fixedLitCount 15)
     | 2 => do
       let (litLens, distLens, br₃) ← Inflate.decodeDynamicLengthsOnly br₂
       let litCount := HuffTree.countLengthsFast litLens 15
       let distCount := HuffTree.countLengthsFast distLens 15
-      let litTable := HuffTree.buildTableCanonicalFastWithCount litLens litCount 15
-      let distTable := HuffTree.buildTableCanonicalFastWithCount distLens distCount 15
-      let litLD := HuffTree.buildLongDecodeWithCount litLens litCount 15
-      let distLD := HuffTree.buildLongDecodeWithCount distLens distCount 15
-      decodeHuffmanCurTables br₃ output outPos litTable distTable litLD distLD maxOut
-        (HuffTree.buildTableCanonicalFastWithCount_size litLens litCount 15)
+      let litTF := HuffTree.buildTreeFreeWithCount litLens litCount 15
+      let distTF := HuffTree.buildTreeFreeWithCount distLens distCount 15
+      decodeHuffmanCurTables br₃ output outPos litTF.1 distTF.1 litTF.2 distTF.2 maxOut
+        (HuffTree.buildTreeFreeWithCount_size litLens litCount 15)
     | _ => throw s!"Inflate: reserved block type {btype}"
   if bfinal == 1 then
     return (output', outPos', br'.alignToByte.pos)
@@ -417,6 +417,8 @@ def inflateLoopCur (br : BitReader) (output : ByteArray) (outPos : Nat)
   termination_by dataSize * 8 - br.bitPos
   decreasing_by all_goals omega
 
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 2000000 in
 /-- `inflateLoopCur` through the branch-free `uset` fastloop `goCurU`. -/
 def inflateLoopCurU (br : BitReader) (output : ByteArray) (outPos : Nat)
     (maxOut dataSize : Nat) : Except String (ByteArray × Nat × Nat) := do
@@ -428,18 +430,16 @@ def inflateLoopCurU (br : BitReader) (output : ByteArray) (outPos : Nat)
       pure (o, p, b)
     | 1 =>
       decodeHuffmanCurTablesU br₂ output outPos
-        Inflate.fixedLitTable Inflate.fixedDistTable Inflate.fixedLitLD Inflate.fixedDistLD maxOut
-        (HuffTree.buildTableCanonicalFastWithCount_size Inflate.fixedLitLengths Inflate.fixedLitCount 15)
+        Inflate.fixedLitTF.1 Inflate.fixedDistTF.1 Inflate.fixedLitTF.2 Inflate.fixedDistTF.2 maxOut
+        (HuffTree.buildTreeFreeWithCount_size Inflate.fixedLitLengths Inflate.fixedLitCount 15)
     | 2 => do
       let (litLens, distLens, br₃) ← Inflate.decodeDynamicLengthsOnly br₂
       let litCount := HuffTree.countLengthsFast litLens 15
       let distCount := HuffTree.countLengthsFast distLens 15
-      let litTable := HuffTree.buildTableCanonicalFastWithCount litLens litCount 15
-      let distTable := HuffTree.buildTableCanonicalFastWithCount distLens distCount 15
-      let litLD := HuffTree.buildLongDecodeWithCount litLens litCount 15
-      let distLD := HuffTree.buildLongDecodeWithCount distLens distCount 15
-      decodeHuffmanCurTablesU br₃ output outPos litTable distTable litLD distLD maxOut
-        (HuffTree.buildTableCanonicalFastWithCount_size litLens litCount 15)
+      let litTF := HuffTree.buildTreeFreeWithCount litLens litCount 15
+      let distTF := HuffTree.buildTreeFreeWithCount distLens distCount 15
+      decodeHuffmanCurTablesU br₃ output outPos litTF.1 distTF.1 litTF.2 distTF.2 maxOut
+        (HuffTree.buildTreeFreeWithCount_size litLens litCount 15)
     | _ => throw s!"Inflate: reserved block type {btype}"
   if bfinal == 1 then
     return (output', outPos', br'.alignToByte.pos)

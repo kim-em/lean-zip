@@ -1079,8 +1079,8 @@ theorem inflateLoopTreeFree_size_mono (maxOut dataSize : Nat)
     · -- reserved
       exact absurd href (by simp [bind, Except.bind])
 
-set_option maxRecDepth 4096 in
-set_option maxHeartbeats 1000000 in
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 2000000 in
 /-- **The block-loop bisimulation.** The cursor block loop `inflateLoopCur`
     re-represents the reference `inflateLoopTreeFree` (which is `Inflate.inflate`,
     `inflateRaw_eq_loop`): identical `btype` dispatch and `BitReader` bookkeeping,
