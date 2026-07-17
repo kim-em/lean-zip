@@ -904,10 +904,16 @@ arbitrary-choice-array validity proofs (`LZ77OptimalCorrect`) apply verbatim.
 Everything here is heuristic — opaque to correctness. -/
 
 /-- Candidate-cache chain-walk depth for the L9-fast tier. Lower than
-    `optChainDepth = 256`: the sweep's outside-the-frontier gain peaks at 64
-    (48 and 96 within a point), trading a little ratio for the ~4× cheaper cache
-    build. Pure ratio/speed knob. -/
-def fastChainDepth : Nat := 64
+    `optChainDepth = 256`: the original sweep's outside-the-frontier gain
+    peaked at 64, and the #2782 cheap-optimal spike re-gridded it against the
+    L8↔L9 mixing line after the split-tier/singleton landings moved the
+    neighbors — **32 now beats the line by +8.8%** (weighted Silesia
+    0.3149 @ 6.0 MB/s vs 0.3137 @ 4.3 at depth 64, ~+40% L9 speed for
+    +0.12pp), and the old depth-64 point stays covered by the new-L9↔L10
+    blend. Depth 16 falls 26% below the line (cache too weak); 64 remains
+    the better ratio point but is dominated as a ladder rung. Pure
+    ratio/speed knob. -/
+def fastChainDepth : Nat := 32
 
 /-- `scanCands` without the `scanBounds` length-code boundary scan: price each
     candidate slot only at its full cached length. Slots hold strictly
