@@ -1654,4 +1654,19 @@ theorem inflateFastU_eq (data : ByteArray) (maxOut : Nat) (out : ByteArray)
   rw [Inflate.inflateFastU, inflateRawFastU_eq]
   exact hf
 
+/-- **Production dispatch is correct on valid input.** The exact-size fastloop
+    path `inflateSized … (exact := true)` returns exactly `inflate`'s bytes
+    whenever the stream is valid: the fast branch is `inflateFastU_eq`, and the
+    fallback / empty-output branch is `inflate` itself (the `sizeHint` is inert).
+    So promoting the fastloop into a decode path guarded by an exact, bounded
+    size never changes the accepted bytes. -/
+theorem inflateSized_eq (data : ByteArray) (maxOut : Nat) (out : ByteArray)
+    (hds : data.size < USize.size) (hosz : out.size < USize.size) (hle : out.size ≤ maxOut)
+    (href : Inflate.inflate data maxOut = .ok out) :
+    Inflate.inflateSized data maxOut out.size true = .ok out := by
+  rw [Inflate.inflateSized]
+  split
+  · rw [inflateFastU_eq data maxOut out hds hosz hle href]
+  · rw [Inflate.inflate_sizeHint_eq]; exact href
+
 end Zip.Native

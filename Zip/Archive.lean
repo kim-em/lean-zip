@@ -4,6 +4,7 @@ import ZipCommon.Handle
 import Zip.RawDeflate
 import Zip.Native.Inflate
 import Zip.Native.InflateTreeFree
+import Zip.Native.InflateFast
 import Zip.Native.Crc32
 
 /-! ZIP archive construction and extraction: entry metadata, local/central headers,
@@ -1237,7 +1238,19 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
         -- above `nativePresizeCap` simply keep a few of their doublings.
         let sizeHint := min (min entry.uncompressedSize.toNat maxEntrySize.toNat)
           (min (compData.size * 1100) nativePresizeCap)
-        match Zip.Native.Inflate.inflate compData maxEntrySize.toNat (sizeHint := sizeHint) with
+        -- When none of the clamps bit (`sizeHint` is the entry's exact declared
+        -- `uncompressedSize`), the hint is both exact and bounded by
+        -- `nativePresizeCap`, so decode with the verified branch-free `uset`
+        -- fastloop (`inflateSized … (exact := true)`): every byte is written once
+        -- into the pre-extended buffer, dropping the per-literal capacity and
+        -- output-size checks. It returns exactly `inflate`'s bytes on a valid
+        -- stream (`Zip.Native.inflateSized_eq`); a wrong `uncompressedSize` or a
+        -- corrupt stream makes it fall back to the push-based `inflate`, and the
+        -- CRC32 check below guards a mismatch either way. When a clamp bit
+        -- (`exact = false`) the hint stays an inert capacity hint on `inflate`.
+        let exact := sizeHint == entry.uncompressedSize.toNat
+        match Zip.Native.Inflate.inflateSized compData maxEntrySize.toNat
+            (sizeHint := sizeHint) (exact := exact) with
         | .ok data => pure data
         | .error msg => throw (IO.userError s!"zip: native inflate failed for {label}: {msg}")
       else RawDeflate.decompress compData maxEntrySize
