@@ -47,6 +47,24 @@ dependency order:
   loop bisimulation on the presized buffer, then the exact-size contract makes
   `cf = out`).
 
+## The branch-free `uset` margin-split fastloop (the actual #2799 shape)
+
+On top of the `set!` cursor, the same file proves the **branch-free `uset`
+fastloop** `goCurU` — a per-symbol margin guard `outPos + 299 ≤ output.size`
+gates a hot body that writes literals with proven-bounds `uset` (no per-literal
+bounds check), drops the per-symbol max-size check, and swaps `goCur`'s
+`outPos + length > maxOut` guard for the cheaper `length > 258` — equal to
+`goCur`. The centrepiece **`goCurU_eq`** is a 9-case functional induction over
+`goCurU.induct` under the invariant `output.size ≤ maxOut`: the margin makes
+`goCur`'s output-size checks unreachable (`ByteArray.uset_eq_set!`), and
+`length_le_258` (a `decide` over the 29-entry length table, with `takeBits_lt`)
+makes the two length guards agree; the `< 299`-byte tail is a literal delegation
+to `goCur`. It lifts — every block decoder preserving the buffer size
+(`decodeStoredCur_size`, `decodeHuffmanCurTables_size`, via `goCur_size`) — through
+`decodeHuffmanCurTablesU_eq`, the block-loop bisimulation `inflateLoopCurU_eq`,
+and `inflateRawFastU_eq`, to **`inflateFastU_eq`**: the `uset` fastloop composed
+with `inflateFast_eq` decodes `Inflate.inflate` correctly.
+
 This file is standalone — not imported by `Zip` — so `Inflate.inflate` and CI
 stay `sorry`-free regardless.
 -/
@@ -1273,5 +1291,367 @@ theorem inflateFast_eq (data : ByteArray) (maxOut : Nat) (out : ByteArray)
   simp only [bind, Except.bind, hcur]
   rw [if_neg (by rw [hcfsz]; simp)]
   simp only [pure, Except.pure, hcfout]
+
+/-! ### The `uset` margin-split fastloop (`goCurU`) equals the `set!` cursor (`goCur`)
+
+`goCurU` is `goCur` with the per-symbol capacity checks hoisted to a single
+`outPos + 299 ≤ output.size` margin guard, `uset` in place of `set!`, and a
+`length ≤ 258` check in the match (the copy overshoots into the margin). Under
+`output.size ≤ maxOut` the two are result-identical: the margin discharges every
+per-symbol `maxOut` check `goCur` makes, `uset = set!` in bounds, and DEFLATE
+`length ≤ 258` kills the extra check. The `< 299`-byte tail literally *is* `goCur`. -/
+
+/-- `uset` (proven-bounds) is `set!` in bounds. -/
+theorem ByteArray.uset_eq_set! (a : ByteArray) (i : USize) (v : UInt8) (h : i.toNat < a.size) :
+    a.uset i v h = a.set! i.toNat v := by
+  have hd : i.toNat < a.data.size := h
+  simp only [ByteArray.uset, ByteArray.set!, Array.uset_eq_set, Array.set!_eq_setIfInBounds]
+  congr 1
+  rw [Array.setIfInBounds, dif_pos hd]
+
+/-- `takeBits` extracts a value below `2^n`. -/
+theorem takeBits_lt (bitBuf : UInt64) (cnt n : Nat) (hn : n < 64) {v : Nat} {bb : UInt64} {c : Nat}
+    (h : InflateBuf.takeBits bitBuf cnt n = .ok (v, bb, c)) : v < 2 ^ n := by
+  unfold InflateBuf.takeBits at h
+  split at h
+  · exact absurd h (by simp)
+  · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h; exact InflateBuf.mask_lt hn
+
+/-- **DEFLATE lengths are ≤ 258**: `lengthBase[idx] + eb ≤ 258` for any extra-bits
+    value below `2^lengthExtra[idx]`. Kills `goCurU`'s `length > 258` guard. -/
+theorem length_le_258 (idx : Nat) (h : idx < Inflate.lengthBase.size) {eb : Nat}
+    (heb : eb < 2 ^ (Inflate.lengthExtra[idx]'(by
+      rw [Inflate.lengthExtra_size]; rw [Inflate.lengthBase_size] at h; exact h)).toNat) :
+    Inflate.lengthBase[idx].toNat + eb ≤ 258 := by
+  have hex : idx < Inflate.lengthExtra.size := by
+    rw [Inflate.lengthExtra_size, ← Inflate.lengthBase_size]; exact h
+  have hkey : ∀ k : Fin Inflate.lengthBase.size,
+      Inflate.lengthBase[k.val]!.toNat + 2 ^ Inflate.lengthExtra[k.val]!.toNat ≤ 259 := by
+    decide
+  have hk := hkey ⟨idx, h⟩
+  rw [getElem!_pos Inflate.lengthBase idx h, getElem!_pos Inflate.lengthExtra idx hex] at hk
+  omega
+
+/-- Length extra-bit counts are all `< 64` (they max out at 5); needed to invoke
+    `takeBits_lt` at the DEFLATE length codes. -/
+theorem lengthExtra_lt_64 (idx : Nat) (h : idx < Inflate.lengthExtra.size) :
+    (Inflate.lengthExtra[idx]).toNat < 64 := by
+  have hkey : ∀ k : Fin Inflate.lengthExtra.size, Inflate.lengthExtra[k.val]!.toNat < 64 := by
+    decide
+  have hk := hkey ⟨idx, h⟩
+  rwa [getElem!_pos Inflate.lengthExtra idx h] at hk
+
+-- Force generation of the `goCurU` functional-induction principle.
+private def goCurU_induct_force := @Zip.Native.InflateBuf.goCurU.induct
+
+set_option maxRecDepth 8192 in
+/-- **The #2799 centrepiece**: the branch-free `uset` margin-split fastloop
+    `goCurU` computes exactly what the bounds-checked `set!` cursor `goCur` does,
+    given the invariant `output.size ≤ maxOut`. Under the per-symbol margin
+    (`outPos + 299 ≤ output.size`) `goCur`'s output-size checks can never fire,
+    `uset = set!` in bounds, and DEFLATE `length ≤ 258` makes `goCurU`'s cheaper
+    `length > 258` guard agree with `goCur`'s `outPos + length > maxOut`; the
+    `< 299`-byte tail is a literal delegation to `goCur`. -/
+theorem goCurU_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : HuffTree.LongDecode)
+    (maxBits : Nat) (data : ByteArray) (maxOut : Nat) (hsz : data.size < USize.size)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits) :
+    ∀ (pos : USize) (bitBuf : UInt64) (cnt : USize) (output : ByteArray) (outPos : USize),
+    output.size ≤ maxOut →
+    InflateBuf.goCurU litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt hsz hlp
+        output outPos
+      = goCur litTable distTable litLD distLD maxBits data maxOut pos bitBuf cnt hsz hlp
+        output outPos := by
+  intro pos bitBuf cnt output outPos
+  induction pos, bitBuf, cnt, output, outPos using InflateBuf.goCurU.induct
+    (litTable := litTable) (litLD := litLD) (maxBits := maxBits) (data := data)
+    (hsz := hsz) (hlp := hlp) with
+  | case1 pos bitBuf cnt output outPos hrc ih =>
+    intro hsize
+    rw [InflateBuf.goCurU, dif_pos hrc, goCur, dif_pos hrc]
+    exact ih hsize
+  | case2 pos bitBuf cnt output outPos hrc hm ent hlit ih =>
+    intro hsize
+    have hlt : outPos.toNat < output.size := by omega
+    have hmax : ¬ outPos.toNat ≥ maxOut := by omega
+    have hI := ih (by rw [ByteArray.uset_eq_set!, ByteArray.size_set!]; exact hsize)
+    rw [ByteArray.uset_eq_set!] at hI
+    rw [InflateBuf.goCurU, dif_neg hrc, dif_pos hm, dif_pos hlit, ByteArray.uset_eq_set!]
+    rw [goCur, dif_neg hrc, dif_pos hlit, if_neg hmax]
+    exact hI
+  | case3 pos bitBuf cnt output outPos hrc hm ent hlit estr hde =>
+    intro hsize
+    rw [InflateBuf.goCurU, dif_neg hrc, dif_pos hm, dif_neg hlit]
+    rw [goCur, dif_neg hrc, dif_neg hlit]
+    simp only [hde]
+  | case4 pos bitBuf cnt output outPos hrc hm ent hlit cnt0 sym bb c' used hde hsym hnp =>
+    intro hsize
+    have hmax : ¬ outPos.toNat ≥ maxOut := by omega
+    rw [InflateBuf.goCurU, dif_neg hrc, dif_pos hm, dif_neg hlit]
+    simp only [hde]
+    rw [if_pos hsym, dif_pos hnp]
+    rw [goCur, dif_neg hrc, dif_neg hlit]
+    simp only [hde]
+    rw [if_pos hsym, if_neg hmax, dif_pos hnp]
+  | case5 pos bitBuf cnt output outPos hrc hm ent hlit cnt0 sym bb c' used hde hsym hnp ih =>
+    intro hsize
+    have hlt : outPos.toNat < output.size := by omega
+    have hmax : ¬ outPos.toNat ≥ maxOut := by omega
+    have hI := ih (by rw [ByteArray.uset_eq_set!, ByteArray.size_set!]; exact hsize)
+    rw [ByteArray.uset_eq_set!] at hI
+    rw [InflateBuf.goCurU, dif_neg hrc, dif_pos hm, dif_neg hlit]
+    simp only [hde]
+    rw [if_pos hsym, dif_neg hnp, ByteArray.uset_eq_set!]
+    rw [goCur, dif_neg hrc, dif_neg hlit]
+    simp only [hde]
+    rw [if_pos hsym, if_neg hmax, dif_neg hnp]
+    exact hI
+  | case6 pos bitBuf cnt output outPos hrc hm ent hlit sym bb c' used hde hnlt heob =>
+    intro hsize
+    rw [InflateBuf.goCurU, dif_neg hrc, dif_pos hm, dif_neg hlit]
+    simp only [hde]
+    rw [if_neg hnlt, if_pos heob]
+    rw [goCur, dif_neg hrc, dif_neg hlit]
+    simp only [hde]
+    rw [if_neg hnlt, if_pos heob]
+  | case7 pos bitBuf cnt output outPos hrc hm ent hlit sym bb c' used hde hnlt hneob idx hidx =>
+    intro hsize
+    have hidx' : sym.toNat - 257 ≥ Inflate.lengthBase.size := hidx
+    rw [InflateBuf.goCurU, dif_neg hrc, dif_pos hm, dif_neg hlit]
+    simp only [hde]
+    rw [if_neg hnlt, if_neg hneob, dif_pos hidx']
+    rw [goCur, dif_neg hrc, dif_neg hlit]
+    simp only [hde]
+    rw [if_neg hnlt, if_neg hneob, dif_pos hidx']
+  | case8 pos bitBuf cnt output outPos hrc hm ent hlit cnt0 sym bb c' used hde hsym hneob idx hh base ih =>
+    intro hsize
+    have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
+    have hhc29 : sym.toNat - 257 < 29 := by
+      have := hhc; rw [Inflate.lengthBase_size] at this; omega
+    rw [InflateBuf.goCurU, dif_neg hrc, dif_pos hm, dif_neg hlit]
+    simp only [hde, if_neg hsym, if_neg hneob, dif_neg hhc]
+    rw [goCur, dif_neg hrc, dif_neg hlit]
+    simp only [hde, if_neg hsym, if_neg hneob, dif_neg hhc]
+    simp only [bind, Except.bind]
+    cases htb : InflateBuf.takeBits bb c'
+        (Inflate.lengthExtra[sym.toNat - 257]'(by rw [Inflate.lengthExtra_size]; omega)).toNat with
+    | error e => rfl
+    | ok pe =>
+      obtain ⟨eb, bb2, c2⟩ := pe
+      simp only []
+      cases hde2 : HuffTree.decodeSymCanon distLD distTable maxBits bb2 c2 with
+      | error e => rfl
+      | ok pd =>
+        obtain ⟨dsym, bb3, c3, dused⟩ := pd
+        simp only []
+        by_cases hdidx : dsym.toNat ≥ Inflate.distBase.size
+        · simp only [dif_pos hdidx]
+        · simp only [dif_neg hdidx]
+          cases htb2 : InflateBuf.takeBits bb3 c3
+              (Inflate.distExtra[dsym.toNat]'(by
+                rw [Inflate.distExtra_size]
+                simp only [Inflate.distBase_size, ge_iff_le, Nat.not_le] at hdidx; omega)).toNat with
+          | error e => rfl
+          | ok pd2 =>
+            obtain ⟨deb, bb4, c4⟩ := pd2
+            simp only []
+            by_cases hz : Inflate.distBase[dsym.toNat].toNat + deb = 0
+            · simp only [dif_pos hz]
+            · by_cases hds : Inflate.distBase[dsym.toNat].toNat + deb > outPos.toNat
+              · simp only [dif_neg hz, dif_pos hds]
+              · simp only [dif_neg hz, dif_neg hds]
+                have heblt : eb < 2 ^ (Inflate.lengthExtra[sym.toNat - 257]'(by
+                    rw [Inflate.lengthExtra_size]; omega)).toNat :=
+                  takeBits_lt bb c' _ (lengthExtra_lt_64 (sym.toNat - 257) (by
+                    rw [Inflate.lengthExtra_size]; omega)) htb
+                have hlen258 : Inflate.lengthBase[sym.toNat - 257].toNat + eb ≤ 258 :=
+                  length_le_258 (sym.toNat - 257) (by rw [Inflate.lengthBase_size]; omega) heblt
+                rw [dif_neg (show ¬ Inflate.lengthBase[sym.toNat - 257].toNat + eb > 258 by omega)]
+                rw [if_neg (show ¬ outPos.toNat + (Inflate.lengthBase[sym.toNat - 257].toNat + eb)
+                  > maxOut by omega)]
+                by_cases hnp : cnt.toNat ≤ c4
+                · simp only [dif_pos hnp]
+                · rw [dif_neg hnp, dif_neg hnp]
+                  exact ih eb dsym hdidx deb bb4 c4 hnp (by rw [copyWithinAt_size]; exact hsize)
+  | case9 pos bitBuf cnt output outPos hrc hm =>
+    intro hsize
+    rw [InflateBuf.goCurU, dif_neg hrc, dif_neg hm]
+
+/-- The `uset` fastloop block decoder agrees with the `set!` one (lifts `goCurU_eq`
+    through the shared `decodeHuffmanCurTables` scaffolding). -/
+theorem decodeHuffmanCurTablesU_eq (br : ZipCommon.BitReader) (output : ByteArray) (outPos : Nat)
+    (litTable distTable : HuffTree.DecodeTable) (litLD distLD : HuffTree.LongDecode) (maxOut : Nat)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits) (hsize : output.size ≤ maxOut) :
+    InflateBuf.decodeHuffmanCurTablesU br output outPos litTable distTable litLD distLD maxOut hlp
+      = InflateBuf.decodeHuffmanCurTables br output outPos litTable distTable litLD distLD maxOut hlp := by
+  unfold InflateBuf.decodeHuffmanCurTablesU InflateBuf.decodeHuffmanCurTables
+  simp only [goCurU_eq _ _ _ _ _ _ _ _ _ _ _ _ _ _ hsize]
+
+/-- `decodeStoredCur` preserves the buffer size (it only `set!`s the raw bytes in place). -/
+theorem decodeStoredCur_size {br : ZipCommon.BitReader} {output : ByteArray} {outPos maxOut : Nat}
+    {out : ByteArray} {p : Nat} {br' : ZipCommon.BitReader}
+    (h : InflateBuf.decodeStoredCur br output outPos maxOut = .ok (out, p, br')) :
+    out.size = output.size := by
+  rw [InflateBuf.decodeStoredCur] at h
+  cases h1 : br.readUInt16LE with
+  | error e => simp [h1, bind, Except.bind] at h
+  | ok r1 =>
+    obtain ⟨len, br1⟩ := r1
+    cases h2 : br1.readUInt16LE with
+    | error e => simp [h1, h2, bind, Except.bind] at h
+    | ok r2 =>
+      obtain ⟨nlen, br2⟩ := r2
+      cases h3 : br2.readBytes len.toNat with
+      | error e =>
+        simp only [h1, h2, h3, bind, Except.bind, pure, Except.pure] at h
+        split at h
+        · exact absurd h (by simp)
+        · split at h <;> exact absurd h (by simp)
+      | ok r3 =>
+        obtain ⟨bytes, br3⟩ := r3
+        simp only [h1, h2, h3, bind, Except.bind, pure, Except.pure] at h
+        split at h
+        · exact absurd h (by simp)
+        · split at h
+          · exact absurd h (by simp)
+          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨rfl, _, _⟩ := h
+            simp only [storedCopyLoop_size]
+
+/-- `decodeHuffmanCurTables` preserves the buffer size (it delegates to `goCur`,
+    which only writes in place). -/
+theorem decodeHuffmanCurTables_size {br : ZipCommon.BitReader} {output : ByteArray} {outPos : Nat}
+    {litTable distTable : HuffTree.DecodeTable} {litLD distLD : HuffTree.LongDecode} {maxOut : Nat}
+    {hlp : litTable.packed.size = 2 ^ HuffTree.fastBits}
+    {out : ByteArray} {p : Nat} {br' : ZipCommon.BitReader}
+    (h : InflateBuf.decodeHuffmanCurTables br output outPos litTable distTable litLD distLD maxOut hlp
+      = .ok (out, p, br')) :
+    out.size = output.size := by
+  rw [InflateBuf.decodeHuffmanCurTables] at h
+  split at h
+  split at h
+  · simp only [bind, Except.bind] at h
+    obtain ⟨pg, hg, h⟩ := bindOk' h
+    obtain ⟨og, oo, opp, obb, occ⟩ := pg
+    simp only [Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, _, _⟩ := h
+    exact goCur_size _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ hg
+  · exact absurd h (by simp)
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 2000000 in
+/-- **The `uset` block loop agrees with the `set!` block loop.** Identical block
+    dispatch and `BitReader` bookkeeping; the only per-block difference
+    (`decodeHuffmanCurTablesU` vs `decodeHuffmanCurTables`) is bridged by
+    `decodeHuffmanCurTablesU_eq`, and every block decoder preserves the buffer
+    size, so the invariant `output.size ≤ maxOut` threads through the recursion. -/
+theorem inflateLoopCurU_eq (maxOut dataSize : Nat) :
+    ∀ (br : ZipCommon.BitReader) (output : ByteArray) (outPos : Nat),
+    output.size ≤ maxOut →
+    InflateBuf.inflateLoopCurU br output outPos maxOut dataSize
+      = InflateBuf.inflateLoopCur br output outPos maxOut dataSize := by
+  intro br output outPos
+  induction br, output, outPos using InflateBuf.inflateLoopCurU.induct (dataSize := dataSize) with
+  | case1 br output outPos ih =>
+    intro hsize
+    rw [InflateBuf.inflateLoopCurU, InflateBuf.inflateLoopCur]
+    cases h1 : br.readBits 1 with
+    | error e => simp only [h1, bind, Except.bind]
+    | ok r1 =>
+      obtain ⟨bfinal, br₁⟩ := r1
+      cases h2 : br₁.readBits 2 with
+      | error e => simp only [h1, h2, bind, Except.bind]
+      | ok r2 =>
+        obtain ⟨btype, br₂⟩ := r2
+        have htail : ∀ (o' : ByteArray) (p' : Nat) (b' : ZipCommon.BitReader), o'.size ≤ maxOut →
+            (if bfinal == 1 then (pure (o', p', b'.alignToByte.pos) : Except String (ByteArray × Nat × Nat))
+             else if _h : b'.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+                  else if _h : dataSize * 8 < b'.bitPos then throw "Inflate: bit position out of range"
+                  else InflateBuf.inflateLoopCurU b' o' p' maxOut dataSize)
+          = (if bfinal == 1 then pure (o', p', b'.alignToByte.pos)
+             else if _h : b'.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+                  else if _h : dataSize * 8 < b'.bitPos then throw "Inflate: bit position out of range"
+                  else InflateBuf.inflateLoopCur b' o' p' maxOut dataSize) := by
+          intro o' p' b' ho'
+          by_cases hbf : (bfinal == 1) = true
+          · rw [if_pos hbf, if_pos hbf]
+          · rw [if_neg hbf, if_neg hbf]
+            by_cases hg1 : b'.bitPos ≤ br.bitPos
+            · rw [dif_pos hg1, dif_pos hg1]
+            · rw [dif_neg hg1, dif_neg hg1]
+              by_cases hg2 : dataSize * 8 < b'.bitPos
+              · rw [dif_pos hg2, dif_pos hg2]
+              · rw [dif_neg hg2, dif_neg hg2]; exact ih o' p' b' hg1 hg2 ho'
+        have hbtv : btype = 0 ∨ btype = 1 ∨ btype = 2 ∨ btype = 3 := by
+          have hb4 : btype.toNat < 4 := Inflate.readBits_lt (n := 2) (by omega) h2
+          rcases (show btype.toNat = 0 ∨ btype.toNat = 1 ∨ btype.toNat = 2 ∨ btype.toNat = 3 from by omega)
+            with h' | h' | h' | h'
+          · exact Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))
+          · exact Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl)))
+          · exact Or.inr (Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+          · exact Or.inr (Or.inr (Or.inr (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+        simp only [h1, h2, bind, Except.bind]
+        rcases hbtv with rfl | rfl | rfl | rfl
+        · cases hb : InflateBuf.decodeStoredCur br₂ output outPos maxOut with
+          | error e => simp only [hb, bind, Except.bind]
+          | ok r =>
+            obtain ⟨o', p', b'⟩ := r
+            simp only [hb, bind, Except.bind]
+            exact htail o' p' b' (by rw [decodeStoredCur_size hb]; exact hsize)
+        · rw [decodeHuffmanCurTablesU_eq _ _ _ _ _ _ _ _ _ hsize]
+          cases hb : InflateBuf.decodeHuffmanCurTables br₂ output outPos
+              Inflate.fixedLitTF.1 Inflate.fixedDistTF.1 Inflate.fixedLitTF.2 Inflate.fixedDistTF.2 maxOut
+              (HuffTree.buildTreeFreeWithCount_size Inflate.fixedLitLengths Inflate.fixedLitCount 15) with
+          | error e => simp only [hb, bind, Except.bind]
+          | ok r =>
+            obtain ⟨o', p', b'⟩ := r
+            simp only [hb, bind, Except.bind]
+            exact htail o' p' b' (by rw [decodeHuffmanCurTables_size hb]; exact hsize)
+        · cases hd : Inflate.decodeDynamicLengthsOnly br₂ with
+          | error e => simp only [hd, bind, Except.bind]
+          | ok rd =>
+            obtain ⟨litLens, distLens, br₃⟩ := rd
+            simp only [hd, bind, Except.bind]
+            rw [decodeHuffmanCurTablesU_eq _ _ _ _ _ _ _ _ _ hsize]
+            cases hb : InflateBuf.decodeHuffmanCurTables br₃ output outPos
+                (HuffTree.buildTreeFreeWithCount litLens (HuffTree.countLengthsFast litLens 15) 15).1
+                (HuffTree.buildTreeFreeWithCount distLens (HuffTree.countLengthsFast distLens 15) 15).1
+                (HuffTree.buildTreeFreeWithCount litLens (HuffTree.countLengthsFast litLens 15) 15).2
+                (HuffTree.buildTreeFreeWithCount distLens (HuffTree.countLengthsFast distLens 15) 15).2
+                maxOut
+                (HuffTree.buildTreeFreeWithCount_size litLens (HuffTree.countLengthsFast litLens 15) 15) with
+            | error e => simp only [hb, bind, Except.bind]
+            | ok r =>
+              obtain ⟨o', p', b'⟩ := r
+              simp only [hb, bind, Except.bind]
+              exact htail o' p' b' (by rw [decodeHuffmanCurTables_size hb]; exact hsize)
+        · rfl
+
+/-- `inflateRawFastU` (branch-free `uset` fastloop) agrees with `inflateRawFast`
+    (the `set!` cursor), by `inflateLoopCurU_eq` on the presized buffer. -/
+theorem inflateRawFastU_eq (data : ByteArray) (startPos maxOutputSize sizeHint : Nat) :
+    Inflate.inflateRawFastU data startPos maxOutputSize sizeHint
+      = Inflate.inflateRawFast data startPos maxOutputSize sizeHint := by
+  unfold Inflate.inflateRawFastU Inflate.inflateRawFast
+  by_cases hg : sizeHint > maxOutputSize
+  · simp only [if_pos hg, bind, Except.bind]
+  · have hpsz : (ByteArray.presize sizeHint).size = sizeHint := by
+      simp only [ByteArray.presize, ByteArray.size, Array.size_replicate]
+    simp only [if_neg hg, bind, Except.bind,
+      inflateLoopCurU_eq maxOutputSize data.size _ (ByteArray.presize sizeHint) 0
+        (by rw [hpsz]; omega)]
+
+/-- **Target (issue #2799): the branch-free `uset` margin-split fastloop decodes
+    correctly.** `inflateFastU` on the true decompressed size agrees with the
+    reference `Inflate.inflate`, via `inflateRawFastU_eq` (down to `goCurU_eq`)
+    composed with the `set!`-cursor correctness `inflateFast_eq`. -/
+theorem inflateFastU_eq (data : ByteArray) (maxOut : Nat) (out : ByteArray)
+    (hds : data.size < USize.size) (hosz : out.size < USize.size) (hle : out.size ≤ maxOut)
+    (href : Inflate.inflate data maxOut = .ok out) :
+    Inflate.inflateFastU data maxOut out.size = .ok out := by
+  have hf := inflateFast_eq data maxOut out hds hosz hle href
+  rw [Inflate.inflateFast] at hf
+  rw [Inflate.inflateFastU, inflateRawFastU_eq]
+  exact hf
 
 end Zip.Native

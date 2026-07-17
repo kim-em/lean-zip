@@ -233,3 +233,30 @@ decoder) stays open. The reproducible probe lives on this branch:
 `ZipTest/InflateFast.lean` guards correctness, and `Zip/Spec/InflateFastCorrect.lean`
 holds the verified foundational lemmas + the roadmap for the bisimulation and
 the lift to `inflateFast = inflate`.
+
+## Follow-up: the branch-free `uset` margin-split fastloop is now proven
+
+The `set!` cursor (`goCur`/`inflateFast`) was the scaffold; the actual #2799
+shape is the **branch-free `uset` fastloop** `goCurU` (a per-symbol margin guard
+`outPos + 299 ≤ output.size` gates a hot body using proven-bounds `uset`, drops
+the per-symbol max-size check, and replaces `goCur`'s `outPos + length > maxOut`
+guard with the cheaper `length > 258`). That is now verified equal to `goCur`
+and lifted end-to-end, all in `Zip/Spec/InflateFastCorrect.lean`:
+
+- **`goCurU_eq`** — the centrepiece: a 9-case functional induction over
+  `goCurU.induct` under the invariant `output.size ≤ maxOut`. Under the margin,
+  `goCur`'s output-size checks are unreachable and `uset = set!`
+  (`ByteArray.uset_eq_set!`); `length_le_258` (a `decide` over the 29-entry DEFLATE
+  length table, fed by `takeBits_lt`/`lengthExtra_lt_64`) makes the two length
+  guards agree; the `< 299`-byte tail is a literal delegation to `goCur`.
+- **size preservation** of the block decoders — `decodeStoredCur_size`
+  (via `storedCopyLoop_size`) and `decodeHuffmanCurTables_size` (via `goCur_size`)
+  — so the `output.size ≤ maxOut` invariant threads through the loop.
+- **`decodeHuffmanCurTablesU_eq`**, the block-loop bisimulation
+  **`inflateLoopCurU_eq`** (single-case `inflateLoopCurU.induct`), and
+  **`inflateRawFastU_eq`**.
+- **`inflateFastU_eq`**: composing `inflateRawFastU_eq` with `inflateFast_eq`,
+  the branch-free `uset` fastloop run at the exact size hint decodes
+  `Inflate.inflate` correctly.
+
+Still `sorry`-free; `lake build` + `lake exe test` green.
