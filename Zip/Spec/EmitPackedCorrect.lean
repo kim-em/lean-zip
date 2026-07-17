@@ -281,15 +281,25 @@ private theorem packCodeEntry_write (bw : BitWriter) (e : UInt16 × UInt8) :
     bv_decide
   rw [packCodeEntry_len, hcode, BitWriter.writeRevCode_eq]
 
+/-- The extra-bit count of any code word is a byte field (`&&& 0xFF`), so it is
+    always below 256 — the bound `writeRevCodeExtra_eq` needs to stay faithful. -/
+private theorem codeExtra_lt_256 (w : UInt32) : codeExtra w < 256 := by
+  unfold codeExtra
+  have h : (w >>> 8) &&& 0xFF < 256 := by bv_decide
+  simpa using UInt32.lt_iff_toNat_lt.mp h
+
 /-- The packed-table reference emit is the pair-table one over `packCodeTab`:
     identical branch structure, each table read recovered by
-    `packCodeEntry_code`/`packCodeEntry_len`. -/
+    `packCodeEntry_code`/`packCodeEntry_len`, and each fused huff+extra write
+    unfused back to the two-call form (`writeRevCodeExtra_eq`, whose byte-field
+    extra-count bound is `codeExtra_lt_256`). -/
 private theorem emitRefWithCodesPT_eq (bw : BitWriter)
     (litCodes distCodes : Array (UInt16 × UInt8)) (w : UInt32) :
     emitRefWithCodesPT bw (packCodeTab litCodes) (packCodeTab distCodes) w =
       emitRefWithCodesP bw litCodes distCodes w := by
   unfold emitRefWithCodesPT emitRefWithCodesP
-  simp only [packCodeTab, Array.size_map, Array.getElem_map, packCodeEntry_write]
+  simp only [packCodeTab, Array.size_map, Array.getElem_map, packCodeEntry_write,
+    BitWriter.writeRevCodeExtra_eq, codeExtra_lt_256]
   rfl
 
 /-- The packed-table emit loop is the pair-table one over `packCodeTab`, for
@@ -314,6 +324,45 @@ theorem emitTokensWithCodesPT_eq (bw : BitWriter) (ws : Array UInt32)
         exact ih _ (by omega) _ _ rfl
     · simp only [hi, ↓reduceDIte]
 
+
+/-- The USize-index emit loop is the `Nat`-index one at `i.toNat`: lockstep
+    induction on the remaining tokens, with the `USize` increment aligned by
+    the in-range step identity. -/
+theorem emitTokensWithCodesPTU_eq (bw : BitWriter) (ws : Array UInt32)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (hsz : ws.size < USize.size) (i : USize) :
+    emitTokensWithCodesPTU bw ws litT distT hlit hdist hsz i =
+      emitTokensWithCodesPT bw ws litT distT hlit hdist i.toNat := by
+  induction h : ws.size - i.toNat using Nat.strongRecOn generalizing bw i with
+  | _ n ih =>
+    unfold emitTokensWithCodesPTU emitTokensWithCodesPT
+    by_cases hi : i.toNat < ws.size
+    · have hstep : (i + 1).toNat = i.toNat + 1 := by
+        have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+        rw [USize.toNat_add, USize.toNat_one]; exact Nat.mod_eq_of_lt (by omega)
+      simp only [hi, ↓reduceDIte, Array.uget]
+      by_cases hc : ws[i.toNat] &&& ((1 : UInt32) <<< 31) = 0
+      · simp only [hc, ↓reduceIte]
+        rw [ih _ (by omega) _ _ rfl, hstep]
+      · simp only [hc, ↓reduceIte]
+        rw [ih _ (by omega) _ _ rfl, hstep]
+    · simp only [hi, ↓reduceDIte]
+
+/-- The guarded USize emit dispatch equals the `Nat` loop from `0`: the guard
+    hit rewrites through `emitTokensWithCodesPTU_eq` (with `(0 : USize).toNat = 0`),
+    the miss is definitional. -/
+theorem emitTokensWithCodesPTG_eq (bw : BitWriter) (ws : Array UInt32)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) :
+    emitTokensWithCodesPTG bw ws litT distT hlit hdist =
+      emitTokensWithCodesPT bw ws litT distT hlit hdist 0 := by
+  unfold emitTokensWithCodesPTG
+  split
+  · rw [emitTokensWithCodesPTU_eq]
+    simp only [USize.toNat_zero]
+  · rfl
+
 /-! ## The packed single-block cores equal the boxed ones -/
 
 /-- The packed fixed-block core is the boxed one over the `unpackTok` view:
@@ -332,6 +381,6 @@ theorem deflateDynamicBlockCoreP_eq (data : ByteArray) (ptoks : Array UInt32)
     deflateDynamicBlockCoreP data ptoks litLens distLens hlit hdist =
       deflateDynamicBlockCore data (ptoks.map unpackTok) litLens distLens hlit hdist := by
   unfold deflateDynamicBlockCoreP deflateDynamicBlockCore
-  simp only [emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
+  simp only [emitTokensWithCodesPTG_eq, emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
 
 end Zip.Native.Deflate

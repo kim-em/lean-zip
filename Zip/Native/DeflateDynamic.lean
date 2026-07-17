@@ -156,14 +156,12 @@ def packCodeTab (t : Array (UInt16 × UInt8)) : Array UInt32 :=
   let idx := codeIdx lw
   if hlitlt : idx + 257 < litT.size then
     let e := litT[idx + 257]
-    let bw := bw.writeRevCode e.toUInt16 (e >>> 16).toUInt8
-    let bw := bw.writeBits (codeExtra lw) (codeVal lw)
+    let bw := bw.writeRevCodeExtra e.toUInt16 (e >>> 16).toUInt8 (codeExtra lw) (codeVal lw)
     let dw := distCodeWord ((w &&& 0xFFFF).toNat)
     let dIdx := codeIdx dw
     if hdistlt : dIdx < distT.size then
       let de := distT[dIdx]
-      let bw := bw.writeRevCode de.toUInt16 (de >>> 16).toUInt8
-      bw.writeBits (codeExtra dw) (codeVal dw)
+      bw.writeRevCodeExtra de.toUInt16 (de >>> 16).toUInt8 (codeExtra dw) (codeVal dw)
     else bw
   else bw
 
@@ -189,6 +187,48 @@ def emitTokensWithCodesPT (bw : BitWriter) (tokens : Array UInt32)
   else bw
 termination_by tokens.size - i
 
+
+
+/-- USize-index twin of `emitTokensWithCodesPT` (measurement candidate): same
+    walk with the loop index in `USize`, `uget` token reads, and the
+    addressability witness `hsz` hoisted out of the loop. Equal to
+    `emitTokensWithCodesPT` at `i.toNat` (`emitTokensWithCodesPTU_eq`). -/
+def emitTokensWithCodesPTU (bw : BitWriter) (tokens : Array UInt32)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (hsz : tokens.size < USize.size)
+    (i : USize) : BitWriter :=
+  if h : i.toNat < tokens.size then
+    let w := tokens.uget i (by exact h)
+    have hstep : (i + 1).toNat = i.toNat + 1 := by
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      rw [USize.toNat_add, USize.toNat_one]; exact Nat.mod_eq_of_lt (by omega)
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      have : w.toUInt8.toNat < litT.size := by
+        have := UInt8.toNat_lt w.toUInt8; omega
+      let e := litT[w.toUInt8.toNat]
+      emitTokensWithCodesPTU (bw.writeRevCode e.toUInt16 (e >>> 16).toUInt8) tokens litT distT
+        hlit hdist hsz (i + 1)
+    else
+      emitTokensWithCodesPTU (emitRefWithCodesPT bw litT distT w) tokens litT distT
+        hlit hdist hsz (i + 1)
+  else bw
+termination_by tokens.size - i.toNat
+decreasing_by all_goals (rw [hstep]; omega)
+
+/-- Guarded dispatch to the USize emit loop: one `USize` round-trip check per
+    block unlocks the de-boxed index walk; the (never-taken) fallback is the
+    `Nat` loop, so this equals `emitTokensWithCodesPT ... 0`
+    (`emitTokensWithCodesPTG_eq`). -/
+@[inline] def emitTokensWithCodesPTG (bw : BitWriter) (tokens : Array UInt32)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
+  if hg : tokens.size.toUSize.toNat = tokens.size then
+    have hsz : tokens.size < USize.size := by
+      rw [← hg]; exact USize.toNat_lt_two_pow_numBits _
+    emitTokensWithCodesPTU bw tokens litT distT hlit hdist hsz 0
+  else
+    emitTokensWithCodesPT bw tokens litT distT hlit hdist 0
 
 /-- Write the dynamic Huffman tree header via BitWriter.
     This is the native equivalent of spec `encodeDynamicTrees`, writing
@@ -437,8 +477,8 @@ def deflateDynamicBlockCoreP (data : ByteArray) (tokens : Array UInt32)
       rw [packCodeTab_size]; exact hlit_size
     have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
       rw [packCodeTab_size]; exact hdist_size
-    let bw := emitTokensWithCodesPT bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
-      hlitT_size hdistT_size 0
+    let bw := emitTokensWithCodesPTG bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
+      hlitT_size hdistT_size
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
@@ -480,8 +520,8 @@ def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : Array UInt32)
       rw [packCodeTab_size]; exact hlit_size
     have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
       rw [packCodeTab_size]; exact hdist_size
-    let bw := emitTokensWithCodesPT bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
-      hlitT_size hdistT_size 0
+    let bw := emitTokensWithCodesPTG bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
+      hlitT_size hdistT_size
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
