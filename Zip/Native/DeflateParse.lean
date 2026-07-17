@@ -912,8 +912,15 @@ Everything here is heuristic — opaque to correctness. -/
     +0.12pp), and the old depth-64 point stays covered by the new-L9↔L10
     blend. Depth 16 falls 26% below the line (cache too weak); 64 remains
     the better ratio point but is dominated as a ladder rung. Pure
-    ratio/speed knob. -/
-def fastChainDepth : Nat := 32
+    ratio/speed knob.
+
+    #2782 postscript: depth 32 was implemented and measured in production —
+    weighted Silesia 0.3146 @ ~5.0 MB/s — and REJECTED by the mixing-frontier
+    test: the point lands 3.6% below the old L8↔L9 blend and leaves the old
+    depth-64 point uncovered by 3.4% (the spike's +8.8% margin belonged to the
+    standalone parse without the pipeline's floor and emit overheads). 64
+    stands. -/
+def fastChainDepth : Nat := 64
 
 /-- `scanCands` without the `scanBounds` length-code boundary scan: price each
     candidate slot only at its full cached length. Slots hold strictly
