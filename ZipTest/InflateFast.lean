@@ -1,14 +1,16 @@
 import ZipTest.Helpers
 import Zip.Native.InflateFast
 
-/-! Conformance tests for the write-once cursor decode spike (issue #2799).
+/-! Conformance tests for the write-once cursor decode (issue #2799).
 
     `Inflate.inflateFast` (`set!` cursor) and `Inflate.inflateFastU` (branch-free
-    `uset` fastloop) must produce byte-identical output to the production
+    `uset` fastloop) produce byte-identical output to the production
     `Inflate.inflate` on the **exact-size path** — the caller passes the true
-    decompressed length as `sizeHint`. These are not yet proven equivalent; this
-    test is the runtime guard that keeps the spike honest across corpora, block
-    types, and edge cases. -/
+    decompressed length as `sizeHint`. Both are proven equal to `inflate`
+    (`Zip.Spec.InflateFastCorrect.inflateFast_eq` / `inflateFastU_eq`); this test
+    is the runtime cross-check across corpora, block types, and edge cases. It
+    also exercises the production dispatch `Inflate.inflateSized`, including the
+    fallback taken on a wrong size hint. -/
 
 open Zip.Native
 
@@ -93,6 +95,17 @@ def ZipTest.InflateFast.checkOne (label : String) (data : ByteArray) (level : UI
     assert! b == data
     assert! b == refOut
   | .error e => throw (IO.userError s!"inflateFastU failed on {label} (level {level}): {e}")
+  -- Production dispatch `inflateSized`: the exact-size fast path, the inert
+  -- fallback (`exact := false`), and wrong hints (oversized and undersized) that
+  -- must reject in the fastloop and fall back to the push-based decoder — all
+  -- give `refOut` (the reverse-soundness / `inflateSized_agrees` guarantee).
+  for (tag, hint, exact) in
+      [("exact", data.size, true), ("inexact", data.size, false),
+       ("wrong-hint-over", data.size + 7, true), ("wrong-hint-under", data.size / 2, true),
+       ("exact-inert", data.size, false)] do
+    match Inflate.inflateSized compressed (sizeHint := hint) (exact := exact) with
+    | .ok b => assert! b == refOut
+    | .error e => throw (IO.userError s!"inflateSized {tag} failed on {label} (level {level}): {e}")
 
 def ZipTest.InflateFast.tests : IO Unit := do
   IO.println "  InflateFast (write-once cursor spike, #2799) tests..."
@@ -114,3 +127,10 @@ def ZipTest.InflateFast.tests : IO Unit := do
   -- Longer varied buffer (multiple dynamic blocks, long matches).
   let varied := ByteArray.mk (Array.ofFn (n := 40000) (fun i => (i.val % 251).toUInt8))
   ZipTest.InflateFast.checkOne "varied" varied
+  -- Margin-boundary sizes: the `uset` fastloop's per-symbol `outPos + 299 ≤
+  -- output.size` guard transitions here between the hot margin body and the
+  -- `< 299`-byte tail delegation to `goCur`. Sweep both sides across levels.
+  for n in [1, 2, 297, 298, 299, 300, 301, 557, 598, 599, 600, 601] do
+    let d := ByteArray.mk (Array.ofFn (n := n) (fun i => (i.val * 7 % 251).toUInt8))
+    for lvl in [0, 6, 9] do
+      ZipTest.InflateFast.checkOne s!"margin{n}@L{lvl}" d lvl.toUInt8

@@ -4,6 +4,7 @@ import ZipCommon.Handle
 import Zip.RawDeflate
 import Zip.Native.Inflate
 import Zip.Native.InflateTreeFree
+import Zip.Native.InflateFast
 import Zip.Native.Crc32
 
 /-! ZIP archive construction and extraction: entry metadata, local/central headers,
@@ -1237,7 +1238,25 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
         -- above `nativePresizeCap` simply keep a few of their doublings.
         let sizeHint := min (min entry.uncompressedSize.toNat maxEntrySize.toNat)
           (min (compData.size * 1100) nativePresizeCap)
-        match Zip.Native.Inflate.inflate compData maxEntrySize.toNat (sizeHint := sizeHint) with
+        -- When none of the clamps bit (`sizeHint` is the entry's exact declared
+        -- `uncompressedSize`), the hint is both exact and bounded by
+        -- `nativePresizeCap`, so decode with the verified branch-free `uset`
+        -- fastloop (`inflateSized … (exact := true)`): every byte is written once
+        -- into the pre-extended buffer, dropping the per-literal capacity and
+        -- output-size checks. `inflateSized` is proven equal to `inflate` for
+        -- every `USize`-representable input (`Zip.Native.inflateSized_agrees`,
+        -- under `maxOut < USize.size` — always true for in-memory `ByteArray`s on
+        -- a 64-bit target, the addressability regime every native decode proof in
+        -- this library assumes), so it never changes the decoded bytes: a wrong
+        -- `uncompressedSize` or a corrupt stream is rejected exactly as `inflate`
+        -- would reject it (the fastloop's exact-size contract rejects, then falls
+        -- back). The `maxEntrySize.toNat < USize.size` conjunct keeps the fast path
+        -- inside that proven regime on any platform. The CRC32 check below is ZIP
+        -- integrity, not a soundness backstop. When a clamp bit (`exact = false`)
+        -- the hint stays an inert capacity hint on `inflate`.
+        let exact := sizeHint == entry.uncompressedSize.toNat && maxEntrySize.toNat < USize.size
+        match Zip.Native.Inflate.inflateSized compData maxEntrySize.toNat
+            (sizeHint := sizeHint) (exact := exact) with
         | .ok data => pure data
         | .error msg => throw (IO.userError s!"zip: native inflate failed for {label}: {msg}")
       else RawDeflate.decompress compData maxEntrySize

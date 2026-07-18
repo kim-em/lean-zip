@@ -23,22 +23,24 @@ fallback — is identical, so an A/B of `inflateFast` against the production
 `Inflate.inflate` isolates exactly the per-symbol output-write cost (#2799's
 "remaining half").
 
-The equivalence to the reference decoder is **not yet proven** (the spike carries
-no `Zip.Spec` obligation). Per the issue's benchmark-first method, the proof is
-paid for only once the A/B confirms the win; until then `inflateFast` is NOT on
-any production path — `Inflate.inflate` is unchanged and stays the verified
-decoder, and this module is deliberately **not** re-exported by the top-level
-`Zip` (an `import Zip` does not surface these unproven APIs). `inflateFast` is
-exercised only by the `inflate-profile decode-fast` driver and the conformance
-test that asserts `inflateFast = inflate` output.
+The equivalence to the reference decoder is now **proven**: both cursor loops
+are `Zip.Spec.InflateFastCorrect.inflateFast_eq` / `inflateFastU_eq`, so on a
+valid stream at the exact size they return exactly `Inflate.inflate`'s bytes.
+The production dispatch `inflateSized` (below) uses the verified `uset` fastloop
+when the caller supplies an exact, bounded size and falls back to `inflate`
+otherwise; it is now wired into ZIP extraction (`Zip.Archive`, size from the
+central-directory `uncompressedSize`), so `import Zip` does surface it. The A/B
+driver `inflate-profile decode-fast` and the `inflateFast = inflate` conformance
+test remain.
 
-`inflateFast` is valid only on the **exact-size path**: the caller must pass a
+The fastloop is valid only on the **exact-size path**: the caller must pass a
 `sizeHint` equal to the true decompressed length (the archive workloads: gzip
 ISIZE, ZIP sizes). It pre-extends to `sizeHint`, rejects `sizeHint >
 maxOutputSize` up front (the fastloop drops the per-symbol max-size check under
 the margin), and errors unless the stream decodes to exactly `sizeHint` — the
-exact-size contract is executable, not silently truncated. The unknown-size
-chunked path is future work in the tracking issue.
+exact-size contract is executable, not silently truncated, so a wrong hint is
+caught and `inflateSized` falls back. The unknown-size chunked path is future
+work in the tracking issue.
 -/
 
 namespace ByteArray
@@ -503,6 +505,28 @@ def inflateFastU (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
     (sizeHint : Nat := 0) : Except String ByteArray := do
   let (output, _) ← inflateRawFastU data 0 maxOutputSize sizeHint
   return output
+
+/-- **Production fastloop dispatch.** When the caller knows the *exact*
+    decompressed size and has bounded it (`exact = true`, `sizeHint > 0` — the
+    ZIP local/central-directory `uncompressedSize`, the gzip ISIZE, both clamped
+    to a presize cap by the caller), decode with the verified branch-free `uset`
+    margin-split fastloop `inflateFastU`, which writes every byte once into the
+    pre-extended buffer. It is proven to return exactly `inflate`'s bytes on a
+    valid stream at the exact size (`Zip.Native.inflateSized_eq`, via
+    `inflateFastU_eq`); on a wrong hint or a corrupt stream the fastloop rejects
+    (its exact-size contract) and we fall back to the push-based production
+    `inflate`, so the result never differs from `inflate` for accepted input and
+    any downstream checksum still guards a mismatch. Without an exact bounded
+    size we decode with `inflate` directly, keeping `sizeHint` as its inert
+    capacity hint. -/
+def inflateSized (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
+    (sizeHint : Nat := 0) (exact : Bool := false) : Except String ByteArray :=
+  if exact && sizeHint > 0 then
+    match inflateFastU data maxOutputSize sizeHint with
+    | .ok out => .ok out
+    | .error _ => inflate data maxOutputSize sizeHint
+  else
+    inflate data maxOutputSize sizeHint
 
 end Inflate
 end Zip.Native
