@@ -2410,12 +2410,17 @@ def lz77LazyMergedLoop.rollDefer (data : ByteArray)
     let head2 := headProbeGuarded c (prevSize + h2)
     let maxLen2 := min 258 (data.size - (mp + 1))
     have hmaxLen2P : (mp + 1) + maxLen2 ≤ data.size := by omega
-    -- Unseeded `(0, 0)` re-probe, mirror-aligned with `lz77ChainLazyIterP.rollDefer`
-    -- (rung 5): a length seed only changes a *rejected* probe result, and acceptance
-    -- needs `len' > pLen` strictly, so seeded and unseeded give the identical accepted
-    -- output (the certified spike seeds; `seeded_probe_bridge` proves byte-identity).
-    -- Keeping it unseeded makes `mergedLoop_eq`'s `rollDefer` twin a structural lockstep.
-    let r2 := chainWalkGuardedPackedU data c windowSize (mp + 1) maxLen2 niceLen hmaxLen2P head2 (lazy2ProbeDepth maxChain) 0 0
+    -- Length-seed the re-probe with the pending length (zlib `deflate_slow`'s
+    -- `prev_length` trick, exactly as the certified spike): a candidate shorter than
+    -- the pending match cannot improve on it, so pre-loading `pLen` as the probe's
+    -- best length lets `scan_end` reject those candidates at one byte-compare instead
+    -- of a full `countMatch` — this is where the spike's ~+2.4%-matcher figure lives.
+    -- The seed only changes a *rejected* result (acceptance needs `len' > pLen`
+    -- strictly), so it is output-neutral; `mergedLoop_eq` bridges it to the unseeded
+    -- packed twin via `seeded_probe_bridge` (as the main lookahead already does).
+    let cutoff2 := min niceLen maxLen2
+    let seed := if pLen < cutoff2 then pLen else 0
+    let r2 := chainWalkGuardedPackedU data c windowSize (mp + 1) maxLen2 niceLen hmaxLen2P head2 (lazy2ProbeDepth maxChain) seed 0
     let len' := r2 % 512
     let pos' := r2 / 512
     if lazyAcceptCost pLen (mp - pMatchPos) len' (mp + 1 - pos') = true ∧ (mp + 1) + len' ≤ data.size then

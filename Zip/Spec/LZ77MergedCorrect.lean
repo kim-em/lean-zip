@@ -561,12 +561,31 @@ private theorem mergedLoop_eq (data : ByteArray)
             simp only [getElem!_append_right' p'' t'' prevSize (lz77Greedy.hash3 data (mp + 1) hashSize (by omega)) hps'' hh2m]
             rw [chainWalkGuardedPackedU_append data p'' t'' windowSize (mp + 1)
               (min 258 (data.size - (mp + 1))) niceLen (by omega) hpv'' (t''[lz77Greedy.hash3 data (mp + 1) hashSize (by omega)]!) (lazy2ProbeDepth maxChain)]
-            -- Unseeded re-probe on both sides (rung 5): the accept ites are identical
-            -- after the append-strip, so `split` aligns them with no seed bridge.
-            split
-            · -- accept: roll to `mp+1` via the nested induction `ihm`
-              exact ihm _ (by omega) _ _ _ _ _ _ _ _ hht'' hps'' hpv'' (by omega) rfl
-            · -- reject: commit `reference pLen` at `mp`, then `mainLoop` via OUTER ih
+            -- Seeded merged re-probe vs unseeded packed twin: bridge the accept-cost
+            -- with `seeded_probe_bridge`, then case on the walk equality. The seed is
+            -- output-neutral (it only changes a rejected probe).
+            have hbr := seeded_probe_bridge data p'' windowSize (mp + 1)
+              (min 258 (data.size - (mp + 1))) niceLen (by omega) (by omega)
+              (t''[lz77Greedy.hash3 data (mp + 1) hashSize (by omega)]!) (lazy2ProbeDepth maxChain)
+              pLen (mp - pMatchPos) (mp + 1)
+            rw [hbr.1]
+            rcases hbr.2 with heq | hfalse
+            · -- seeded = unseeded: `rw [heq]` aligns the bound, then split
+              rw [heq]
+              split
+              · -- accept: roll to `mp+1` via the nested induction `ihm`
+                exact ihm _ (by omega) _ _ _ _ _ _ _ _ hht'' hps'' hpv'' (by omega) rfl
+              · -- reject: commit `reference pLen` at `mp`, then `mainLoop` via OUTER ih
+                rw [updateHashesMergedH3Guarded_eq,
+                  updateHashesMerged_append data hashSize prevSize t'' p'' mp 1 _ insertCap hhs hht'' hps'' hpv'',
+                  updateHashesGuarded_eq]
+                exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht'')
+                  (by rw [updateHashes_size2]; exact hps'') (by rw [updateHashes_size2]; exact hpv'') rfl
+            · -- seeded probe rejects: both accept conditions are false (`hbr.1`+`hfalse`),
+              -- so reduce both ites to `else` without `split` (which would descend into
+              -- the seed `if` in the merged bound), then commit via the OUTER ih.
+              have huw := hbr.1.symm.trans hfalse
+              simp only [huw, false_and, Bool.false_eq_true, if_false, reduceIte]
               rw [updateHashesMergedH3Guarded_eq,
                 updateHashesMerged_append data hashSize prevSize t'' p'' mp 1 _ insertCap hhs hht'' hps'' hpv'',
                 updateHashesGuarded_eq]
