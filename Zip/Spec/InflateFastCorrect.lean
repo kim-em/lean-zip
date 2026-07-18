@@ -1421,6 +1421,63 @@ theorem decodeHuffmanCurTables_outPos_mono {br : ZipCommon.BitReader} {buf : Byt
       _ _ _ _ _ co cop cpos cbb ccnt hgc
     rwa [InflateBuf.toUSize_toNat_of_lt houtsz] at hmn
 
+/-- The cursor stored block keeps the cursor in the output budget. -/
+theorem decodeStoredCur_outPos_le_maxOut {br : ZipCommon.BitReader} {buf : ByteArray}
+    {outPos maxOut : Nat} {cf : ByteArray} {op : Nat} {rbr : ZipCommon.BitReader}
+    (h : InflateBuf.decodeStoredCur br buf outPos maxOut = .ok (cf, op, rbr)) : op ≤ maxOut := by
+  rw [InflateBuf.decodeStoredCur] at h
+  cases h1 : br.readUInt16LE with
+  | error e => simp [h1, bind, Except.bind] at h
+  | ok r1 =>
+    obtain ⟨len, br1⟩ := r1
+    cases h2 : br1.readUInt16LE with
+    | error e => simp [h1, h2, bind, Except.bind] at h
+    | ok r2 =>
+      obtain ⟨nlen, br2⟩ := r2
+      cases h3 : br2.readBytes len.toNat with
+      | error e =>
+        simp only [h1, h2, h3, bind, Except.bind, pure, Except.pure] at h
+        split at h
+        · exact absurd h (by simp)
+        · split at h <;> exact absurd h (by simp)
+      | ok r3 =>
+        obtain ⟨bytes, br3⟩ := r3
+        simp only [h1, h2, h3, bind, Except.bind, pure, Except.pure] at h
+        split at h
+        · exact absurd h (by simp)
+        · split at h
+          · exact absurd h (by simp)
+          · simp only [Except.ok.injEq, Prod.mk.injEq] at h
+            obtain ⟨_, rfl, _⟩ := h; omega
+
+/-- The cursor Huffman block keeps the cursor in the output budget (via
+    `goCur_outPos_le_maxOut`). -/
+theorem decodeHuffmanCurTables_outPos_le_maxOut {br : ZipCommon.BitReader} {buf : ByteArray}
+    {outPos : Nat} {litTable distTable : HuffTree.DecodeTable} {litLD distLD : HuffTree.LongDecode}
+    {maxOut : Nat} {hlp : litTable.packed.size = 2 ^ HuffTree.fastBits}
+    (hds : br.data.size < USize.size) (hmo : maxOut < USize.size) (houtsz : outPos < USize.size)
+    (hinv : outPos ≤ maxOut) {cf : ByteArray} {op : Nat} {rbr : ZipCommon.BitReader}
+    (h : InflateBuf.decodeHuffmanCurTables br buf outPos litTable distTable litLD distLD maxOut hlp
+          = .ok (cf, op, rbr)) : op ≤ maxOut := by
+  have hsz : br.data.size.toUSize.toNat = br.data.size := InflateBuf.toUSize_toNat_of_lt hds
+  rw [InflateBuf.decodeHuffmanCurTables] at h
+  rcases hrf : refill br.data br.pos 0 0 with ⟨pos0, bitBuf0, cnt0⟩
+  rw [hrf] at h
+  simp only [hsz, ↓reduceDIte] at h
+  cases hgc : goCur litTable distTable litLD distLD 15 br.data maxOut
+      pos0.toUSize (bitBuf0 >>> br.bitOff.toUInt64) (cnt0 - br.bitOff).toUSize
+      (by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _) hlp buf outPos.toUSize with
+  | error e => rw [hgc] at h; simp only [bind, Except.bind, reduceCtorEq] at h
+  | ok res =>
+    obtain ⟨co, cop, cpos, cbb, ccnt⟩ := res
+    rw [hgc] at h
+    simp only [bind, Except.bind, Except.ok.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl, _⟩ := h
+    exact goCur_outPos_le_maxOut litTable distTable litLD distLD 15 br.data maxOut
+      (by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _) hlp hmo
+      _ _ _ _ _ (by rw [InflateBuf.toUSize_toNat_of_lt houtsz]; exact hinv)
+      co cop cpos cbb ccnt hgc
+
 /-! ### Reference-loop output monotonicity (for the loop-lift room bound) -/
 
 /-- One Huffman block never shrinks the output (via `goTreeFreeU_size_mono`). -/
