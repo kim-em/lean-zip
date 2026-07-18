@@ -81,18 +81,13 @@ theorem lz77ChainLazy_mainLoop_valid (data : ByteArray) (windowSize hashSize max
                   · omega
                   · -- accept + spill-ok: `if 1 < lazy2Steps` (roll) `else` (single).
                     split
-                    · split
-                      · -- rolling: literal at pos, then rollDefer at pos+1
-                        rename_i hpl2
-                        exact .literal (by omega) (getElem!_pos data pos (by omega))
-                          (rollDefer_valid data windowSize hashSize maxChain useH3 _ _ _
-                            (pos + 1) _ _ 1 insertCap goodMatch niceLen lazyDepth lazy2Steps
-                            hle2 hpl2 hQ2 hw)
-                      · -- ¬(3 ≤ matchLen2): unreachable, single-deferral fallback
-                        exact .literal (by omega) (getElem!_pos data pos (by omega))
-                          (lazyRef_at_pos data (pos + 1) _ _ hQ2.1 (by omega) hle2
-                            (fun i hi => hQ2.2.2.2.1 i hi)
-                            (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ _ hw))
+                    · -- rolling: literal at pos, then rollDefer at pos+1 (rung 5:
+                      -- `rollDefer` takes no proof-args; `3 ≤ matchLen2` is passed to
+                      -- the *theorem* and derived here from `matchLen2 > matchLen ≥ 3`).
+                      exact .literal (by omega) (getElem!_pos data pos (by omega))
+                        (rollDefer_valid data windowSize hashSize maxChain useH3 _ _ _
+                          (pos + 1) _ _ 1 insertCap goodMatch niceLen lazyDepth lazy2Steps
+                          (by omega) hQ2 hw)
                     · -- ¬(1 < lazy2Steps): single deferral (original behavior)
                       exact .literal (by omega) (getElem!_pos data pos (by omega))
                         (lazyRef_at_pos data (pos + 1) _ _ hQ2.1 (by omega) hle2
@@ -117,10 +112,13 @@ decreasing_by all_goals omega
 theorem rollDefer_valid (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
     (hashTable : Array Nat) (prev h3tab : Array Nat)
     (mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
-    (hmp : mp + pLen ≤ data.size) (hpl : 3 ≤ pLen)
+    (hpl : 3 ≤ pLen)
     (hQ : RollPending data windowSize mp pLen pMatchPos) (hw : windowSize > 0) :
     ValidDecomp data mp
-      (lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3 hashTable prev h3tab mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps hmp hpl) := by
+      (lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3 hashTable prev h3tab mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps) := by
+  -- Rung 5: the def no longer carries `hmp`; derive it from `RollPending` (`pLen ≤
+  -- min 258 (data.size - mp)`) and `hpl` (`3 ≤ pLen ⇒ mp < data.size`).
+  have hmp : mp + pLen ≤ data.size := by have := hQ.2.2.2.2; omega
   unfold lz77ChainLazy.rollDefer
   split
   · rename_i hcan
@@ -140,7 +138,7 @@ theorem rollDefer_valid (data : ByteArray) (windowSize hashSize maxChain : Nat) 
       · exact .literal (by omega) (getElem!_pos data mp (by omega))
           (rollDefer_valid data windowSize hashSize maxChain useH3 _ _ _
             (mp + 1) _ _ (step + 1) insertCap goodMatch niceLen lazyDepth lazy2Steps
-            hacc.2 (by omega) hQ' hw)
+            (by omega) hQ' hw)
     · exact lazyRef_at_pos data mp _ _ hQ.1 hpl hmp (fun i hi => hQ.2.2.2.1 i hi)
         (lz77ChainLazy_mainLoop_valid _ _ _ _ _ _ _ _ _ _ _ _ _ _ hw)
   · exact lazyRef_at_pos data mp _ _ hQ.1 hpl hmp (fun i hi => hQ.2.2.2.1 i hi)
@@ -220,24 +218,15 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
                   · omega
                   · -- accept + spill-ok: `if 1 < lazy2Steps` (roll) `else` (single).
                     split
-                    · split
-                      · -- rolling: literal at pos, then rollDefer at pos+1
-                        rename_i hpl2
-                        intro t ht
-                        cases ht with
-                        | head => trivial
-                        | tail _ h =>
-                          exact rollDefer_encodable data windowSize hashSize maxChain useH3 _ _ _
-                            (pos + 1) _ _ 1 insertCap goodMatch niceLen lazyDepth lazy2Steps
-                            hle2 hpl2 ⟨hQ2a, hQ2b, hQ2c, hQ2d, hQ2e⟩ hw hws t h
-                      · -- ¬(3 ≤ matchLen2): unreachable single-deferral fallback
-                        intro t ht
-                        cases ht with
-                        | head => trivial
-                        | tail _ h =>
-                          cases h with
-                          | head => exact ⟨by omega, by omega, by omega, by omega⟩
-                          | tail _ h => exact lz77ChainLazy_mainLoop_encodable _ _ _ _ _ _ _ _ _ _ _ _ _ _ hw hws t h
+                    · -- rolling: literal at pos, then rollDefer at pos+1 (rung 5:
+                      -- `3 ≤ matchLen2` derived from `matchLen2 > matchLen ≥ 3`).
+                      intro t ht
+                      cases ht with
+                      | head => trivial
+                      | tail _ h =>
+                        exact rollDefer_encodable data windowSize hashSize maxChain useH3 _ _ _
+                          (pos + 1) _ _ 1 insertCap goodMatch niceLen lazyDepth lazy2Steps
+                          (by omega) ⟨hQ2a, hQ2b, hQ2c, hQ2d, hQ2e⟩ hw hws t h
                     · -- ¬(1 < lazy2Steps): single deferral (original behavior)
                       intro t ht
                       cases ht with
@@ -278,10 +267,11 @@ decreasing_by all_goals omega
 theorem rollDefer_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
     (hashTable : Array Nat) (prev h3tab : Array Nat)
     (mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
-    (hmp : mp + pLen ≤ data.size) (hpl : 3 ≤ pLen)
+    (hpl : 3 ≤ pLen)
     (hQ : RollPending data windowSize mp pLen pMatchPos) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3 hashTable prev h3tab mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps hmp hpl, Enc t := by
+    ∀ t ∈ lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3 hashTable prev h3tab mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps, Enc t := by
   obtain ⟨hq1, hq2, hq3, hq4, hq5⟩ := hQ
+  have hmp : mp + pLen ≤ data.size := by omega
   unfold lz77ChainLazy.rollDefer
   split
   · rename_i hcan
@@ -304,7 +294,7 @@ theorem rollDefer_encodable (data : ByteArray) (windowSize hashSize maxChain : N
         | tail _ h =>
           exact rollDefer_encodable data windowSize hashSize maxChain useH3 _ _ _
             (mp + 1) _ _ (step + 1) insertCap goodMatch niceLen lazyDepth lazy2Steps
-            hacc.2 (by omega) ⟨hQ'1, hQ'2, hQ'3, hQ'4, hQ'5⟩ hw hws t h
+            (by omega) ⟨hQ'1, hQ'2, hQ'3, hQ'4, hQ'5⟩ hw hws t h
     · intro t ht
       cases ht with
       | head => exact ⟨hpl, by omega, by omega, by omega⟩
@@ -347,9 +337,9 @@ mutual
     ever inlining the recursive call. -/
 private theorem rollDefer_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
     (hashTable : Array Nat) (prev h3tab : Array Nat) (mp pLen pMatchPos step lazy2Steps : Nat)
-    (acc : Array LZ77Token) (hmp : mp + pLen ≤ data.size) (hpl : 3 ≤ pLen) :
-    lz77ChainLazyIter.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step acc hmp hpl =
-    acc ++ (lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3 hashTable prev h3tab mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps hmp hpl).toArray := by
+    (acc : Array LZ77Token) :
+    lz77ChainLazyIter.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step acc =
+    acc ++ (lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3 hashTable prev h3tab mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray := by
   unfold lz77ChainLazyIter.rollDefer lz77ChainLazy.rollDefer
   by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch
   · rw [dif_pos hcan, dif_pos hcan]
@@ -363,7 +353,7 @@ private theorem rollDefer_eq (data : ByteArray) (windowSize hashSize maxChain in
   · rw [dif_neg hcan, dif_neg hcan]
     simp only [updateHashesGuarded_eq]
     rw [mainLoop_eq_chainLazy, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
-termination_by data.size - mp
+termination_by 2 * (data.size - mp) + 1
 decreasing_by all_goals omega
 
 /-- The iterative lazy chain `mainLoop` is the accumulator form of the recursive
@@ -427,15 +417,8 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
               split
               · -- hle2 : accept + spill-ok
                 split
-                · -- 1 < lazy2Steps : rolling dispatch
-                  split
-                  · -- 3 ≤ matchLen2 : roll — literal at pos, then rollDefer at pos+1
-                    rw [rollDefer_eq, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
-                  · -- ¬(3 ≤ matchLen2) : single-deferral fallback, two pushes
-                    rw [mainLoop_eq_chainLazy,
-                      Array.push_eq_append, Array.push_eq_append,
-                      Array.append_assoc, Array.append_assoc,
-                      ← List.toArray_cons, ← List.toArray_cons]
+                · -- 1 < lazy2Steps : rolling dispatch — roll (rung 5: no hpl2 dite)
+                  rw [rollDefer_eq, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
                 · -- ¬(1 < lazy2Steps) : single deferral, two pushes
                   rw [mainLoop_eq_chainLazy,
                     Array.push_eq_append, Array.push_eq_append,
@@ -461,8 +444,8 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
         ← Array.append_assoc, Array.push_eq_append]
   · simp only [hlt, ↓reduceDIte]
     exact trailing_eq data pos acc
-termination_by data.size - pos
-decreasing_by all_goals omega
+termination_by 2 * (data.size - pos)
+decreasing_by all_goals (first | omega | (refine Nat.mul_lt_mul_of_pos_left ?_ (by decide); omega))
 end
 
 /-- `lz77ChainLazyIter` produces exactly the same tokens as `lz77ChainLazy`. -/
