@@ -338,10 +338,18 @@ set_option maxRecDepth 4000 in
 set_option maxHeartbeats 1000000 in
 /-- The iterative lazy chain `mainLoop` is the accumulator form of the recursive
     one — identical branch structure, push vs. cons at each emission (two pushes in
-    the lookahead arm). -/
+    the lookahead arm). Proven at the rolling-lazy2 default `lazy2Steps ≤ 1`
+    (`hstep`), where the boxed `mutual`'s rolling dispatch is dead and the loop is
+    the original single-deferral behavior. The full-`lazy2Steps` lockstep — where
+    the live `rollDefer` arm must be threaded through this decode — is the rung-2
+    obstruction of #2837 (see the progress note): the walk-decode simp requires
+    a `zeta`-inline to align the two sides' `matchLen`/`matchLen2`, and inlining
+    the `rollDefer` subterm across the branch tree makes that simp diverge
+    (>10^8 steps). Generalizing past `hstep` needs a decode that does not inline
+    `rollDefer` (the deferred rung-2/3 work). -/
 private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
     (hashTable : Array Nat) (prev h3tab : Array Nat) (pos lazy2Steps : Nat) (hstep : ¬ (1 < lazy2Steps)) (acc : Array LZ77Token) :
-    lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth useH3 hashTable prev h3tab pos acc =
+    lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab pos acc =
     acc ++ (lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab pos insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab with
   | _ n ih =>
@@ -355,7 +363,7 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
       -- the two sides' walk decode through `chainWalkGuardedPacked_mod`/`_div`.
       -- `dif_neg hstep` reduces the rolling dispatch `if 1 < lazy2Steps` (dead when
       -- `lazy2Steps ≤ 1`) so the heavy walk-decode simp never traverses `rollDefer`.
-      simp (config := { zeta := false }) only [hlt, ↓reduceDIte, dif_neg hstep]
+      simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
       -- The seed's decoded length is `≤ maxLen` (`h3Seed_spec`); keep that fact
       -- through the abstraction so the seed-general decode lemmas apply.
       have hbnd : h3Seed useH3 data h3tab windowSize pos hlt % 512 ≤ min 258 (data.size - pos) := by
@@ -367,7 +375,7 @@ private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize ma
       rw [hsd] at hbnd
       generalize hash3Single data pos hlt = hsg
       simp only [chainWalkGuardedPacked_mod', chainWalkGuardedPacked_div', min258_le_511,
-        hbnd, Nat.zero_le, updateHashesGuarded_eq]
+        hbnd, Nat.zero_le, updateHashesGuarded_eq, dif_neg hstep]
       -- Branch tree: hge / hle / h3lt / gate (matchLen < goodMatch) / (matchLen2 > matchLen) / hle2
       split
       · -- hge : matchLen ≥ 3
