@@ -725,16 +725,16 @@ theorem lz77ChainIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCa
       (Nat.le_of_eq (by rw [Array.size_replicate]))
 
 /-- The merged-array lazy matcher equals the two-array packed lazy matcher. -/
-theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) :
-    lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 =
-      lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 := by
+theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat) :
+    lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps =
+      lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps := by
   unfold lz77ChainLazyIterPMerged lz77ChainLazyIterP
   split
   · rfl
   · dsimp only
     rw [← Array.replicate_append_replicate]
     exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
-      goodMatch niceLen lazyDepth 1 useH3 (Array.replicate 65536 data.size)
+      goodMatch niceLen lazyDepth lazy2Steps useH3 (Array.replicate 65536 data.size)
       (Array.replicate (min chainWinSize data.size) data.size) (Array.replicate 32768 data.size) 0 _
       (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
       (Nat.le_of_eq (by rw [Array.size_replicate]))

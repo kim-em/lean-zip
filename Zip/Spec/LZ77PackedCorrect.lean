@@ -165,14 +165,14 @@ end
 
 /-- `lz77ChainLazyIterP` produces exactly the `packTok` image of
     `lz77ChainLazyIter`. -/
-theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) :
-    lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 =
-      (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3).map packTok := by
+theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat) :
+    lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps =
+      (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps).map packTok := by
   unfold lz77ChainLazyIterP lz77ChainLazyIter
   split
   · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth 1 useH3 _ _ _ 0 #[]
+      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 _ _ _ 0 #[]
 
 /-! ## View direction: the boxed view recovers the boxed matchers
 
@@ -192,15 +192,15 @@ theorem lz77ChainIterP_map (data : ByteArray) (maxChain windowSize insertCap nic
   rw [hcongr, Array.map_id]
 
 /-- The boxed view of the packed lazy matcher is the boxed lazy matcher. -/
-theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    (lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3).map unpackTok =
-      lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 := by
-  have henc := lz77ChainLazyIter_encodable data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 hw hws
+    (lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps).map unpackTok =
+      lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps := by
+  have henc := lz77ChainLazyIter_encodable data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps hw hws
   rw [lz77ChainLazyIterP_eq, Array.map_map]
   have hcongr : Array.map (unpackTok ∘ packTok)
-        (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3) =
-      Array.map id (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3) :=
+        (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps) =
+      Array.map id (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps) :=
     Array.map_congr_left fun t ht => unpackTok_packTok t (henc t (by simpa only [Array.mem_toList_iff] using ht))
   rw [hcongr, Array.map_id]
 
@@ -212,7 +212,7 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
   unfold lzMatchP lzMatch
   split
   · rw [lz77ChainLazyIterPMerged_eq]
-    exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level)
+    exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level) (lazy2StepsLevel level)
   · rw [lz77ChainIterPMerged_eq]
     exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
@@ -224,7 +224,7 @@ theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
   unfold lzMatchP lzMatch
   split
   · rw [lz77ChainLazyIterPMerged_eq]
-    exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level)
+    exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level) (lazy2StepsLevel level)
       (by omega) (by omega)
   · rw [lz77ChainIterPMerged_eq]
     exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
