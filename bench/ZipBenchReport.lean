@@ -187,10 +187,11 @@ def runWorkloads
           if level > 9 then pure none
           else do
             let ref ← RawDeflate.compress data level.toUInt8
-            -- The decompressed size is known here; pass it so the native decoder
-            -- pre-sizes its output buffer, matching the production ZIP/gzip path
-            -- where the uncompressed size comes from the archive metadata. The FFI
-            -- reference decoders ignore it.
+            -- The decompressed size is known here; pass it as the exact size so
+            -- the native decoder runs its verified `uset` exact-size fastloop
+            -- (`inflateSized … (exact := true)`), matching the production
+            -- ZIP/gzip path where the uncompressed size comes from the archive
+            -- metadata. The FFI reference decoders ignore it.
             let dNs ← measureNs size theReps (dec ref size >>= sink)
             pure (mbps size dNs)
       rows := { compressor := name, pattern := pat, size := size, level := level,
@@ -206,8 +207,13 @@ def nativeCompress (data : ByteArray) (level : Nat) : IO ByteArray :=
   pure (Zip.Native.Deflate.deflateRaw data level.toUInt8)
 
 def nativeDecompress (data : ByteArray) (origSize : Nat) : IO ByteArray :=
-  -- `Inflate.inflate` is the shipped production decode path (tree-free).
-  match Zip.Native.Inflate.inflate data (sizeHint := origSize) with
+  -- Route through `inflateSized … (exact := true)`: the decode-density scenario
+  -- feeds the true `origSize`, so this engages the verified branch-free `uset`
+  -- exact-size fastloop — exactly the production ZIP-extraction decode path
+  -- (`Zip.Archive`), not the push decoder. `inflateSized_agrees` proves this is
+  -- byte-identical to `inflate`; with the true non-zero corpus `origSize`,
+  -- `exact := true` takes the fast path (a `0` size would fall back harmlessly).
+  match Zip.Native.Inflate.inflateSized data (sizeHint := origSize) (exact := true) with
   | .ok b => pure b
   | .error e => throw (IO.userError e)
 
@@ -361,23 +367,29 @@ def runZopfliCeiling (outPath : String) : IO Unit := do
   IO.FS.writeFile outPath json
   IO.eprintln s!"Wrote {rows.length} zopfli rows → {outPath}"
 
-/-- Decode `ref`, optionally pre-sizing the output to `hint` (`0` = no hint).
-    `Inflate.inflate` is the shipped production decode path (tree-free).
-    `@[noinline]` keeps the pure decode call from being hoisted out of the
-    timed loop (it is otherwise loop-invariant), so each timed call really decodes. -/
+/-- Decode `ref` through `inflateSized … (exact := true)`, optionally at exact
+    size `hint` (`0` = no hint → push decoder; `> 0` → verified exact-size `uset`
+    fastloop, the production ZIP-extraction path). `inflateSized_agrees` makes both
+    arms byte-identical to `inflate`. `@[noinline]` keeps the pure decode call from
+    being hoisted out of the timed loop (it is otherwise loop-invariant), so each
+    timed call really decodes. -/
 @[noinline] def decodeForAB (ref : ByteArray) (hint : Nat) : IO Nat := do
-  match Zip.Native.Inflate.inflate ref (sizeHint := hint) with
+  match Zip.Native.Inflate.inflateSized ref (sizeHint := hint) (exact := true) with
   | .ok b => sink b
   | .error e => throw (IO.userError e)
 
-/-- Paired, interleaved decode A/B: native decode WITH the output-size hint vs
+/-- Paired, interleaved decode A/B: native decode WITH the exact output size vs
     WITHOUT it, measured back-to-back per file so machine-load common-mode noise
-    cancels. Reports per-corpus geomean speedup (no-hint time / hint time) with a
-    95% CI on the log-ratios. Robust on a busy shared machine; pin with `taskset -c`.
-    This is a diagnostic, not part of the dashboard matrix. -/
+    cancels. Since both arms go through `inflateSized … (exact := true)`, the
+    exact-size arm (`hint = size`) engages the verified `uset` fastloop while the
+    no-hint arm (`hint = 0`) falls back to the push decoder — so this now measures
+    the *fastloop* speedup, not merely output presizing. Reports per-corpus geomean
+    speedup (no-hint time / exact-size time) with a 95% CI on the log-ratios. Robust
+    on a busy shared machine; pin with `taskset -c`. This is a diagnostic, not part
+    of the dashboard matrix. -/
 def runPresizeAB (pairs : Nat := 12) : IO Unit := do
   let corpora ← loadCorpora
-  IO.println s!"Paired decode A/B (no-hint time / hint time), {pairs} pairs/file, level 6:"
+  IO.println s!"Paired decode A/B (push no-hint time / exact-size fastloop time), {pairs} pairs/file, level 6:"
   for (corpus, files) in corpora do
     let mut logs : List Float := []
     let mut noMBs : List Float := []
