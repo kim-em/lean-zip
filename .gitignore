@@ -10,4 +10,4 @@ __pycache__/
 /plans/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*.md
 /.codex
 # local `pareto_history.py --preview` renders (working-tree state; never committed)
-/bench/graphs/*_preview.svg
+/bench/graphs/*_preview.*
