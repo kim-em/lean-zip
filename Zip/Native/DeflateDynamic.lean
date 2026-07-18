@@ -2120,6 +2120,12 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     -- (the matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
     -- Both candidates consume the packed words end-to-end (freqs *and* emit):
     -- no branch materializes boxed tokens.
+    --
+    -- (#2782 postscript: a cheap-knobs floor matcher at L9/L10 was tried and
+    -- reverted — speed-neutral on Silesia, but the floor genuinely WINS on
+    -- ptt5-class Canterbury bitmaps at L9, so weakening it changes real
+    -- output. The floor's cost was never the matcher; it was the full base
+    -- EMIT, now a sized prep below.)
     let ptokens := lzMatchP data level
     if level == 9 then
       -- Level 9 (#2638): the cheaper **L9-fast** approximate-optimal parse — near
@@ -2131,12 +2137,17 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- gate the same parse runs *windowed* (#2787): region-capped choice storage
       -- gives byte-identical tokens in bounded memory, so the crown survives on
       -- streams larger than 64 MiB instead of collapsing to the split ratio.
-      if data.size ≤ optimalMaxSize then
-        pickSmaller (deflateRawBaseP data ptokens)
-          (deflateDynamicBlocksOptimalFast data sharedTokChunk)
+      -- #2782 follow-up: size the floor (`deflateRawBasePPrep`, the #2753
+      -- tree-capturing prep) instead of emitting it — the optimal candidate is
+      -- strictly smaller on every corpus file (#2640), so the emit-both
+      -- `pickSmaller` paid a full discarded freq+tree+BitWriter pass. Same
+      -- winner, same bytes (prep size = flushed size, the #2753 invariant).
+      let opt := if data.size ≤ optimalMaxSize then
+        deflateDynamicBlocksOptimalFast data sharedTokChunk
       else
-        pickSmaller (deflateRawBaseP data ptokens)
-          (deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk)
+        deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk
+      let bp := deflateRawBasePPrep data ptokens
+      emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
     else if 10 ≤ level then
       -- Level ≥ 10: the exact backward-DP crown (the former level-9 behaviour,
       -- #2640) — the max-ratio ceiling, kept reachable per the #2638 directive.
@@ -2144,12 +2155,13 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- Canterbury and Silesia file, so the split candidates are dropped here;
       -- `pickSmaller(base, optimal)` is never worse than the lazy baseline. As at
       -- level 9, above the memory gate the exact parse runs windowed (#2787).
-      if data.size ≤ optimalMaxSize then
-        pickSmaller (deflateRawBaseP data ptokens)
-          (deflateDynamicBlocksOptimal data sharedTokChunk)
+      -- Sized floor here too — see the level-9 arm.
+      let opt := if data.size ≤ optimalMaxSize then
+        deflateDynamicBlocksOptimal data sharedTokChunk
       else
-        pickSmaller (deflateRawBaseP data ptokens)
-          (deflateDynamicBlocksOptimalWindowed data sharedTokChunk)
+        deflateDynamicBlocksOptimalWindowed data sharedTokChunk
+      let bp := deflateRawBasePPrep data ptokens
+      emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
     else
       -- Levels 5–8: base vs cross-block shared-window split at the
       -- observation-divergence boundaries (#2737),
