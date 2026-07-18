@@ -344,7 +344,7 @@
 <text x="62" y="46" opacity="0">2026-07-10 · 9e62f214 · 37/40 — perf(decode): subtables for 12-15-bit codes; retire the walkCanonical…<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.80628;0.82723" calcMode="discrete" dur="19.1s" repeatCount="indefinite"/></text>
 <text x="62" y="46" opacity="0">2026-07-11 · e2b80757 · 38/40 — perf: fuse token-frequency counting into the L1-L3 matcher pass (#2833)<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.82723;0.84817" calcMode="discrete" dur="19.1s" repeatCount="indefinite"/></text>
 <text x="62" y="46" opacity="0">2026-07-11 · 30a8de98 · 39/40 — perf: re-grid L5 onto the post-singleton frontier (light split tier) …<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.84817;0.86911" calcMode="discrete" dur="19.1s" repeatCount="indefinite"/></text>
-<text x="62" y="46" opacity="0">2026-07-18 · worktree · 40/40 — uncommitted dashboard refresh<animate attributeName="opacity" values="0;1" keyTimes="0;0.86911" calcMode="discrete" dur="19.1s" repeatCount="indefinite"/></text>
+<text x="62" y="46" opacity="0">2026-07-18 · 4167938e · 40/40 — perf(tune): deepen L6&#x27;s lazy probe to 18 for strict miniz_oxide-L6 do…<animate attributeName="opacity" values="0;1" keyTimes="0;0.86911" calcMode="discrete" dur="19.1s" repeatCount="indefinite"/></text>
 </g>
 <rect x="586" y="496" width="330" height="90" fill="#ffffff" opacity="0.85" stroke="#cccccc"/>
 <g font-size="10.5" fill="#333333">
