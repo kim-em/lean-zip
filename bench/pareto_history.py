@@ -77,6 +77,16 @@ def git(*args):
                           capture_output=True, text=True, check=True).stdout
 
 
+def latest_json_dirty():
+    """True if bench/results/latest.json has uncommitted changes vs HEAD.
+
+    The committed animation SVG is rendered from committed git history; a dirty
+    latest.json would make it (references, a transient 'worktree' frame, and a
+    wall-clock date) depend on the working tree, which CI's clean checkout cannot
+    reproduce — so `animation-sync` would fail on the very next push."""
+    return bool(git("status", "--porcelain", "--", "bench/results/latest.json").strip())
+
+
 # --------------------------------------------------------------------------
 # extraction
 
@@ -135,10 +145,13 @@ def drop_noise(frames):
     return out
 
 
-def extract(corpus):
+def extract(corpus, include_worktree=False):
     """-> (references, frames, meta): fixed reference curves from the current
     latest.json (+ frozen zopfli ceiling), one filtered frame per committed
-    dashboard refresh (plus the working tree, if it differs from HEAD's)."""
+    dashboard refresh. When include_worktree is set, an uncommitted refresh that
+    differs from HEAD is appended as a final 'worktree' frame — that path is for
+    local --preview only; the committed SVG is built from committed frames so
+    CI's clean checkout can reproduce it (see latest_json_dirty)."""
     now = json.load(open(REPO / "bench/results/latest.json"))
     results_now = now["results"]
     ceiling_path = REPO / "bench/results/zopfli-ceiling.json"
@@ -175,11 +188,13 @@ def extract(corpus):
                  "bench/results/latest.json")
 
     # a just-refreshed, not-yet-committed dashboard becomes the final frame
-    wt = native_points(now["results"], corpus)
-    if wt and wt != frames[-1]["points"]:
-        frames.append(dict(commit="worktree", subject="uncommitted dashboard refresh",
-                           commit_date=now.get("meta", {}).get("date", "?"),
-                           points=wt))
+    # (preview only; excluded from the committed SVG for CI reproducibility)
+    if include_worktree:
+        wt = native_points(now["results"], corpus)
+        if wt and wt != frames[-1]["points"]:
+            frames.append(dict(commit="worktree", subject="uncommitted dashboard refresh",
+                               commit_date=now.get("meta", {}).get("date", "?"),
+                               points=wt))
 
     raw = len(frames)
     frames = drop_noise(drop_spikes(frames))
@@ -642,12 +657,36 @@ def main():
                     help="also render mp4 + GIF (matplotlib frames + ffmpeg)")
     ap.add_argument("--html", action="store_true",
                     help="also emit the interactive player page")
+    ap.add_argument("--preview", action="store_true",
+                    help="render a local preview to <stem>_preview.svg that "
+                         "includes the uncommitted working-tree refresh; the file "
+                         "is untracked and must NOT be committed")
     args = ap.parse_args()
 
-    references, frames, meta = extract(args.corpus)
     graphs = REPO / "bench/graphs"
     graphs.mkdir(parents=True, exist_ok=True)
     stem = f"{args.corpus}_compress_pareto_history"
+
+    if args.preview:
+        references, frames, meta = extract(args.corpus, include_worktree=True)
+        build_svg(references, frames, meta, graphs / f"{stem}_preview.svg")
+        print(f"preview written to {stem}_preview.svg (untracked — do NOT commit); "
+              "commit bench/results/latest.json and re-run without --preview to "
+              "regenerate the tracked SVG", file=sys.stderr)
+        return
+
+    if latest_json_dirty():
+        sys.exit(
+            "refusing to regenerate the committed SVG: bench/results/latest.json "
+            "has uncommitted changes.\n"
+            "The committed animation is built from committed history so CI's clean "
+            "checkout can reproduce it byte-for-byte; a dirty latest.json would bake "
+            "in a transient 'worktree' frame and a wall-clock date that CI cannot "
+            "reproduce, so animation-sync would fail on the next push.\n"
+            "Commit bench/results/latest.json first, then re-run.  (Use --preview to "
+            "render a local, uncommitted preview instead.)")
+
+    references, frames, meta = extract(args.corpus, include_worktree=False)
     build_svg(references, frames, meta, graphs / f"{stem}.svg")
     if args.video:
         build_video(references, frames, meta,
