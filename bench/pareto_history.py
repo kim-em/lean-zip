@@ -77,6 +77,25 @@ def git(*args):
                           capture_output=True, text=True, check=True).stdout
 
 
+# tracked data inputs that `extract` reads from the working tree; a dirty copy
+# of any of these changes the committed SVG (reference curves + provenance meta)
+# in a way CI's clean checkout cannot reproduce.
+GENERATOR_INPUTS = ["bench/results/latest.json", "bench/results/zopfli-ceiling.json"]
+
+
+def inputs_dirty():
+    """-> list of GENERATOR_INPUTS whose working-tree copy differs from HEAD.
+
+    The committed animation SVG is rendered from committed git history; a dirty
+    input would make it (reference curves and provenance metadata, plus — only on
+    the --preview path — a transient 'worktree' frame and a wall-clock date)
+    depend on the working tree, which CI's clean checkout cannot reproduce, so
+    `animation-sync` would fail on the very next push. Uses `git status` so a
+    staged-but-not-committed change counts as dirty too."""
+    return [p for p in GENERATOR_INPUTS
+            if git("status", "--porcelain", "--", p).strip()]
+
+
 # --------------------------------------------------------------------------
 # extraction
 
@@ -135,10 +154,13 @@ def drop_noise(frames):
     return out
 
 
-def extract(corpus):
+def extract(corpus, include_worktree=False):
     """-> (references, frames, meta): fixed reference curves from the current
     latest.json (+ frozen zopfli ceiling), one filtered frame per committed
-    dashboard refresh (plus the working tree, if it differs from HEAD's)."""
+    dashboard refresh. When include_worktree is set, an uncommitted refresh that
+    differs from HEAD is appended as a final 'worktree' frame — that path is for
+    local --preview only; the committed SVG is built from committed frames so
+    CI's clean checkout can reproduce it (see latest_json_dirty)."""
     now = json.load(open(REPO / "bench/results/latest.json"))
     results_now = now["results"]
     ceiling_path = REPO / "bench/results/zopfli-ceiling.json"
@@ -175,11 +197,13 @@ def extract(corpus):
                  "bench/results/latest.json")
 
     # a just-refreshed, not-yet-committed dashboard becomes the final frame
-    wt = native_points(now["results"], corpus)
-    if wt and wt != frames[-1]["points"]:
-        frames.append(dict(commit="worktree", subject="uncommitted dashboard refresh",
-                           commit_date=now.get("meta", {}).get("date", "?"),
-                           points=wt))
+    # (preview only; excluded from the committed SVG for CI reproducibility)
+    if include_worktree:
+        wt = native_points(now["results"], corpus)
+        if wt and wt != frames[-1]["points"]:
+            frames.append(dict(commit="worktree", subject="uncommitted dashboard refresh",
+                               commit_date=now.get("meta", {}).get("date", "?"),
+                               points=wt))
 
     raw = len(frames)
     frames = drop_noise(drop_spikes(frames))
@@ -642,18 +666,46 @@ def main():
                     help="also render mp4 + GIF (matplotlib frames + ffmpeg)")
     ap.add_argument("--html", action="store_true",
                     help="also emit the interactive player page")
+    ap.add_argument("--preview", action="store_true",
+                    help="render a local preview to <stem>_preview.svg that "
+                         "includes the uncommitted working-tree refresh; the file "
+                         "is untracked and must NOT be committed")
     args = ap.parse_args()
 
-    references, frames, meta = extract(args.corpus)
     graphs = REPO / "bench/graphs"
     graphs.mkdir(parents=True, exist_ok=True)
     stem = f"{args.corpus}_compress_pareto_history"
-    build_svg(references, frames, meta, graphs / f"{stem}.svg")
+
+    # --preview renders the working-tree state (uncommitted refresh frame and all)
+    # to untracked <stem>_preview.* for local eyeballing; the default path renders
+    # the tracked artifacts and refuses to run when a data input is dirty.
+    if not args.preview:
+        dirty = inputs_dirty()
+        if dirty:
+            sys.exit(
+                "refusing to regenerate the committed SVG: "
+                + ", ".join(dirty) + " has uncommitted changes.\n"
+                "The committed animation is built from committed history so CI's "
+                "clean checkout can reproduce it byte-for-byte; dirty input data "
+                "would change the reference curves and provenance metadata (and, on "
+                "--preview, add a transient 'worktree' frame with a wall-clock date) "
+                "in ways CI cannot reproduce, so animation-sync would fail on the "
+                "next push.\n"
+                "Commit those file(s) first, then re-run.  (Use --preview to render "
+                "a local, uncommitted preview instead.)")
+
+    suffix = "_preview" if args.preview else ""
+    references, frames, meta = extract(args.corpus, include_worktree=args.preview)
+    build_svg(references, frames, meta, graphs / f"{stem}{suffix}.svg")
     if args.video:
         build_video(references, frames, meta,
-                    graphs / f"{stem}.mp4", graphs / f"{stem}.gif")
+                    graphs / f"{stem}{suffix}.mp4", graphs / f"{stem}{suffix}.gif")
     if args.html:
-        build_html(references, frames, meta, graphs / f"{stem}.html")
+        build_html(references, frames, meta, graphs / f"{stem}{suffix}.html")
+    if args.preview:
+        print(f"preview written to {stem}_preview.* (untracked — do NOT commit); "
+              "commit the refreshed data and re-run without --preview to regenerate "
+              "the tracked artifacts", file=sys.stderr)
 
 
 if __name__ == "__main__":

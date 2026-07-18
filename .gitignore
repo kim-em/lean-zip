@@ -9,3 +9,5 @@ __pycache__/
 /.claude/.pod-checksums
 /plans/[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*.md
 /.codex
+# local `pareto_history.py --preview` renders (working-tree state; never committed)
+/bench/graphs/*_preview.*
