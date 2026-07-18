@@ -819,11 +819,14 @@ def niceLen (level : UInt8) : Nat :=
     slack. The probe still runs — it is shallower, not skipped — so the ratio cost
     stays in the noise while the second walk's cycles roughly halve.
 
-    **L6 probes at `/8` since the post-singleton re-grid**: paired with the
-    `goodMatch = 64` gate it buys +8% weighted-Silesia speed for +0.09pp on a
-    tier where the hash3 singleton already banked −0.28pp — the resulting
-    (0.3205, ~36.5 MB/s) point strictly dominates miniz_oxide L6. L7 (the old
-    L6 config) stays at `/2`. **L5 probes at `/4` since the L5 re-grid**
+    **L6 probes at depth 18 (the strict-dominance re-pair)**: the `/8` (= 8)
+    depth chosen by the post-singleton re-grid dominated miniz_oxide L6 on the
+    *weighted* plane but sat 0.8bp above it on the dashboard's per-file
+    geomean; the fine `gate-sweep` ld-grid shows depth 18 (with the
+    `goodMatch = 64` gate) is the shallowest probe whose geomean ratio clears
+    miniz L6 with real margin (0.32153 vs 0.32164, deterministic) while
+    keeping the speed edge — so the default level dominates on BOTH published
+    metrics. L7 (the old L6 config) stays at `/2`. **L5 probes at `/4` since the L5 re-grid**
     (`gate-sweep`, see `chainDepth`): the winning (chain 24, gate 64) split
     point took its probe at 6 — deep enough to keep the deferral wins the
     gate lets through, half the cost of the `/2` default.
@@ -834,7 +837,7 @@ def niceLen (level : UInt8) : Nat :=
     keeps the encoder contracts. -/
 def lazyDepth (level : UInt8) : Nat :=
   if level == 5 then chainDepth level / 4
-  else if level == 6 then chainDepth level / 8
+  else if level == 6 then 18
   else chainDepth level / 2
 
 /-- Enable the hash3 length-3 singleton at the split tier (levels 6–8). Our
