@@ -337,4 +337,51 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   | .ok result => assert! result == helloBytes
   | .error e => throw (IO.userError s!"zlib decompressSingle on FFI zlib failed: {e}")
 
+  -- ── Exact-size fastloop wiring (issue #2846) ─────────────────────────────
+  -- Exact-size hit: a single-member gzip whose trailing ISIZE is the exact
+  -- decompressed length drives the verified `uset` fastloop. The result must
+  -- equal both the input and the FFI decoder (bytes == push == FFI).
+  let gzLarge ← Gzip.compress large
+  match Zip.Native.GzipDecode.decompress gzLarge with
+  | .ok result =>
+    assert! result == large
+    let ffi ← Gzip.decompress gzLarge
+    assert! result == ffi
+  | .error e => throw (IO.userError s!"gzip fastloop exact-size hit failed: {e}")
+
+  -- Deliberately-wrong ISIZE: corrupt the trailing 4-byte ISIZE. The fast hint is
+  -- now wrong, so the fastloop's exact-size contract rejects and we fall back to
+  -- the push decoder — which decodes the true bytes; the ISIZE integrity check
+  -- then catches the corruption (a bad hint never slips corrupt data past).
+  let mut wrongIsize := gzLarge
+  let isizePos := wrongIsize.size - 4
+  wrongIsize := wrongIsize.set! isizePos (wrongIsize[isizePos]! ^^^ 0xFF)
+  match Zip.Native.GzipDecode.decompress wrongIsize with
+  | .error e => assert! e.contains "size mismatch"
+  | .ok _ => throw (IO.userError "gzip wrong-ISIZE should error on size mismatch")
+
+  -- Concatenated multi-member stream (fallback path): the first member's fast
+  -- attempt takes the *last* member's ISIZE as its hint (the member sizes differ),
+  -- so the fastloop rejects on member 0 and falls back; the whole stream still
+  -- decodes to the concatenation.
+  let gzBig ← Gzip.compress big
+  let gzSingle ← Gzip.compress singleByte
+  let multi := gzBig ++ gzSingle
+  match Zip.Native.GzipDecode.decompress multi with
+  | .ok result => assert! result == (big ++ singleByte)
+  | .error e => throw (IO.userError s!"gzip concatenated fallback failed: {e}")
+
+  -- Unit-level `inflateRawSized`: an exact hint fires the fastloop, and a wrong
+  -- hint falls back — both return the identical bytes *and* end position as the
+  -- push `inflateRaw` (the executable witness of `inflateRawSized_agrees`).
+  let deflatedLarge := Zip.Native.Deflate.deflateRaw large 1
+  match Zip.Native.Inflate.inflateRaw deflatedLarge 0 (1024 * 1024 * 1024) with
+  | .error e => throw (IO.userError s!"inflateRaw on deflatedLarge failed: {e}")
+  | .ok (pushBytes, pushEnd) =>
+    for (sh, ex) in [(large.size, true), (large.size + 13, true), (0, false)] do
+      match Zip.Native.Inflate.inflateRawSized deflatedLarge 0 (1024 * 1024 * 1024)
+          (sizeHint := sh) (exact := ex) with
+      | .ok (b, ep) => assert! b == pushBytes && ep == pushEnd
+      | .error e => throw (IO.userError s!"inflateRawSized (hint {sh}) failed: {e}")
+
   IO.println "  NativeGzip tests passed."

@@ -2657,4 +2657,76 @@ theorem inflateSized_agrees (data : ByteArray) (maxOut sizeHint : Nat) (exact : 
     | error e => exact Inflate.inflate_sizeHint_eq data maxOut sizeHint
   · exact Inflate.inflate_sizeHint_eq data maxOut sizeHint
 
+set_option maxHeartbeats 1000000 in
+/-- **Soundness — the raw-offset reverse direction.** The `inflateRaw` counterpart of
+    `inflateFastU_sound`: whenever the branch-free `uset` fastloop *accepts* a stream
+    starting at byte offset `startPos`, the reference push decoder `Inflate.inflateRaw`
+    accepts the same bytes *and* reports the same byte-aligned end position `ep`.
+    Same skeleton as `inflateFastU_sound`, but the loop bisimulation
+    `inflateLoopCur_treeFree` is instantiated at `pos := startPos` (needing
+    `startPos ≤ data.size`, always true at a gzip member boundary), and the returned
+    `endPos` is preserved rather than discarded so a container decoder can locate the
+    trailer / next member from it. -/
+theorem inflateRawFastU_sound (data : ByteArray) (startPos maxOut sizeHint : Nat)
+    (o : ByteArray) (ep : Nat)
+    (hds : data.size < USize.size) (hmo : maxOut < USize.size) (hsp : startPos ≤ data.size)
+    (h : Inflate.inflateRawFastU data startPos maxOut sizeHint = .ok (o, ep)) :
+    Inflate.inflateRaw data startPos maxOut = .ok (o, ep) := by
+  have hpsz : (ByteArray.presize sizeHint).size = sizeHint := by
+    simp only [ByteArray.presize, ByteArray.size, Array.size_replicate]
+  have hemp : ByteArray.emptyWithCapacity 0 = (ByteArray.presize sizeHint).extract 0 0 := by
+    apply ByteArray.ext_getElem!
+    · rw [ByteArray.size_extract]; simp
+    · intro i hi; simp at hi
+  rw [inflateRawFastU_eq, Inflate.inflateRawFast] at h
+  simp only [bind, Except.bind] at h
+  split at h
+  · exact absurd h (by simp)
+  · rename_i hng
+    obtain ⟨pl, hloop, hchk⟩ := bindOk' h
+    obtain ⟨cf, cop, cep⟩ := pl
+    simp only [] at hchk
+    split at hchk
+    · exact absurd hchk (by simp)
+    · rename_i hcopeq
+      obtain ⟨rfl, rfl⟩ := hchk
+      have hcfsz : o.size = sizeHint := by
+        rw [inflateLoopCur_size maxOut data.size _ _ _ _ _ _ hloop, hpsz]
+      have hcopval : cop = o.size := Decidable.of_not_not hcopeq
+      have htf := inflateLoopCur_treeFree maxOut data.size hds hmo
+        { data := data, pos := startPos, bitOff := 0 } (ByteArray.presize sizeHint) 0 o cop ep
+        (by simp only [ZipCommon.BitReader.bitPos]; omega) rfl (by rw [hpsz]; omega)
+        (by rw [hpsz]; omega) (by omega) hloop (by rw [hpsz]; omega)
+      rw [← hemp] at htf
+      have hoext : o.extract 0 cop = o := by
+        rw [hcopval]
+        apply ByteArray.ext_getElem!
+        · rw [ByteArray.size_extract]; omega
+        · intro i hi
+          rw [ByteArray.size_extract] at hi
+          rw [ByteArray.getElem!_extract _ 0 _ i (by omega), Nat.zero_add]
+      rw [hoext] at htf
+      rw [Inflate.inflateRaw_eq_loop]
+      exact htf
+
+/-- **The raw-offset `uset` fastloop dispatch equals the reference decoder.**
+    `inflateRawSized … = inflateRaw`: the fast path returns exactly `inflateRaw`'s
+    bytes *and* end position when it accepts (`inflateRawFastU_sound`), and the
+    fallback / inert-hint branches are `inflateRaw` itself. So wiring the fastloop
+    into the gzip member decode never changes the decoded bytes or the member
+    boundary; the gzip CRC32 / ISIZE trailer checks stay integrity checks, not
+    soundness backstops. -/
+theorem inflateRawSized_agrees (data : ByteArray) (startPos maxOut sizeHint : Nat) (exact : Bool)
+    (hds : data.size < USize.size) (hmo : maxOut < USize.size) (hsp : startPos ≤ data.size) :
+    Inflate.inflateRawSized data startPos maxOut sizeHint exact
+      = Inflate.inflateRaw data startPos maxOut := by
+  rw [Inflate.inflateRawSized]
+  split
+  · cases hfu : Inflate.inflateRawFastU data startPos maxOut sizeHint with
+    | ok r =>
+      obtain ⟨o, ep⟩ := r
+      exact (inflateRawFastU_sound data startPos maxOut sizeHint o ep hds hmo hsp hfu).symm
+    | error e => rfl
+  · rfl
+
 end Zip.Native

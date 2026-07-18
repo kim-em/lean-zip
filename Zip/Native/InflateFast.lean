@@ -528,5 +528,28 @@ def inflateSized (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024)
   else
     inflate data maxOutputSize sizeHint
 
+/-- **Production fastloop dispatch, raw offset form.** The `inflateRaw` counterpart
+    of `inflateSized`: it decodes a DEFLATE stream starting at byte offset `startPos`
+    and, alongside the bytes, returns the byte-aligned position after the last block
+    (`endPos`), which a container decoder needs to locate the trailer / next member.
+    When the caller knows the *exact* decompressed size and has bounded it
+    (`exact = true`, `sizeHint > 0` — for gzip, the trailer `ISIZE` of a single-member
+    stream, clamped to a presize cap), decode with the verified branch-free `uset`
+    fastloop `inflateRawFastU`; on a wrong hint or a corrupt stream the fastloop
+    rejects (its exact-size contract) and we fall back to the push-based production
+    `inflateRaw`. It is proven equal to `inflateRaw` for every `USize`-representable
+    input (`Zip.Native.inflateRawSized_agrees`), so it never changes the decoded
+    bytes or `endPos`. Without an exact bounded size we decode with `inflateRaw`
+    directly. -/
+def inflateRawSized (data : ByteArray) (startPos : Nat := 0)
+    (maxOutputSize : Nat := 1024 * 1024 * 1024) (sizeHint : Nat := 0)
+    (exact : Bool := false) : Except String (ByteArray × Nat) :=
+  if exact && sizeHint > 0 then
+    match inflateRawFastU data startPos maxOutputSize sizeHint with
+    | .ok r => .ok r
+    | .error _ => inflateRaw data startPos maxOutputSize
+  else
+    inflateRaw data startPos maxOutputSize
+
 end Inflate
 end Zip.Native
