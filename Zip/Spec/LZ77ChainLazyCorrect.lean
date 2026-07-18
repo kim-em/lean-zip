@@ -334,86 +334,136 @@ theorem lz77ChainLazy_encodable (data : ByteArray) (maxChain windowSize insertCa
 
 /-! ## Iterative version: equivalence + transferred contracts -/
 
+set_option backward.split false in
 set_option maxRecDepth 4000 in
-set_option maxHeartbeats 1000000 in
+set_option maxHeartbeats 2000000 in
+mutual
+/-- Accumulator form of `lz77ChainLazy.rollDefer` equals the boxed twin
+    (push vs. cons at each emission). Mutual with `mainLoop_eq_chainLazy`: the
+    commit arms re-enter `mainLoop`, the roll arm recurses at `mp+1`. The
+    unseeded `(0, 0)` re-probe decodes with `chainWalkGuardedPacked_mod'`/`_div'`
+    (`bestLen = 0 ≤ maxLen` via `Nat.zero_le`), which produces the *same*
+    `chainWalk` expression on both sides, so the recursive `_eq` applies without
+    ever inlining the recursive call. -/
+private theorem rollDefer_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (mp pLen pMatchPos step lazy2Steps : Nat)
+    (acc : Array LZ77Token) (hmp : mp + pLen ≤ data.size) (hpl : 3 ≤ pLen) :
+    lz77ChainLazyIter.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step acc hmp hpl =
+    acc ++ (lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3 hashTable prev h3tab mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps hmp hpl).toArray := by
+  unfold lz77ChainLazyIter.rollDefer lz77ChainLazy.rollDefer
+  by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch
+  · rw [dif_pos hcan, dif_pos hcan]
+    simp (config := { maxSteps := 4000000 }) only [chainWalkGuardedPacked_mod', chainWalkGuardedPacked_div', min258_le_511,
+      Nat.zero_le, updateHashesGuarded_eq]
+    split
+    · -- roll: literal at mp, then rollDefer at mp+1 (step+1)
+      rw [rollDefer_eq, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
+    · -- no improvement: commit reference(pLen) at mp, then mainLoop at mp+pLen
+      rw [mainLoop_eq_chainLazy, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
+  · rw [dif_neg hcan, dif_neg hcan]
+    simp only [updateHashesGuarded_eq]
+    rw [mainLoop_eq_chainLazy, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
+termination_by data.size - mp
+decreasing_by all_goals omega
+
 /-- The iterative lazy chain `mainLoop` is the accumulator form of the recursive
-    one — identical branch structure, push vs. cons at each emission (two pushes in
-    the lookahead arm). Proven at the rolling-lazy2 default `lazy2Steps ≤ 1`
-    (`hstep`), where the boxed `mutual`'s rolling dispatch is dead and the loop is
-    the original single-deferral behavior. The full-`lazy2Steps` lockstep — where
-    the live `rollDefer` arm must be threaded through this decode — is the rung-2
-    obstruction of #2837 (see the progress note): the walk-decode simp requires
-    a `zeta`-inline to align the two sides' `matchLen`/`matchLen2`, and inlining
-    the `rollDefer` subterm across the branch tree makes that simp diverge
-    (>10^8 steps). Generalizing past `hstep` needs a decode that does not inline
-    `rollDefer` (the deferred rung-2/3 work). -/
+    one — identical branch structure, push vs. cons at each emission (two pushes
+    in the lookahead arm). Generalized to *all* `lazy2Steps` (rung 3 of #2837):
+    the live rolling dispatch (`if 1 < lazy2Steps`) is threaded through the
+    walk-decode via the mutual `rollDefer_eq`, no `dif_neg hstep` pruning.
+
+    Rung 3 discoveries (the rung-2 obstruction was a `split` blow-up, not a
+    genuine decode divergence):
+    * The walk-decode `simp` (`chainWalkGuardedPacked_mod'`/`_div'`) decodes
+      *both* sides' walks to the same `chainWalk` expression, so the two
+      `rollDefer` calls become syntactically identical up to their `acc`. The
+      rolling leaf is then discharged by `rollDefer_eq` (a `rw`, never inlining
+      the recursive `rollDefer`). It needs a raised `maxSteps` (the inlined goal
+      is large) but terminates.
+    * `set_option backward.split false` is load-bearing: the *default* `split`
+      builds its motive over the whole inlined goal — including the live
+      `rollDefer` subterm — and exceeds `maxSteps`. The backward-split path does
+      not. This is the fix the rung-2 note was missing.
+    * The `_eq` pair is genuine mutual well-founded recursion (`termination_by
+      data.size - pos` / `data.size - mp`), driven by `rw [rollDefer_eq]` /
+      `rw [mainLoop_eq_chainLazy]`; `decreasing_by all_goals omega` closes every
+      recursive call from the branch hypotheses. -/
 private theorem mainLoop_eq_chainLazy (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
-    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos lazy2Steps : Nat) (hstep : ¬ (1 < lazy2Steps)) (acc : Array LZ77Token) :
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos lazy2Steps : Nat) (acc : Array LZ77Token) :
     lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab pos acc =
     acc ++ (lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab pos insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab with
-  | _ n ih =>
-    unfold lz77ChainLazyIter.mainLoop lz77ChainLazy.mainLoop
-    by_cases hlt : pos + 2 < data.size
-    · -- Reduce the outer `pos+2 < data.size` dite with `zeta := false`, so the
-      -- `let r := chainWalk … seed …` binding is NOT inlined yet — otherwise the
-      -- large opaque `h3Seed`/`hash3Single` terms get duplicated across the whole
-      -- branch tree (via `matchLen`/`matchPos`) and blow up. Abstract those two
-      -- opaque terms to variables first, then the (now cheap) zeta-simp aligns
-      -- the two sides' walk decode through `chainWalkGuardedPacked_mod`/`_div`.
-      -- `dif_neg hstep` reduces the rolling dispatch `if 1 < lazy2Steps` (dead when
-      -- `lazy2Steps ≤ 1`) so the heavy walk-decode simp never traverses `rollDefer`.
-      simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
-      -- The seed's decoded length is `≤ maxLen` (`h3Seed_spec`); keep that fact
-      -- through the abstraction so the seed-general decode lemmas apply.
-      have hbnd : h3Seed useH3 data h3tab windowSize pos hlt % 512 ≤ min 258 (data.size - pos) := by
-        rcases h3Seed_spec useH3 data h3tab windowSize pos hlt (min 258 (data.size - pos))
-          (by omega) (by omega) with hz | hq
-        · omega
-        · exact hq.2.2.2.2
-      generalize hsd : h3Seed useH3 data h3tab windowSize pos hlt = sd
-      rw [hsd] at hbnd
-      generalize hash3Single data pos hlt = hsg
-      simp only [chainWalkGuardedPacked_mod', chainWalkGuardedPacked_div', min258_le_511,
-        hbnd, Nat.zero_le, updateHashesGuarded_eq, dif_neg hstep]
-      -- Branch tree: hge / hle / h3lt / gate (matchLen < goodMatch) / (matchLen2 > matchLen) / hle2
+  unfold lz77ChainLazyIter.mainLoop lz77ChainLazy.mainLoop
+  by_cases hlt : pos + 2 < data.size
+  · -- Reduce the outer `pos+2 < data.size` dite with `zeta := false`, so the
+    -- `let r := chainWalk … seed …` binding is NOT inlined yet — otherwise the
+    -- large opaque `h3Seed`/`hash3Single` terms get duplicated across the whole
+    -- branch tree (via `matchLen`/`matchPos`) and blow up. Abstract those two
+    -- opaque terms to variables first, then the (now cheap) zeta-simp aligns
+    -- the two sides' walk decode through `chainWalkGuardedPacked_mod`/`_div`.
+    simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
+    -- The seed's decoded length is `≤ maxLen` (`h3Seed_spec`); keep that fact
+    -- through the abstraction so the seed-general decode lemmas apply.
+    have hbnd : h3Seed useH3 data h3tab windowSize pos hlt % 512 ≤ min 258 (data.size - pos) := by
+      rcases h3Seed_spec useH3 data h3tab windowSize pos hlt (min 258 (data.size - pos))
+        (by omega) (by omega) with hz | hq
+      · omega
+      · exact hq.2.2.2.2
+    generalize hsd : h3Seed useH3 data h3tab windowSize pos hlt = sd
+    rw [hsd] at hbnd
+    generalize hash3Single data pos hlt = hsg
+    simp (config := { maxSteps := 4000000 }) only [chainWalkGuardedPacked_mod', chainWalkGuardedPacked_div', min258_le_511,
+      hbnd, Nat.zero_le, updateHashesGuarded_eq]
+    -- Branch tree: hge / hle / h3lt / gate (matchLen < goodMatch) / (matchLen2 > matchLen) / hle2
+    split
+    · -- hge : matchLen ≥ 3
       split
-      · -- hge : matchLen ≥ 3
+      · -- hle : pos + matchLen ≤ data.size
         split
-        · -- hle : pos + matchLen ≤ data.size
+        · -- h3lt : pos + 3 < data.size
           split
-          · -- h3lt : pos + 3 < data.size
+          · -- matchLen < goodMatch : lookahead
             split
-            · -- matchLen < goodMatch : lookahead
+            · -- matchLen2 > matchLen
               split
-              · -- matchLen2 > matchLen
+              · -- hle2 : accept + spill-ok
                 split
-                · -- hle2 : lookahead emits literal + reference(matchLen2), two pushes.
-                  -- The rolling dispatch was already reduced away by `dif_neg hstep`.
-                  rw [ih _ (by omega) _ _ _ _ _ rfl,
+                · -- 1 < lazy2Steps : rolling dispatch
+                  split
+                  · -- 3 ≤ matchLen2 : roll — literal at pos, then rollDefer at pos+1
+                    rw [rollDefer_eq, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
+                  · -- ¬(3 ≤ matchLen2) : single-deferral fallback, two pushes
+                    rw [mainLoop_eq_chainLazy,
+                      Array.push_eq_append, Array.push_eq_append,
+                      Array.append_assoc, Array.append_assoc,
+                      ← List.toArray_cons, ← List.toArray_cons]
+                · -- ¬(1 < lazy2Steps) : single deferral, two pushes
+                  rw [mainLoop_eq_chainLazy,
                     Array.push_eq_append, Array.push_eq_append,
                     Array.append_assoc, Array.append_assoc,
                     ← List.toArray_cons, ← List.toArray_cons]
-                · -- ¬hle2 : reference(matchLen) at pos
-                  rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
-                    ← Array.append_assoc, Array.push_eq_append]
-              · -- matchLen2 ≤ matchLen : reference(matchLen) at pos
-                rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
+              · -- ¬hle2 : reference(matchLen) at pos
+                rw [mainLoop_eq_chainLazy, List.toArray_cons,
                   ← Array.append_assoc, Array.push_eq_append]
-            · -- matchLen ≥ goodMatch (gated) : reference(matchLen) at pos
-              rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
+            · -- matchLen2 ≤ matchLen : reference(matchLen) at pos
+              rw [mainLoop_eq_chainLazy, List.toArray_cons,
                 ← Array.append_assoc, Array.push_eq_append]
-          · -- ¬h3lt : reference(matchLen) at pos (near end)
-            rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
+          · -- matchLen ≥ goodMatch (gated) : reference(matchLen) at pos
+            rw [mainLoop_eq_chainLazy, List.toArray_cons,
               ← Array.append_assoc, Array.push_eq_append]
-        · -- ¬hle : literal
-          rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
+        · -- ¬h3lt : reference(matchLen) at pos (near end)
+          rw [mainLoop_eq_chainLazy, List.toArray_cons,
             ← Array.append_assoc, Array.push_eq_append]
-      · -- ¬hge : literal
-        rw [ih _ (by omega) _ _ _ _ _ rfl, List.toArray_cons,
+      · -- ¬hle : literal
+        rw [mainLoop_eq_chainLazy, List.toArray_cons,
           ← Array.append_assoc, Array.push_eq_append]
-    · simp only [hlt, ↓reduceDIte]
-      exact trailing_eq data pos acc
+    · -- ¬hge : literal
+      rw [mainLoop_eq_chainLazy, List.toArray_cons,
+        ← Array.append_assoc, Array.push_eq_append]
+  · simp only [hlt, ↓reduceDIte]
+    exact trailing_eq data pos acc
+termination_by data.size - pos
+decreasing_by all_goals omega
+end
 
 /-- `lz77ChainLazyIter` produces exactly the same tokens as `lz77ChainLazy`. -/
 theorem lz77ChainLazyIter_eq_lz77ChainLazy (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) :
@@ -422,7 +472,7 @@ theorem lz77ChainLazyIter_eq_lz77ChainLazy (data : ByteArray) (maxChain windowSi
   unfold lz77ChainLazyIter lz77ChainLazy
   split
   · rw [trailing_eq]; simp only [List.append_toArray, List.nil_append]
-  · rw [mainLoop_eq_chainLazy (lazy2Steps := 1) (hstep := by omega)]
+  · rw [mainLoop_eq_chainLazy (lazy2Steps := 1)]
     simp only [List.append_toArray, List.nil_append]
 
 theorem lz77ChainLazyIter_valid (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
