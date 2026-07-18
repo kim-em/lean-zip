@@ -78,51 +78,94 @@ theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap nice
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
       mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ 0 #[]
 
-set_option maxHeartbeats 1000000 in
-/-- The packed lazy `mainLoop` is the packed image of the boxed one. The gate
-    (`matchLen < goodMatch`) is applied identically in both, so the branch tree
-    stays in lockstep — one extra split versus the ungated proof. -/
+set_option backward.split false in
+set_option maxRecDepth 4000 in
+set_option maxHeartbeats 2000000 in
+mutual
+
+/-- Packed image of `lz77ChainLazyIter.rollDefer`: the packed rolling deferral is
+    `(·.map packTok)` of the boxed-token one. Mutual with `mainLoopLazyP_eq` (rung 4
+    of #2837): the roll arm recurses at `mp+1`, the commit arms re-enter `mainLoop`.
+    The `USize` re-probe aligns to its `Nat` twin via `chainWalkGuardedPackedU_eq`,
+    so both sides land on the same walk; `Array.map_push` commutes `packTok` through
+    each push. -/
+private theorem rollDefer_P_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (mp pLen pMatchPos step : Nat) (acc : Array LZ77Token)
+    (hmp : mp + pLen ≤ data.size) (hpl : 3 ≤ pLen) :
+    lz77ChainLazyIterP.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step
+        (acc.map packTok) hmp hpl =
+      (lz77ChainLazyIter.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step
+        acc hmp hpl).map packTok := by
+  unfold lz77ChainLazyIterP.rollDefer lz77ChainLazyIter.rollDefer
+  by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch
+  · rw [dif_pos hcan, dif_pos hcan]
+    simp (config := { maxSteps := 4000000 }) only [chainWalkGuardedPackedU_eq]
+    split
+    · -- roll: literal at mp, then rollDefer at mp+1
+      simp only [← Array.map_push]
+      rw [rollDefer_P_eq]
+    · -- no improvement: commit reference(pLen), then mainLoop
+      simp only [← Array.map_push]
+      rw [mainLoopLazyP_eq]
+  · rw [dif_neg hcan, dif_neg hcan]
+    simp only [← Array.map_push]
+    rw [mainLoopLazyP_eq]
+termination_by data.size - mp
+decreasing_by all_goals omega
+
+/-- The packed lazy `mainLoop` is the packed image of the boxed one, generalized to
+    *all* `lazy2Steps` (rung 4 of #2837): the live rolling dispatch is threaded
+    through the walk-decode via the mutual `rollDefer_P_eq`. The gate
+    (`matchLen < goodMatch`) is applied identically in both, so the branch tree stays
+    in lockstep. `set_option backward.split false` keeps the `split` on the
+    `rollDefer`-live goal from blowing its motive (the rung-3 fix). -/
 private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
-    (hstep : ¬ 1 < lazy2Steps)
     (hashTable : Array Nat) (prev h3tab : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth useH3 hashTable prev h3tab pos
+    lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab pos
         (acc.map packTok) =
       (lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab pos
         acc).map packTok := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab with
-  | _ n ih =>
-    unfold lz77ChainLazyIterP.mainLoop lz77ChainLazyIter.mainLoop
-    by_cases hlt : pos + 2 < data.size
-    · -- Reduce the outer dite with `zeta := false` (so the seed-laden walk is not
-      -- duplicated across the branch tree), abstract the opaque hash3 terms, then
-      -- align the `USize` walk to its `Nat` twin (`chainWalkGuardedPackedU_eq` is
-      -- seed-general, so both sides land on the same packed walk). `dif_neg hstep`
-      -- kills the iter side's dead `1 < lazy2Steps` rolling dispatch (packed has no
-      -- `lazy2Steps` yet — that is rung 3); it must ride the zeta-true decode simp,
-      -- not the folded one — the dispatch sits under `have` binders the folded simp
-      -- does not enter, and inlining the live `rollDefer` arm would diverge.
-      simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
-      generalize h3Seed useH3 data h3tab windowSize pos hlt = sd
-      generalize hash3Single data pos hlt = hsg
-      simp only [chainWalkGuardedPackedU_eq, dif_neg hstep]
-      -- Branch tree: hge / hle / h3lt / gate / deferral / hle2
-      split
+  unfold lz77ChainLazyIterP.mainLoop lz77ChainLazyIter.mainLoop
+  by_cases hlt : pos + 2 < data.size
+  · -- Reduce the outer dite with `zeta := false`, abstract the opaque hash3 terms,
+    -- then align the `USize` walk to its `Nat` twin (`chainWalkGuardedPackedU_eq`).
+    simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
+    generalize h3Seed useH3 data h3tab windowSize pos hlt = sd
+    generalize hash3Single data pos hlt = hsg
+    simp (config := { maxSteps := 4000000 }) only [chainWalkGuardedPackedU_eq]
+    -- Branch tree: hge / hle / h3lt / gate / lazyAccept / hle2 / h1 / hpl2
+    split
+    · split
       · split
         · split
           · split
             · split
               · split
-                · -- deferral arm: literal + reference, two pushes
-                  rw [← Array.map_push, ← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-                · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-              · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-            · -- gated: reference(matchLen)
-              rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-          · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ _ rfl]
-    · simp only [hlt, ↓reduceDIte]
-      exact trailingP_eq data pos acc
+                · split
+                  · -- roll arm: literal push, then rollDefer
+                    rw [← Array.map_push, rollDefer_P_eq]
+                  · -- ¬hpl2: single-deferral fallback, two pushes
+                    rw [← Array.map_push, ← Array.map_push, mainLoopLazyP_eq]
+                · -- ¬h1: single deferral, two pushes
+                  rw [← Array.map_push, ← Array.map_push, mainLoopLazyP_eq]
+              · -- ¬hle2: reference(matchLen)
+                rw [← Array.map_push, mainLoopLazyP_eq]
+            · -- ¬lazyAccept: reference(matchLen)
+              rw [← Array.map_push, mainLoopLazyP_eq]
+          · -- gated: reference(matchLen)
+            rw [← Array.map_push, mainLoopLazyP_eq]
+        · -- ¬h3lt: reference(matchLen)
+          rw [← Array.map_push, mainLoopLazyP_eq]
+      · -- ¬hle: literal
+        rw [← Array.map_push, mainLoopLazyP_eq]
+    · -- ¬hge: literal
+      rw [← Array.map_push, mainLoopLazyP_eq]
+  · simp only [hlt, ↓reduceDIte]
+    exact trailingP_eq data pos acc
+termination_by data.size - pos
+decreasing_by all_goals omega
+
+end
 
 /-- `lz77ChainLazyIterP` produces exactly the `packTok` image of
     `lz77ChainLazyIter`. -/
@@ -133,7 +176,7 @@ theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap 
   split
   · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth 1 useH3 (by omega) _ _ _ 0 #[]
+      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth 1 useH3 _ _ _ 0 #[]
 
 /-! ## View direction: the boxed view recovers the boxed matchers
 
