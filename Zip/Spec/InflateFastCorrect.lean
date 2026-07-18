@@ -66,6 +66,22 @@ to `goCur`. It lifts — every block decoder preserving the buffer size
 and `inflateRawFastU_eq`, to **`inflateFastU_eq`**: the `uset` fastloop composed
 with `inflateFast_eq` decodes `Inflate.inflate` correctly.
 
+## The reverse direction (soundness) and the production ratchet
+
+`inflateFastU_eq` is forward-only (`inflate` accepts ⟹ fastloop accepts). The
+**reverse** — fastloop accepts ⟹ `inflate` accepts — is a full reverse
+bisimulation mirroring the forward chain: `goCur_treeFree` (reverse of
+`goCur_eq`, using `goCur_outPos_mono` / `goCur_outPos_le_maxOut` to stay within
+the exact-size buffer over `USize`), the reverse block bridges
+`decodeStoredCur_treeFree` / `decodeHuffmanCurTables_treeFree`, and the reverse
+loop `inflateLoopCur_treeFree` (with `inflateLoopCur_outPos_mono` bounding every
+block cursor by the final one). Composed with `inflateLoopCur_size` and
+`inflateRaw_eq_loop` this gives **`inflateFastU_sound`**, hence
+**`inflateSized_agrees`**: the production dispatch `Inflate.inflateSized … =
+Inflate.inflate` *unconditionally* — the fastloop is a true ratchet, so wiring it
+into ZIP extraction (`Zip.Archive`, size from the central-directory
+`uncompressedSize`) needs no checksum backstop for soundness.
+
 This file is standalone — not imported by `Zip` — so `Inflate.inflate` and CI
 stay `sorry`-free regardless.
 -/
@@ -2142,6 +2158,57 @@ theorem inflateLoopCur_treeFree (maxOut dataSize : Nat) (hdd : dataSize < USize.
       simp only [bind, Except.bind]; exact hreftail
     · exact absurd h (by simp [bind, Except.bind])
 
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 1000000 in
+/-- **The cursor block loop preserves the buffer size** (every block writes in
+    place). Needed so the exact-size contract pins the cursor to `sizeHint`. -/
+theorem inflateLoopCur_size (maxOut dataSize : Nat) :
+    ∀ (br : ZipCommon.BitReader) (buf : ByteArray) (outPos : Nat) (cf : ByteArray) (op ep : Nat),
+    InflateBuf.inflateLoopCur br buf outPos maxOut dataSize = .ok (cf, op, ep) → cf.size = buf.size := by
+  intro br buf outPos
+  induction br, buf, outPos using InflateBuf.inflateLoopCur.induct (dataSize := dataSize) with
+  | case1 br buf outPos ih =>
+    intro cf op ep h
+    rw [InflateBuf.inflateLoopCur] at h
+    obtain ⟨p1, hrb1, h⟩ := bindOk' h; obtain ⟨bfinal, br₁⟩ := p1; simp only [] at h
+    obtain ⟨p2, hrb2, h⟩ := bindOk' h; obtain ⟨btype, br₂⟩ := p2; simp only [] at h
+    have hbtv : btype = 0 ∨ btype = 1 ∨ btype = 2 ∨ btype = 3 := by
+      have hb4 : btype.toNat < 4 := Inflate.readBits_lt (n := 2) (by omega) hrb2
+      rcases (show btype.toNat = 0 ∨ btype.toNat = 1 ∨ btype.toNat = 2 ∨ btype.toNat = 3 from by omega)
+        with h' | h' | h' | h'
+      · exact Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))
+      · exact Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl)))
+      · exact Or.inr (Or.inr (Or.inl (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+      · exact Or.inr (Or.inr (Or.inr (UInt32.toNat_inj.mp (by rw [h']; rfl))))
+    have htail : ∀ (co : ByteArray) (cop : Nat) (cbr : ZipCommon.BitReader), co.size = buf.size →
+        (if bfinal == 1 then pure (co, cop, cbr.alignToByte.pos)
+         else if _h : cbr.bitPos ≤ br.bitPos then throw "Inflate: no progress in inflate loop"
+              else if _h : dataSize * 8 < cbr.bitPos then throw "Inflate: bit position out of range"
+              else InflateBuf.inflateLoopCur cbr co cop maxOut dataSize) = .ok (cf, op, ep) →
+        cf.size = buf.size := by
+      intro co cop cbr hcosz htc
+      by_cases hbf : (bfinal == 1) = true
+      · rw [if_pos hbf] at htc; simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at htc
+        obtain ⟨rfl, _, _⟩ := htc; exact hcosz
+      · rw [if_neg hbf] at htc
+        by_cases hg1 : cbr.bitPos ≤ br.bitPos
+        · rw [dif_pos hg1] at htc; exact absurd htc (by simp)
+        · rw [dif_neg hg1] at htc
+          by_cases hg2 : dataSize * 8 < cbr.bitPos
+          · rw [dif_pos hg2] at htc; exact absurd htc (by simp)
+          · rw [dif_neg hg2] at htc
+            rw [ih co cop cbr hg1 hg2 cf op ep htc]; exact hcosz
+    simp only [hrb1, hrb2, bind, Except.bind] at h
+    rcases hbtv with rfl | rfl | rfl | rfl
+    · obtain ⟨pb, hblock, htl⟩ := bindOk' h; obtain ⟨co, cop, cbr⟩ := pb; simp only [] at htl
+      exact htail co cop cbr (decodeStoredCur_size hblock) htl
+    · obtain ⟨pb, hblock, htl⟩ := bindOk' h; obtain ⟨co, cop, cbr⟩ := pb; simp only [] at htl
+      exact htail co cop cbr (decodeHuffmanCurTables_size hblock) htl
+    · obtain ⟨pdt, hdt, h⟩ := bindOk' h; obtain ⟨litLens, distLens, br₃⟩ := pdt; try simp only [] at h
+      obtain ⟨pb, hblock, htl⟩ := bindOk' h; obtain ⟨co, cop, cbr⟩ := pb; simp only [] at htl
+      exact htail co cop cbr (decodeHuffmanCurTables_size hblock) htl
+    · exact absurd h (by simp [bind, Except.bind])
+
 set_option maxHeartbeats 1000000 in
 /-- **Target (issue #2799): the write-once cursor decoder agrees with the verified
     decoder on the exact-size path.** Whenever the verified tree-free decoder
@@ -2515,5 +2582,73 @@ theorem inflateSized_eq (data : ByteArray) (maxOut : Nat) (out : ByteArray)
   split
   · rw [inflateFastU_eq data maxOut out hds hosz hle href]
   · rw [Inflate.inflate_sizeHint_eq]; exact href
+
+set_option maxHeartbeats 1000000 in
+/-- **Soundness — the reverse direction.** Whenever the branch-free `uset` fastloop
+    *accepts*, the reference `Inflate.inflate` accepts the same bytes. Chains
+    `inflateRawFastU_eq`, the exact-size contract (`cop = cf.size`, and the loop
+    preserves size, so `cop = sizeHint`), the reverse loop bisimulation
+    `inflateLoopCur_treeFree`, then `inflateRaw_eq_loop`. -/
+theorem inflateFastU_sound (data : ByteArray) (maxOut sizeHint : Nat) (o : ByteArray)
+    (hds : data.size < USize.size) (hmo : maxOut < USize.size)
+    (h : Inflate.inflateFastU data maxOut sizeHint = .ok o) :
+    Inflate.inflate data maxOut = .ok o := by
+  have hpsz : (ByteArray.presize sizeHint).size = sizeHint := by
+    simp only [ByteArray.presize, ByteArray.size, Array.size_replicate]
+  have hemp : ByteArray.emptyWithCapacity 0 = (ByteArray.presize sizeHint).extract 0 0 := by
+    apply ByteArray.ext_getElem!
+    · rw [ByteArray.size_extract]; simp
+    · intro i hi; simp at hi
+  rw [Inflate.inflateFastU] at h
+  obtain ⟨pr, hraw, hret⟩ := bindOk' h
+  obtain ⟨o', endPos⟩ := pr
+  simp only [pure, Except.pure, Except.ok.injEq] at hret
+  rw [inflateRawFastU_eq, Inflate.inflateRawFast] at hraw
+  simp only [bind, Except.bind] at hraw
+  split at hraw
+  · exact absurd hraw (by simp)
+  · rename_i hng
+    obtain ⟨pl, hloop, hchk⟩ := bindOk' hraw
+    obtain ⟨cf, cop, cep⟩ := pl
+    simp only [] at hchk
+    split at hchk
+    · exact absurd hchk (by simp)
+    · rename_i hcopeq
+      obtain ⟨rfl, rfl⟩ := hchk
+      have hcfsz : o'.size = sizeHint := by
+        rw [inflateLoopCur_size maxOut data.size _ _ _ _ _ _ hloop, hpsz]
+      have hcopval : cop = o'.size := Decidable.of_not_not hcopeq
+      have htf := inflateLoopCur_treeFree maxOut data.size hds hmo
+        { data := data, pos := 0, bitOff := 0 } (ByteArray.presize sizeHint) 0 o' cop endPos
+        (by simp [ZipCommon.BitReader.bitPos]) rfl (by rw [hpsz]; omega) (by rw [hpsz]; omega)
+        (by omega) hloop (by rw [hpsz]; omega)
+      rw [← hemp] at htf
+      have hoext : o'.extract 0 cop = o' := by
+        rw [hcopval]
+        apply ByteArray.ext_getElem!
+        · rw [ByteArray.size_extract]; omega
+        · intro i hi
+          rw [ByteArray.size_extract] at hi
+          rw [ByteArray.getElem!_extract _ 0 _ i (by omega), Nat.zero_add]
+      rw [hoext] at htf
+      rw [Inflate.inflate]
+      simp only [bind, Except.bind]
+      rw [Inflate.inflateRaw_eq_loop, htf]
+      exact congrArg Except.ok hret
+
+/-- **The `uset` fastloop production dispatch equals the reference decoder,
+    unconditionally.** `inflateSized … = inflate`: the fast path returns exactly
+    `inflate`'s bytes when it accepts (`inflateFastU_sound`), the fallback and
+    inert-hint paths are `inflate` itself. So the fastloop is a true ratchet — no
+    CRC backstop is needed for soundness. -/
+theorem inflateSized_agrees (data : ByteArray) (maxOut sizeHint : Nat) (exact : Bool)
+    (hds : data.size < USize.size) (hmo : maxOut < USize.size) :
+    Inflate.inflateSized data maxOut sizeHint exact = Inflate.inflate data maxOut := by
+  rw [Inflate.inflateSized]
+  split
+  · cases hfu : Inflate.inflateFastU data maxOut sizeHint with
+    | ok o => exact (inflateFastU_sound data maxOut sizeHint o hds hmo hfu).symm
+    | error e => exact Inflate.inflate_sizeHint_eq data maxOut sizeHint
+  · exact Inflate.inflate_sizeHint_eq data maxOut sizeHint
 
 end Zip.Native

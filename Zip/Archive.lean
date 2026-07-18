@@ -1243,10 +1243,12 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
         -- `nativePresizeCap`, so decode with the verified branch-free `uset`
         -- fastloop (`inflateSized … (exact := true)`): every byte is written once
         -- into the pre-extended buffer, dropping the per-literal capacity and
-        -- output-size checks. It returns exactly `inflate`'s bytes on a valid
-        -- stream (`Zip.Native.inflateSized_eq`); a wrong `uncompressedSize` or a
-        -- corrupt stream makes it fall back to the push-based `inflate`, and the
-        -- CRC32 check below guards a mismatch either way. When a clamp bit
+        -- output-size checks. `inflateSized` is proven *unconditionally* equal to
+        -- `inflate` (`Zip.Native.inflateSized_agrees`), so this never changes the
+        -- decoded bytes for any input — a wrong `uncompressedSize` or a corrupt
+        -- stream is rejected exactly as `inflate` would reject it (the fastloop's
+        -- exact-size contract rejects, then falls back). The CRC32 check below is
+        -- ZIP integrity, not a soundness backstop. When a clamp bit
         -- (`exact = false`) the hint stays an inert capacity hint on `inflate`.
         let exact := sizeHint == entry.uncompressedSize.toNat
         match Zip.Native.Inflate.inflateSized compData maxEntrySize.toNat
