@@ -1243,14 +1243,18 @@ private def readEntryData (h : IO.FS.Handle) (entry : Entry) (label : String)
         -- `nativePresizeCap`, so decode with the verified branch-free `uset`
         -- fastloop (`inflateSized … (exact := true)`): every byte is written once
         -- into the pre-extended buffer, dropping the per-literal capacity and
-        -- output-size checks. `inflateSized` is proven *unconditionally* equal to
-        -- `inflate` (`Zip.Native.inflateSized_agrees`), so this never changes the
-        -- decoded bytes for any input — a wrong `uncompressedSize` or a corrupt
-        -- stream is rejected exactly as `inflate` would reject it (the fastloop's
-        -- exact-size contract rejects, then falls back). The CRC32 check below is
-        -- ZIP integrity, not a soundness backstop. When a clamp bit
-        -- (`exact = false`) the hint stays an inert capacity hint on `inflate`.
-        let exact := sizeHint == entry.uncompressedSize.toNat
+        -- output-size checks. `inflateSized` is proven equal to `inflate` for
+        -- every `USize`-representable input (`Zip.Native.inflateSized_agrees`,
+        -- under `maxOut < USize.size` — always true for in-memory `ByteArray`s on
+        -- a 64-bit target, the addressability regime every native decode proof in
+        -- this library assumes), so it never changes the decoded bytes: a wrong
+        -- `uncompressedSize` or a corrupt stream is rejected exactly as `inflate`
+        -- would reject it (the fastloop's exact-size contract rejects, then falls
+        -- back). The `maxEntrySize.toNat < USize.size` conjunct keeps the fast path
+        -- inside that proven regime on any platform. The CRC32 check below is ZIP
+        -- integrity, not a soundness backstop. When a clamp bit (`exact = false`)
+        -- the hint stays an inert capacity hint on `inflate`.
+        let exact := sizeHint == entry.uncompressedSize.toNat && maxEntrySize.toNat < USize.size
         match Zip.Native.Inflate.inflateSized compData maxEntrySize.toNat
             (sizeHint := sizeHint) (exact := exact) with
         | .ok data => pure data
