@@ -371,6 +371,16 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   | .ok result => assert! result == (big ++ singleByte)
   | .error e => throw (IO.userError s!"gzip concatenated fallback failed: {e}")
 
+  -- Empty first member then a nonempty one: `result` stays empty after member 0,
+  -- so the fast-path attempt must be gated on the first-member flag, not
+  -- `result.size == 0`. Correctness is independent of the gate; this pins the
+  -- concatenation result.
+  let gzEmpty ← Gzip.compress ByteArray.empty
+  let emptyThenHello := gzEmpty ++ gzippedHello
+  match Zip.Native.GzipDecode.decompress emptyThenHello with
+  | .ok result => assert! result == helloBytes
+  | .error e => throw (IO.userError s!"gzip empty-first-member fallback failed: {e}")
+
   -- Unit-level `inflateRawSized`: an exact hint fires the fastloop, and a wrong
   -- hint falls back — both return the identical bytes *and* end position as the
   -- push `inflateRaw` (the executable witness of `inflateRawSized_agrees`).
@@ -378,6 +388,12 @@ def ZipTest.NativeGzip.tests : IO Unit := do
   match Zip.Native.Inflate.inflateRaw deflatedLarge 0 (1024 * 1024 * 1024) with
   | .error e => throw (IO.userError s!"inflateRaw on deflatedLarge failed: {e}")
   | .ok (pushBytes, pushEnd) =>
+    -- The exact hint must make the fastloop itself *accept* (an executable witness
+    -- that the fast path really fires — not just that the dispatch is equivalent).
+    match Zip.Native.Inflate.inflateRawFastU deflatedLarge 0 (1024 * 1024 * 1024)
+        (sizeHint := large.size) with
+    | .ok (b, ep) => assert! b == pushBytes && ep == pushEnd
+    | .error e => throw (IO.userError s!"inflateRawFastU exact hint should accept: {e}")
     for (sh, ex) in [(large.size, true), (large.size + 13, true), (0, false)] do
       match Zip.Native.Inflate.inflateRawSized deflatedLarge 0 (1024 * 1024 * 1024)
           (sizeHint := sh) (exact := ex) with
