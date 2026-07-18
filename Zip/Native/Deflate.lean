@@ -1388,6 +1388,175 @@ theorem lazyAcceptCost_lt {len1 dist1 len2 dist2 : Nat}
   simp only [lazyAcceptCost, Bool.and_eq_true, decide_eq_true_eq] at h
   exact h.1
 
+/-- Chain depth for a rolling-lazy2 follow-up probe (`rollDefer`). Mirrors the
+    certified spike's mode-0 ladder (`bench/ZipLazyRollSweep.lean`, #2837): a
+    constant `maxChain / 4` after the main loop's own full-depth `pos+1` probe,
+    floored at 1 so a probe never runs at zero fuel. A pure heuristic — depth
+    never enters a validity proof (`chainWalk_spec` holds for any fuel). -/
+@[inline] def lazy2ProbeDepth (maxChain : Nat) : Nat :=
+  max 1 (maxChain / 4)
+
+/-! Rolling multi-step deferral for `lz77ChainLazy` (rung 1 of #2837). `mainLoop`
+    is the boxed lazy matcher extended with a `lazy2Steps` knob: when the accept
+    rule fires and steps remain (`1 < lazy2Steps`), it emits the pending
+    match-start byte as a literal and enters `rollDefer`, which keeps deferring
+    while each next position strictly improves the pending match (libdeflate's
+    `deflate_compress_lazy2` loop). `lazy2Steps = 1` never enters `rollDefer` — it
+    is the original single-deferral behavior verbatim, so every downstream `_eq`
+    holds at the default. Match-finding stays opaque to correctness
+    (`chainWalk_spec` for any chain state), and every emitted reference is
+    re-verified at emission, so the roll's chain state never enters a proof. -/
+mutual
+
+def lz77ChainLazy.mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) : List LZ77Token :=
+  if hlt : pos + 2 < data.size then
+    let h := lz77Greedy.hash3 data pos hashSize hlt
+    let head := headProbeGuarded hashTable h
+    let hashTable := guardedSet hashTable h pos
+    let prev := guardedSet prev (pos &&& 0x7FFF) head
+    let seed := h3Seed useH3 data h3tab windowSize pos hlt
+    let h3tab := if useH3 then guardedSet h3tab (hash3Single data pos hlt) pos else h3tab
+    let maxLen := min 258 (data.size - pos)
+    have hmaxLenP : pos + maxLen ≤ data.size := by omega
+    let m := lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+    let matchLen := m.1
+    let matchPos := m.2
+    if hge : matchLen ≥ 3 then
+      if hle : pos + matchLen ≤ data.size then
+        if h3lt : pos + 3 < data.size then
+          if matchLen < goodMatch then
+            let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+            let head2 := headProbeGuarded hashTable h2
+            let maxLen2 := min 258 (data.size - (pos + 1))
+            have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
+            let m2 :=
+              lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth 0 0
+            let matchLen2 := m2.1
+            let matchPos2 := m2.2
+            if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                if h1 : 1 < lazy2Steps then
+                  -- Rolling deferral (rung 1 of #2837): emit the pending
+                  -- match-start byte as a literal, roll the pending match `M'`
+                  -- forward into `rollDefer` at `pos+1`, step 1.
+                  if hpl2 : 3 ≤ matchLen2 then
+                    .literal (data[pos]'(by omega)) ::
+                      lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3
+                        hashTable prev h3tab (pos + 1) matchLen2 matchPos2 1
+                        insertCap goodMatch niceLen lazyDepth lazy2Steps hle2 hpl2
+                  else
+                    -- Unreachable (accept ⇒ matchLen2 > matchLen ≥ 3); the
+                    -- single-deferral result keeps the function total.
+                    let (hashTable, prev) :=
+                      lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
+                    let h3tab := if useH3 then updateHash3 data h3tab pos 1 (matchLen2 + 1) insertCap else h3tab
+                    .literal (data[pos]'(by omega)) ::
+                      .reference matchLen2 (pos + 1 - matchPos2) ::
+                        lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + 1 + matchLen2) insertCap goodMatch niceLen lazyDepth lazy2Steps
+                else
+                  -- Single deferral (`lazy2Steps ≤ 1`): the original lazy behavior.
+                  have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                  let (hashTable, prev) :=
+                    lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
+                  let h3tab := if useH3 then updateHash3 data h3tab pos 1 (matchLen2 + 1) insertCap else h3tab
+                  .literal (data[pos]'(by omega)) ::
+                    .reference matchLen2 (pos + 1 - matchPos2) ::
+                      lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + 1 + matchLen2) insertCap goodMatch niceLen lazyDepth lazy2Steps
+              else
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let (hashTable, prev) :=
+                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
+                let h3tab := if useH3 then updateHash3 data h3tab pos 1 matchLen insertCap else h3tab
+                .reference matchLen (pos - matchPos) ::
+                  lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen lazyDepth lazy2Steps
+            else
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let (hashTable, prev) :=
+                lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
+              let h3tab := if useH3 then updateHash3 data h3tab pos 1 matchLen insertCap else h3tab
+              .reference matchLen (pos - matchPos) ::
+                lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen lazyDepth lazy2Steps
+          else
+            -- Gated: long first match, skip the lookahead; still insert interior hashes.
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            let (hashTable, prev) :=
+              lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
+            let h3tab := if useH3 then updateHash3 data h3tab pos 1 matchLen insertCap else h3tab
+            .reference matchLen (pos - matchPos) ::
+              lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen lazyDepth lazy2Steps
+        else
+          -- Near end of data: keep match at pos
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          .reference matchLen (pos - matchPos) ::
+            lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen lazyDepth lazy2Steps
+      else
+        .literal (data[pos]'(by omega)) ::
+          lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + 1) insertCap goodMatch niceLen lazyDepth lazy2Steps
+    else
+      .literal (data[pos]'(by omega)) ::
+        lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + 1) insertCap goodMatch niceLen lazyDepth lazy2Steps
+  else
+    lz77Greedy.trailing data pos
+termination_by data.size - pos
+decreasing_by all_goals omega
+
+/-- Rolling sub-recursion: a pending match `(pLen, pMatchPos)` starts at `mp`;
+    positions `< mp` are already decided. If a defer remains (`step < lazy2Steps`,
+    room, and the pending match is short) and re-probing `mp+1` at
+    `lazy2ProbeDepth` strictly improves it (`lazyAcceptCost`), emit `lit(mp)` and
+    roll to the new match at `mp+1`, step `+1`. Otherwise commit the pending match
+    at `mp`. The no-more-defers commit uses the production batch
+    `updateHashes (mp-1) 1 (pLen+1)`, so `mainLoop`'s `lazy2Steps = 1` entry (which
+    never reaches here) matches production exactly. `hmp`/`hpl` carry the pending
+    match's length bounds for termination; the emitted reference's validity is
+    re-established at emission (see `LZ77ChainLazyCorrect`). -/
+def lz77ChainLazy.rollDefer (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
+    (hashTable : Array Nat) (prev h3tab : Array Nat)
+    (mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (hmp : mp + pLen ≤ data.size) (hpl : 3 ≤ pLen) : List LZ77Token :=
+  if hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch then
+    -- Insert `mp` (loop-top style) so `mp+1` can match against it.
+    let hmh := lz77Greedy.hash3 data mp hashSize (by omega)
+    let headmp := headProbeGuarded hashTable hmh
+    let hashTable := guardedSet hashTable hmh mp
+    let prev := guardedSet prev (mp &&& 0x7FFF) headmp
+    let h3tab := if useH3 then guardedSet h3tab (hash3Single data mp (by omega)) mp else h3tab
+    -- Probe `mp+1` at the ladder depth. Unseeded (0,0): a length seed only changes
+    -- a rejected result, and acceptance needs `len' > pLen` strictly (matches the
+    -- seeded spike's accepted output exactly), so this stays validity-provable.
+    let h2 := lz77Greedy.hash3 data (mp + 1) hashSize (by omega)
+    let head2 := headProbeGuarded hashTable h2
+    let maxLen2 := min 258 (data.size - (mp + 1))
+    have hmaxLen2P : (mp + 1) + maxLen2 ≤ data.size := by omega
+    let m2 := lz77Chain.chainWalk data prev windowSize (mp + 1) maxLen2 niceLen hmaxLen2P head2 (lazy2ProbeDepth maxChain) 0 0
+    let len' := m2.1
+    let pos' := m2.2
+    if hacc : lazyAcceptCost pLen (mp - pMatchPos) len' (mp + 1 - pos') = true ∧ (mp + 1) + len' ≤ data.size then
+      have hlen' : 3 ≤ len' := by have := lazyAcceptCost_lt hacc.1; omega
+      .literal (data[mp]'(by omega)) ::
+        lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3
+          hashTable prev h3tab (mp + 1) len' pos' (step + 1)
+          insertCap goodMatch niceLen lazyDepth lazy2Steps hacc.2 hlen'
+    else
+      -- No improvement: commit the pending match at `mp`. `mp` already inserted
+      -- above, so insert only the interior `mp+1 .. mp+pLen-1`.
+      let (hashTable, prev) := lz77Chain.updateHashes data hashSize hashTable prev mp 1 pLen insertCap
+      let h3tab := if useH3 then updateHash3 data h3tab mp 1 pLen insertCap else h3tab
+      .reference pLen (mp - pMatchPos) ::
+        lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (mp + pLen) insertCap goodMatch niceLen lazyDepth lazy2Steps
+  else
+    -- No more defers: commit the pending match at `mp` via the production batch
+    -- `updateHashes (mp-1) 1 (pLen+1)` (inserts `mp .. mp+pLen-1`).
+    let (hashTable, prev) := lz77Chain.updateHashes data hashSize hashTable prev (mp - 1) 1 (pLen + 1) insertCap
+    let h3tab := if useH3 then updateHash3 data h3tab (mp - 1) 1 (pLen + 1) insertCap else h3tab
+    .reference pLen (mp - pMatchPos) ::
+      lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (mp + pLen) insertCap goodMatch niceLen lazyDepth lazy2Steps
+termination_by data.size - mp
+decreasing_by all_goals omega
+
+end
+
 /-- Lazy (one-byte-lookahead, zlib `deflate_slow`-style) variant of `lz77Chain`.
     At each position it finds the best chain match `M` at `pos`; before emitting it
     runs a *second* `chainWalk` at `pos+1` for `M'`. It defers — emits a literal at
@@ -1416,94 +1585,15 @@ theorem lazyAcceptCost_lt {len1 dist1 len2 dist2 : Nat}
     `LZ77ChainLazyCorrect`. -/
 def lz77ChainLazy (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
-    (lazyDepth : Nat := maxChain) (useH3 : Bool := false) :
+    (lazyDepth : Nat := maxChain) (useH3 : Bool := false) (lazy2Steps : Nat := 1) :
     Array LZ77Token :=
   if data.size < 3 then
     (lz77Greedy.trailing data 0).toArray
   else
     let hashSize := 65536
-    (mainLoop data windowSize hashSize maxChain useH3
+    (lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 insertCap goodMatch niceLen lazyDepth).toArray
-where
-  mainLoop (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
-      (hashTable : Array Nat) (prev h3tab : Array Nat) (pos insertCap goodMatch niceLen lazyDepth : Nat) : List LZ77Token :=
-    if hlt : pos + 2 < data.size then
-      let h := lz77Greedy.hash3 data pos hashSize hlt
-      let head := headProbeGuarded hashTable h
-      let hashTable := guardedSet hashTable h pos
-      let prev := guardedSet prev (pos &&& 0x7FFF) head
-      let seed := h3Seed useH3 data h3tab windowSize pos hlt
-      let h3tab := if useH3 then guardedSet h3tab (hash3Single data pos hlt) pos else h3tab
-      let maxLen := min 258 (data.size - pos)
-      have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let m := lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
-      let matchLen := m.1
-      let matchPos := m.2
-      if hge : matchLen ≥ 3 then
-        if hle : pos + matchLen ≤ data.size then
-          -- Lazy: probe pos+1 for a cost-accepted deferral (`lazyAcceptCost`)
-          if h3lt : pos + 3 < data.size then
-            -- Lazy gate (zlib `good_match`): probe pos+1 only when the first match is
-            -- short. `goodMatch = 259` (> 258) restores the ungated lazy matcher.
-            if matchLen < goodMatch then
-              let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
-              let head2 := headProbeGuarded hashTable h2
-              let maxLen2 := min 258 (data.size - (pos + 1))
-              have hmaxLen2P : (pos + 1) + maxLen2 ≤ data.size := by omega
-              let m2 :=
-                lz77Chain.chainWalk data prev windowSize (pos + 1) maxLen2 niceLen hmaxLen2P head2 lazyDepth 0 0
-              let matchLen2 := m2.1
-              let matchPos2 := m2.2
-              if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
-                if hle2 : pos + 1 + matchLen2 ≤ data.size then
-                  -- Cost-accepted match at pos+1: emit literal at pos + reference at pos+1
-                  have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
-                  let (hashTable, prev) :=
-                    lz77Chain.updateHashes data hashSize hashTable prev pos 1 (matchLen2 + 1) insertCap
-                  let h3tab := if useH3 then updateHash3 data h3tab pos 1 (matchLen2 + 1) insertCap else h3tab
-                  .literal (data[pos]'(by omega)) ::
-                    .reference matchLen2 (pos + 1 - matchPos2) ::
-                    mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + 1 + matchLen2) insertCap goodMatch niceLen lazyDepth
-                else
-                  -- matchLen2 spills past data: keep match at pos
-                  have : data.size - (pos + matchLen) < data.size - pos := by omega
-                  let (hashTable, prev) :=
-                    lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
-                  let h3tab := if useH3 then updateHash3 data h3tab pos 1 matchLen insertCap else h3tab
-                  .reference matchLen (pos - matchPos) ::
-                    mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen lazyDepth
-              else
-                -- No better match at pos+1: keep match at pos
-                have : data.size - (pos + matchLen) < data.size - pos := by omega
-                let (hashTable, prev) :=
-                  lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
-                let h3tab := if useH3 then updateHash3 data h3tab pos 1 matchLen insertCap else h3tab
-                .reference matchLen (pos - matchPos) ::
-                  mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen lazyDepth
-            else
-              -- Gated: long first match, skip the lookahead; still insert interior hashes.
-              have : data.size - (pos + matchLen) < data.size - pos := by omega
-              let (hashTable, prev) :=
-                lz77Chain.updateHashes data hashSize hashTable prev pos 1 matchLen insertCap
-              let h3tab := if useH3 then updateHash3 data h3tab pos 1 matchLen insertCap else h3tab
-              .reference matchLen (pos - matchPos) ::
-                mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen lazyDepth
-          else
-            -- Near end of data: keep match at pos
-            have : data.size - (pos + matchLen) < data.size - pos := by omega
-            .reference matchLen (pos - matchPos) ::
-              mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + matchLen) insertCap goodMatch niceLen lazyDepth
-        else
-          .literal (data[pos]'(by omega)) ::
-            mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + 1) insertCap goodMatch niceLen lazyDepth
-      else
-        .literal (data[pos]'(by omega)) ::
-          mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab (pos + 1) insertCap goodMatch niceLen lazyDepth
-    else
-      lz77Greedy.trailing data pos
-  termination_by data.size - pos
-  decreasing_by all_goals omega
+      (.replicate 32768 data.size) 0 insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray
 
 /-- Iterative (tail-recursive, `Array`-accumulating) version of `lz77ChainLazy`.
     Same output, no stack overflow on large inputs. Reuses `lz77Chain`'s
