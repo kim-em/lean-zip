@@ -503,13 +503,14 @@ private theorem seeded_probe_bridge (data : ByteArray) (prev : Array Nat)
 
 set_option maxHeartbeats 1000000 in
 private theorem mergedLoop_eq (data : ByteArray)
-    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
+    (hstep : ¬ 1 < lazy2Steps)
     (hashTable prev h3tab : Array Nat) (pos : Nat) (acc : Array UInt32)
     (hhs : 0 < hashSize) (hht : hashTable.size = hashSize) (hps : prev.size = prevSize)
     (hpv : min chainWinSize data.size ≤ prev.size) :
-    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
         (prev ++ hashTable) h3tab pos acc =
-      lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth useH3
+      lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
         hashTable prev h3tab pos acc := by
   induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab hht hps hpv with
   | _ n ih =>
@@ -528,6 +529,12 @@ private theorem mergedLoop_eq (data : ByteArray)
       simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
       generalize hsd : h3Seed useH3 data h3tab windowSize pos hlt = sd
       generalize hash3Single data pos hlt = hsg
+      -- Prune the dead `1 < lazy2Steps` rolling dispatch on both sides (rung-4 hstep
+      -- checkpoint). It sits under the lookahead `have` binders, so a folded
+      -- (`zeta := false`) simp cannot reach it — this zeta-true `dif_neg hstep`
+      -- reduces those `dite`s so the later `generalize`s (whose explicit `rollDefer`
+      -- proof-args would otherwise block abstracting the head-inserted table) apply.
+      simp only [dif_neg hstep]
       simp only [headProbeGuarded_eq, guardedSet_eq,
         getElem!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) hps hh,
         set!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) pos hps hh,
@@ -677,7 +684,7 @@ theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize inse
   · dsimp only
     rw [← Array.replicate_append_replicate]
     exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
-      goodMatch niceLen lazyDepth useH3 (Array.replicate 65536 data.size)
+      goodMatch niceLen lazyDepth 1 useH3 (by omega) (Array.replicate 65536 data.size)
       (Array.replicate (min chainWinSize data.size) data.size) (Array.replicate 32768 data.size) 0 _
       (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
       (Nat.le_of_eq (by rw [Array.size_replicate]))
