@@ -1,5 +1,6 @@
 import Zip.Native.Inflate
 import Zip.Native.InflateTreeFree
+import Zip.Native.InflateFast
 import Zip.Native.DeflateDynamic
 import Zip.Native.Crc32
 import Zip.Native.Adler32
@@ -16,6 +17,12 @@ import ZipCommon.Binary
 namespace Zip.Native
 
 namespace GzipDecode
+
+/-- Absolute ceiling on the exact-size fastloop's speculative presize allocation,
+    mirroring `Zip.Archive.nativePresizeCap`. A member whose declared decompressed
+    size (gzip trailer `ISIZE`) exceeds this keeps the push decoder rather than
+    pre-extending a large buffer up front. -/
+def presizeCap : Nat := 64 * 1024 * 1024
 
 /-- Scan forward from `pos` in `data` for the next zero byte (NUL).
     Returns the index of the zero byte, or `data.size` if none is found. -/
@@ -43,6 +50,11 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
   if data.size < 10 then throw "Gzip: input too short for gzip header"
   let mut pos : Nat := 0
   let mut result : ByteArray := .empty
+  -- Tracks the very first member. `result.size == 0` is *not* a first-member test:
+  -- an empty member (or a run of them) leaves `result` empty, so it would let every
+  -- empty-prefix member re-attempt the speculative presize. A dedicated flag caps
+  -- the fastloop attempt at exactly one per stream.
+  let mut firstMember : Bool := true
   -- Process concatenated gzip members
   for _ in [:1000] do
     if pos ≥ data.size then return result
@@ -79,7 +91,37 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
       if pos > data.size then throw "Gzip: header extends past end of input"
       -- Inflate (cap each member to remaining budget so total stays within maxOutputSize)
       let memberMax := maxOutputSize - result.size
-      let (decompressed, endPos) ← Inflate.inflateRaw data pos memberMax
+      -- Exact-size fastloop for the single-member case (tar.gz, the dominant real
+      -- workload). For a stream with exactly one member, the trailing 8 bytes are
+      -- this member's trailer, so `ISIZE = readUInt32LE data (size - 4)` is the
+      -- exact decompressed length. We attempt the verified branch-free `uset`
+      -- fastloop (`inflateRawSized … (exact := true)`) only on the *first* member
+      -- (`firstMember`) — for a later member the trailing ISIZE is not this member's
+      -- size — and only when the hint is bounded by `presizeCap` and the member
+      -- budget (`exact` conjuncts). The `memberMax < UInt32.size` conjunct keeps
+      -- ISIZE (which is the size *mod 2^32*) a genuinely exact hint: with the output
+      -- bounded below 4 GiB, `ISIZE = decompressed.size` outright, no 2^32 residue
+      -- ambiguity, so a matching hint fires the fast path rather than wasting a
+      -- decode that would reject. `inflateRawSized` is proven equal to `inflateRaw`
+      -- for every input in the `USize` addressability regime
+      -- (`Zip.Native.inflateRawSized_agrees`, under `data.size < USize.size` — always
+      -- true for an in-memory `ByteArray` on a 64-bit target, the regime every native
+      -- decode proof here assumes — and `memberMax < USize.size` from the conjunct,
+      -- with `pos ≤ data.size` from the guard above). So a wrong hint — a concatenated
+      -- multi-member stream, trailing padding, or a malicious ISIZE — makes the
+      -- fastloop's exact-size contract reject and fall back to the push `inflateRaw`,
+      -- never changing the decoded bytes or the returned `endPos`. The CRC32 / ISIZE
+      -- trailer checks below stay integrity checks, not soundness backstops.
+      let (decompressed, endPos) ←
+        if firstMember then
+          let isize := (Binary.readUInt32LE data (data.size - 4)).toNat
+          let sizeHint := min isize presizeCap
+          let exact := isize == sizeHint && isize ≤ memberMax
+            && memberMax < UInt32.size && memberMax < USize.size
+          Inflate.inflateRawSized data pos memberMax (sizeHint := sizeHint) (exact := exact)
+        else
+          Inflate.inflateRaw data pos memberMax
+      firstMember := false
       pos := endPos
       -- Parse trailer: CRC32 (4 bytes LE) + ISIZE (4 bytes LE)
       if pos + 8 > data.size then throw "Gzip: truncated trailer"
