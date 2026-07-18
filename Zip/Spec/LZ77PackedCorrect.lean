@@ -90,12 +90,11 @@ mutual
     so both sides land on the same walk; `Array.map_push` commutes `packTok` through
     each push. -/
 private theorem rollDefer_P_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
-    (hashTable : Array Nat) (prev h3tab : Array Nat) (mp pLen pMatchPos step : Nat) (acc : Array LZ77Token)
-    (hmp : mp + pLen ≤ data.size) (hpl : 3 ≤ pLen) :
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (mp pLen pMatchPos step : Nat) (acc : Array LZ77Token) :
     lz77ChainLazyIterP.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step
-        (acc.map packTok) hmp hpl =
+        (acc.map packTok) =
       (lz77ChainLazyIter.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step
-        acc hmp hpl).map packTok := by
+        acc).map packTok := by
   unfold lz77ChainLazyIterP.rollDefer lz77ChainLazyIter.rollDefer
   by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch
   · rw [dif_pos hcan, dif_pos hcan]
@@ -110,7 +109,7 @@ private theorem rollDefer_P_eq (data : ByteArray) (windowSize hashSize maxChain 
   · rw [dif_neg hcan, dif_neg hcan]
     simp only [← Array.map_push]
     rw [mainLoopLazyP_eq]
-termination_by data.size - mp
+termination_by 2 * (data.size - mp) + 1
 decreasing_by all_goals omega
 
 /-- The packed lazy `mainLoop` is the packed image of the boxed one, generalized to
@@ -133,7 +132,7 @@ private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChai
     generalize h3Seed useH3 data h3tab windowSize pos hlt = sd
     generalize hash3Single data pos hlt = hsg
     simp (config := { maxSteps := 4000000 }) only [chainWalkGuardedPackedU_eq]
-    -- Branch tree: hge / hle / h3lt / gate / lazyAccept / hle2 / h1 / hpl2
+    -- Branch tree: hge / hle / h3lt / gate / lazyAccept / hle2 / h1 (rung 5: no hpl2)
     split
     · split
       · split
@@ -141,11 +140,8 @@ private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChai
           · split
             · split
               · split
-                · split
-                  · -- roll arm: literal push, then rollDefer
-                    rw [← Array.map_push, rollDefer_P_eq]
-                  · -- ¬hpl2: single-deferral fallback, two pushes
-                    rw [← Array.map_push, ← Array.map_push, mainLoopLazyP_eq]
+                · -- roll arm: literal push, then rollDefer
+                  rw [← Array.map_push, rollDefer_P_eq]
                 · -- ¬h1: single deferral, two pushes
                   rw [← Array.map_push, ← Array.map_push, mainLoopLazyP_eq]
               · -- ¬hle2: reference(matchLen)
@@ -162,8 +158,8 @@ private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChai
       rw [← Array.map_push, mainLoopLazyP_eq]
   · simp only [hlt, ↓reduceDIte]
     exact trailingP_eq data pos acc
-termination_by data.size - pos
-decreasing_by all_goals omega
+termination_by 2 * (data.size - pos)
+decreasing_by all_goals (first | omega | (refine Nat.mul_lt_mul_of_pos_left ?_ (by decide); omega))
 
 end
 

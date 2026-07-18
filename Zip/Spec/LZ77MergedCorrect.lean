@@ -501,10 +501,10 @@ private theorem seeded_probe_bridge (data : ByteArray) (prev : Array Nat)
 
 /-! ## The lockstep loop equality -/
 
-set_option maxHeartbeats 1000000 in
+set_option backward.split false in
+set_option maxHeartbeats 2000000 in
 private theorem mergedLoop_eq (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
-    (hstep : ¬ 1 < lazy2Steps)
     (hashTable prev h3tab : Array Nat) (pos : Nat) (acc : Array UInt32)
     (hhs : 0 < hashSize) (hht : hashTable.size = hashSize) (hps : prev.size = prevSize)
     (hpv : min chainWinSize data.size ≤ prev.size) :
@@ -523,18 +523,67 @@ private theorem mergedLoop_eq (data : ByteArray)
         have h1 := winMask_lt pos
         have h2 := Nat.and_le_left (n := pos) (m := 0x7FFF)
         simp only [chainWinSize] at h1 hpv; omega
-      -- Reduce the outer dite with `zeta := false`, then abstract the opaque
-      -- hash3 seed (identical on both sides — it reads the separate `h3tab`) so
-      -- the append/head-insert simp below does not duplicate it across branches.
+      -- Rolling-arm helper (rung 5): the merged `rollDefer` equals the packed one, by
+      -- a nested strong induction on `data.size - mp`; its commit into `mainLoop` at
+      -- `mp + pLen` reuses the OUTER `ih` (`pos < mp ⇒ data.size-(mp+pLen) < n`). Now
+      -- that `rollDefer` carries no proof-args the seed-bridge `rw`s are motive-correct.
+      have rdeq : ∀ (mp pLen pMatchPos step : Nat) (accd : Array UInt32) (htd prevd h3td : Array Nat)
+          (hhtd : htd.size = hashSize) (hpsd : prevd.size = prevSize)
+          (hpvd : min chainWinSize data.size ≤ prevd.size) (hlo : pos < mp),
+          lz77LazyMergedLoop.rollDefer data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
+              (prevd ++ htd) h3td mp pLen pMatchPos step accd =
+            lz77ChainLazyIterP.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
+              htd prevd h3td mp pLen pMatchPos step accd := by
+        intro mp pLen pMatchPos step accd htd prevd h3td hhtd hpsd hpvd hlo
+        induction hnm : data.size - mp using Nat.strongRecOn generalizing mp pLen pMatchPos step accd htd prevd h3td hhtd hpsd hpvd hlo with
+        | _ mnat ihm =>
+          unfold lz77LazyMergedLoop.rollDefer lz77ChainLazyIterP.rollDefer
+          by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch
+          · have hhd : lz77Greedy.hash3 data mp hashSize (by omega) < htd.size := by
+              rw [hhtd]; have : lz77Greedy.hash3 data mp hashSize (by omega) < hashSize := Nat.mod_lt _ hhs; omega
+            have hmask0d : (mp &&& 0x7FFF) < prevd.size := by
+              have h1 := winMask_lt mp
+              have h2 := Nat.and_le_left (n := mp) (m := 0x7FFF)
+              simp only [chainWinSize] at h1 hpvd; omega
+            rw [dif_pos hcan, dif_pos hcan]
+            simp only [headProbeGuarded_eq, guardedSet_eq,
+              getElem!_append_right' prevd htd prevSize (lz77Greedy.hash3 data mp hashSize (by omega)) hpsd hhd,
+              set!_append_right' prevd htd prevSize (lz77Greedy.hash3 data mp hashSize (by omega)) mp hpsd hhd,
+              set!_append_left prevd (htd.set! (lz77Greedy.hash3 data mp hashSize (by omega)) mp)
+                (mp &&& 0x7FFF) (htd[lz77Greedy.hash3 data mp hashSize (by omega)]!) hmask0d]
+            generalize ht'eqm : htd.set! (lz77Greedy.hash3 data mp hashSize (by omega)) mp = t''
+            generalize hp'eqm : prevd.set! (mp &&& 0x7FFF) (htd[lz77Greedy.hash3 data mp hashSize (by omega)]!) = p''
+            have hht'' : t''.size = hashSize := by rw [← ht'eqm, Array.size_set!]; exact hhtd
+            have hps'' : p''.size = prevSize := by rw [← hp'eqm, Array.size_set!]; exact hpsd
+            have hpv'' : min chainWinSize data.size ≤ p''.size := by rw [← hp'eqm, Array.size_set!]; exact hpvd
+            have hh2m : lz77Greedy.hash3 data (mp + 1) hashSize (by omega) < t''.size := by
+              rw [hht'']; have : lz77Greedy.hash3 data (mp + 1) hashSize (by omega) < hashSize := Nat.mod_lt _ hhs; omega
+            simp only [getElem!_append_right' p'' t'' prevSize (lz77Greedy.hash3 data (mp + 1) hashSize (by omega)) hps'' hh2m]
+            rw [chainWalkGuardedPackedU_append data p'' t'' windowSize (mp + 1)
+              (min 258 (data.size - (mp + 1))) niceLen (by omega) hpv'' (t''[lz77Greedy.hash3 data (mp + 1) hashSize (by omega)]!) (lazy2ProbeDepth maxChain)]
+            -- Unseeded re-probe on both sides (rung 5): the accept ites are identical
+            -- after the append-strip, so `split` aligns them with no seed bridge.
+            split
+            · -- accept: roll to `mp+1` via the nested induction `ihm`
+              exact ihm _ (by omega) _ _ _ _ _ _ _ _ hht'' hps'' hpv'' (by omega) rfl
+            · -- reject: commit `reference pLen` at `mp`, then `mainLoop` via OUTER ih
+              rw [updateHashesMergedH3Guarded_eq,
+                updateHashesMerged_append data hashSize prevSize t'' p'' mp 1 _ insertCap hhs hht'' hps'' hpv'',
+                updateHashesGuarded_eq]
+              exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht'')
+                (by rw [updateHashes_size2]; exact hps'') (by rw [updateHashes_size2]; exact hpv'') rfl
+          · -- no more defers: commit `reference pLen`, then `mainLoop` via OUTER ih
+            rw [dif_neg hcan, dif_neg hcan]
+            rw [updateHashesMergedH3Guarded_eq,
+              updateHashesMerged_append data hashSize prevSize htd prevd (mp - 1) 1 _ insertCap hhs hhtd hpsd hpvd,
+              updateHashesGuarded_eq]
+            exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hhtd)
+              (by rw [updateHashes_size2]; exact hpsd) (by rw [updateHashes_size2]; exact hpvd) rfl
+      -- Main loop lockstep. With `rollDefer` proof-arg-free the `generalize`s below
+      -- survive the live rolling arm (the walk lands only in `Nat` positions).
       simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
       generalize hsd : h3Seed useH3 data h3tab windowSize pos hlt = sd
       generalize hash3Single data pos hlt = hsg
-      -- Prune the dead `1 < lazy2Steps` rolling dispatch on both sides (rung-4 hstep
-      -- checkpoint). It sits under the lookahead `have` binders, so a folded
-      -- (`zeta := false`) simp cannot reach it — this zeta-true `dif_neg hstep`
-      -- reduces those `dite`s so the later `generalize`s (whose explicit `rollDefer`
-      -- proof-args would otherwise block abstracting the head-inserted table) apply.
-      simp only [dif_neg hstep]
       simp only [headProbeGuarded_eq, guardedSet_eq,
         getElem!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) hps hh,
         set!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) pos hps hh,
@@ -547,9 +596,6 @@ private theorem mergedLoop_eq (data : ByteArray)
       have hpv' : min chainWinSize data.size ≤ p'.size := by rw [← hp'eq, Array.size_set!]; exact hpv
       rw [chainWalkGuardedPackedU_append data p' t' windowSize pos (min 258 (data.size - pos))
         niceLen (by omega) hpv' (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain (sd % 512) (sd / 512)]
-      -- Abstract the (now identical on both sides) main walk result so `split`'s
-      -- normalisation does not carry its many `matchLen`/`matchPos`/interior-insert
-      -- copies (which the split-tier `updateHash3` range multiplied).
       generalize chainWalkGuardedPackedU data p' windowSize pos (min 258 (data.size - pos)) niceLen
         (by omega) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain (sd % 512) (sd / 512) = rmain
       split
@@ -566,9 +612,7 @@ private theorem mergedLoop_eq (data : ByteArray)
               (min 258 (data.size - (pos + 1))) niceLen (by omega) hpv'
               (t'[lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!) lazyDepth]
             split
-            · -- goodMatch-T: bridge the *seeded* `pos+1` probe to the unseeded one.
-              -- The seeding lemma makes the lazy decision (and, on accept, the probe
-              -- result itself) identical, so the branch tree stays in lockstep.
+            · -- goodMatch-T: bridge the seeded `pos+1` probe to the unseeded one.
               have hbr := seeded_probe_bridge data p' windowSize (pos + 1)
                 (min 258 (data.size - (pos + 1))) niceLen (by omega) (by omega)
                 (t'[lz77Greedy.hash3 data (pos + 1) hashSize (by omega)]!) lazyDepth
@@ -582,12 +626,18 @@ private theorem mergedLoop_eq (data : ByteArray)
                 rcases hbr.2 with heq | hfalse
                 · rw [heq]
                   split
-                  · rw [updateHashesMergedH3Guarded_eq,
-                      updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
-                      updateHashesGuarded_eq]
-                    exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht')
-                      (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
-                  · rw [updateHashesMergedH3Guarded_eq,
+                  · -- hle2-T: rolling dispatch `if 1 < lazy2Steps`
+                    split
+                    · -- roll: forward to `rollDefer` at `pos+1` via `rdeq`
+                      rw [rdeq] <;> first | exact hht' | exact hps' | exact hpv' | omega
+                    · -- ¬(1 < lazy2Steps): single-deferral two-push commit
+                      rw [updateHashesMergedH3Guarded_eq,
+                        updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
+                        updateHashesGuarded_eq]
+                      exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+                        (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
+                  · -- ¬hle2: reference(matchLen) at pos
+                    rw [updateHashesMergedH3Guarded_eq,
                       updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
                       updateHashesGuarded_eq]
                     exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht')
@@ -684,7 +734,7 @@ theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize inse
   · dsimp only
     rw [← Array.replicate_append_replicate]
     exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
-      goodMatch niceLen lazyDepth 1 useH3 (by omega) (Array.replicate 65536 data.size)
+      goodMatch niceLen lazyDepth 1 useH3 (Array.replicate 65536 data.size)
       (Array.replicate (min chainWinSize data.size) data.size) (Array.replicate 32768 data.size) 0 _
       (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
       (Nat.le_of_eq (by rw [Array.size_replicate]))
