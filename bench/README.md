@@ -216,6 +216,16 @@ memory-bandwidth ceiling on emitting the output bytes. This is the rigorous way 
 isolate a decoder: an own-encoder scatter (the lzbench / Squash convention)
 confounds decoder speed with each encoder's ratio.
 
+The native row here is the **known-exact-size production path** — the same one
+ZIP extraction runs (`Zip.Archive` decodes each entry at its declared
+`uncompressedSize`). The decode-density harness feeds the decoder the stream's
+true output size, so native decodes through
+`Zip.Native.Inflate.inflateSized … (exact := true)`: the verified branch-free
+`uset` exact-size fastloop that writes every byte once into the pre-extended
+buffer, dropping the per-literal capacity and output-size checks. It is proven
+byte-identical to the push decoder `inflate` (`inflateSized_agrees`), so the
+measured throughput is the production fast path, not a benchmark-only shortcut.
+
 Two views over the fixed-encoder streams — libdeflate at levels 1/3/6/9/12 plus a
 zopfli stream per file (the densest realistic raw DEFLATE):
 
