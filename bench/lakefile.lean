@@ -373,3 +373,11 @@ lean_exe fuzz_inflate where
 @[default_target]
 lean_exe fuzz_handle_read where
   root := `ZipFuzzHandleRead
+
+@[default_target]
+lean_exe «csize-file» where
+  root := `ZipCsizeFile
+
+@[default_target]
+lean_exe «rung4-accept» where
+  root := `ZipRung4Accept
