@@ -449,38 +449,38 @@ decreasing_by all_goals (first | omega | (refine Nat.mul_lt_mul_of_pos_left ?_ (
 end
 
 /-- `lz77ChainLazyIter` produces exactly the same tokens as `lz77ChainLazy`. -/
-theorem lz77ChainLazyIter_eq_lz77ChainLazy (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) :
-    lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 =
-      lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 := by
+theorem lz77ChainLazyIter_eq_lz77ChainLazy (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat) :
+    lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps =
+      lz77ChainLazy data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps := by
   unfold lz77ChainLazyIter lz77ChainLazy
   split
   · rw [trailing_eq]; simp only [List.append_toArray, List.nil_append]
-  · rw [mainLoop_eq_chainLazy (lazy2Steps := 1)]
+  · rw [mainLoop_eq_chainLazy (lazy2Steps := lazy2Steps)]
     simp only [List.append_toArray, List.nil_append]
 
-theorem lz77ChainLazyIter_valid (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+theorem lz77ChainLazyIter_valid (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat)
     (hw : windowSize > 0) :
-    ValidDecomp data 0 (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3).toList := by
-  rw [lz77ChainLazyIter_eq_lz77ChainLazy]; exact lz77ChainLazy_valid data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 1 hw
+    ValidDecomp data 0 (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps).toList := by
+  rw [lz77ChainLazyIter_eq_lz77ChainLazy]; exact lz77ChainLazy_valid data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps hw
 
-theorem lz77ChainLazyIter_resolves (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+theorem lz77ChainLazyIter_resolves (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat)
     (hw : windowSize > 0) :
-    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3)) [] =
+    Deflate.Spec.resolveLZ77 (tokensToSymbols (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps)) [] =
       some data.data.toList := by
-  rw [lz77ChainLazyIter_eq_lz77ChainLazy]; exact lz77ChainLazy_resolves data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 1 hw
+  rw [lz77ChainLazyIter_eq_lz77ChainLazy]; exact lz77ChainLazy_resolves data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps hw
 
-theorem lz77ChainLazyIter_encodable (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
+theorem lz77ChainLazyIter_encodable (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    ∀ t ∈ (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3).toList,
+    ∀ t ∈ (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps).toList,
       match t with
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   rw [lz77ChainLazyIter_eq_lz77ChainLazy]
-  exact lz77ChainLazy_encodable data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 1 hw hws
+  exact lz77ChainLazy_encodable data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps hw hws
 
 /-- The lazy chain matcher emits no tokens on empty input. -/
-theorem lz77ChainLazyIter_empty (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool)
-    (hzero : data.size = 0) : lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 = #[] := by
+theorem lz77ChainLazyIter_empty (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat)
+    (hzero : data.size = 0) : lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps = #[] := by
   rw [lz77ChainLazyIter_eq_lz77ChainLazy]
   simp only [lz77ChainLazy, show data.size < 3 from by omega, ↓reduceIte]
   have htrail : lz77Greedy.trailing data 0 = [] := by

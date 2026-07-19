@@ -852,6 +852,19 @@ def lazyDepth (level : UInt8) : Nat :=
     in the cache build. -/
 def useH3Level (level : UInt8) : Bool := decide (6 ≤ level ∧ level ≤ 8)
 
+/-- Rolling lazy2 deferral steps per level (#2837): with steps > 1 the lazy
+    matcher keeps deferring while each next position strictly improves
+    (libdeflate `deflate_compress_lazy2`), catching cascading-improvement runs
+    a single lookahead misses. Only L7 rolls (cap 4, the certified spike's
+    knee: cap 2 captures most of the gain, cap 64 adds nothing over 4):
+    +0.053pp corpus-weighted Silesia at ~+2.4% matcher — ~5x more
+    ratio-efficient than deepening toward L8. L8's deeper chain makes each
+    extra probe ~8x costlier (the spike measured +7.3% matcher there), so it
+    stays at 1; the fast band never rolls. Pure parse heuristic — the tower
+    (`mergedLoop_eq` and the contracts) is proven for every value. -/
+def lazy2StepsLevel (level : UInt8) : Nat :=
+  if level == 7 then 4 else 1
+
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
     greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead
     lazy variant, which improves ratio at equal window/chain depth. Both share the
@@ -861,7 +874,7 @@ def useH3Level (level : UInt8) : Bool := decide (6 ≤ level ∧ level ≤ 8)
     lookahead at `lazyDepth` (half-depth), a heuristic knob invisible to the proof.
     Levels 6–8 additionally enable the hash3 length-3 singleton (`useH3Level`). -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level)
+  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level) (lazy2StepsLevel level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -870,7 +883,7 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
-  if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level)
+  if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level) (lazy2StepsLevel level)
   else lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-! ## Self-contained block-split dynamic compression
