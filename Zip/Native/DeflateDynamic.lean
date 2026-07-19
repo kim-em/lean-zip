@@ -495,10 +495,10 @@ def deflateDynamicBlockCoreP (data : ByteArray) (tokens : Array UInt32)
     `deflateDynamicBlockCorePWith_dynHeaderCodes`). -/
 def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : Array UInt32)
     (litLens distLens : List Nat) (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19)
-    (hlit : litLens.length = 286) (hdist : distLens.length = 30) : ByteArray :=
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30) (cap : Nat := 0) : ByteArray :=
   let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
   let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
-  let bw := BitWriter.empty
+  let bw := BitWriter.emptyWithCapacity cap
   let bw := bw.writeBits 1 1  -- BFINAL
   let bw := bw.writeBits 2 2  -- BTYPE = 10
   let bw := writeDynamicHeaderWith bw litLens distLens p hcl
@@ -531,12 +531,12 @@ def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : Array UInt32)
     `writeDynamicHeaderWith_dynHeaderCodes`. -/
 theorem deflateDynamicBlockCorePWith_dynHeaderCodes (data : ByteArray) (tokens : Array UInt32)
     (litLens distLens : List Nat) (hcl : (dynHeaderCodes litLens distLens).clCodes.size ≥ 19)
-    (hlit : litLens.length = 286) (hdist : distLens.length = 30) :
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30) (cap : Nat) :
     deflateDynamicBlockCorePWith data tokens litLens distLens (dynHeaderCodes litLens distLens)
-        hcl hlit hdist =
+        hcl hlit hdist cap =
       deflateDynamicBlockCoreP data tokens litLens distLens hlit hdist := by
   unfold deflateDynamicBlockCorePWith deflateDynamicBlockCoreP
-  simp only [writeDynamicHeaderWith_dynHeaderCodes]
+  simp only [BitWriter.emptyWithCapacity_eq, writeDynamicHeaderWith_dynHeaderCodes]
 
 
 /-- Write a dynamic Huffman DEFLATE block from precomputed LZ77 tokens.
@@ -1716,7 +1716,8 @@ def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : Array UInt32)
   else
     let sp := sharedPartitionSizedP toks cuts 0
     ((sp.1 + 7) / 8,
-      fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.2 0 BitWriter.empty).flush)
+      fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.2 0
+        (BitWriter.emptyWithCapacity ((sp.1 + 7) / 8))).flush)
 
 /-- The obs-split candidate prep **paired with** the whole-stream frequencies,
     both from one fused sizing pass (`sharedPartitionSizedFreqsP`, #2772).
@@ -1736,7 +1737,8 @@ def deflateObsSplitSizedFreqsP (data : ByteArray) (toks : Array UInt32)
   else
     let sp := sharedPartitionSizedFreqsP toks cuts 0
     (((sp.1.1 + 7) / 8,
-      fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.1.2 0 BitWriter.empty).flush),
+      fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.1.2 0
+        (BitWriter.emptyWithCapacity ((sp.1.1 + 7) / 8))).flush),
      sp.2)
 
 /-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
@@ -1800,9 +1802,9 @@ def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
   let dynBytes := dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
   let storedBytes := storedBlockBytes data
   if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
-  else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
+  else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
   else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes
 
 /-- `deflateRawBaseP` with the whole-stream frequencies supplied as a parameter
     instead of recomputed via `tokenFreqsP ptokens` — the emit twin of
@@ -1819,9 +1821,9 @@ def deflateRawBasePF (data : ByteArray) (ptokens : Array UInt32)
   let dynBytes := dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
   let storedBytes := storedBlockBytes data
   if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
-  else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
+  else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
   else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes
 
 /-- `deflateRawBasePF` at the whole-stream frequencies is `deflateRawBaseP`. -/
 theorem deflateRawBasePF_tokenFreqsP (data : ByteArray) (ptokens : Array UInt32) :
@@ -1850,9 +1852,9 @@ def deflateRawBasePPrep (data : ByteArray) (ptokens : Array UInt32) : Nat × (Un
     else if fixedBytes < dynBytes then fixedBytes else dynBytes),
    fun _ =>
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
-    else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
+    else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
     else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2)
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes)
 
 /-- The prep's emit thunk is exactly `deflateRawBaseP` (same shared plan). -/
 theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : Array UInt32) :
@@ -1880,9 +1882,9 @@ def deflateRawBasePPrepF (data : ByteArray) (ptokens : Array UInt32)
     else if fixedBytes < dynBytes then fixedBytes else dynBytes),
    fun _ =>
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
-    else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens
+    else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
     else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2)
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes)
 
 /-- `deflateRawBasePPrepF` at the whole-stream frequencies is `deflateRawBasePPrep`. -/
 theorem deflateRawBasePPrepF_tokenFreqsP (data : ByteArray) (ptokens : Array UInt32) :

@@ -2618,8 +2618,8 @@ def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray 
     same body with `emitTokensP` in place of `emitTokens`. Equal to
     `deflateFixedBlock` over the boxed view (`deflateFixedBlockP_eq` in
     `Zip/Spec/EmitPackedCorrect.lean`). -/
-def deflateFixedBlockP (data : ByteArray) (tokens : Array UInt32) : ByteArray :=
-  let bw := BitWriter.empty
+def deflateFixedBlockP (data : ByteArray) (tokens : Array UInt32) (cap : Nat := 0) : ByteArray :=
+  let bw := BitWriter.emptyWithCapacity cap
   let bw := bw.writeBits 1 1  -- BFINAL
   let bw := bw.writeBits 2 1  -- BTYPE = 01
   have h256 : 256 < fixedLitCodes.size := by rw [Deflate.fixedLitCodes_size]; omega

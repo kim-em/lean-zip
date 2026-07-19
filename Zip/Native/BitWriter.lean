@@ -37,6 +37,19 @@ namespace BitWriter
 
 def empty : BitWriter := ⟨.empty, 0, 0⟩
 
+/-- `BitWriter.empty` with `c` bytes of output capacity reserved up front.
+    Logically identical to `empty` (`emptyWithCapacity_eq` — capacity is
+    runtime-only state, invisible to the model), but a writer that knows its
+    flushed byte count in advance (the sized-prep dispatch does) can seed the
+    exact capacity and skip every growth-doubling `ByteArray` copy — on
+    Silesia-sized streams those reallocations were ~11% of compress-side minor
+    page faults (memmove of ~2× the output). -/
+def emptyWithCapacity (c : Nat) : BitWriter := ⟨.emptyWithCapacity c, 0, 0⟩
+
+/-- Capacity reservation is logically invisible: `ByteArray.emptyWithCapacity`
+    ignores its argument at the model level, so this is definitional. -/
+@[simp] theorem emptyWithCapacity_eq (c : Nat) : emptyWithCapacity c = empty := rfl
+
 /-- Total number of bits written so far: 8 per fully flushed byte in `data`
     plus the `bitCount` bits held in the partial byte. Used by the DEFLATE
     compressor to size a block (`⌈bitLength/8⌉` bytes after `flush`) without
