@@ -345,7 +345,7 @@
 <text x="62" y="46" opacity="0">2026-07-11 · e2b80757 · 38/41 — perf: fuse token-frequency counting into the L1-L3 matcher pass (#2833)<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.81026;0.83077" calcMode="discrete" dur="19.5s" repeatCount="indefinite"/></text>
 <text x="62" y="46" opacity="0">2026-07-11 · 30a8de98 · 39/41 — perf: re-grid L5 onto the post-singleton frontier (light split tier) …<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.83077;0.85128" calcMode="discrete" dur="19.5s" repeatCount="indefinite"/></text>
 <text x="62" y="46" opacity="0">2026-07-18 · 4167938e · 40/41 — perf(tune): deepen L6&#x27;s lazy probe to 18 for strict miniz_oxide-L6 do…<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.85128;0.87179" calcMode="discrete" dur="19.5s" repeatCount="indefinite"/></text>
-<text x="62" y="46" opacity="0">2026-07-19 · 4dbe447d · 41/41 — bench: refresh dashboard for the fused L7 rolling deferral<animate attributeName="opacity" values="0;1" keyTimes="0;0.87179" calcMode="discrete" dur="19.5s" repeatCount="indefinite"/></text>
+<text x="62" y="46" opacity="0">2026-07-19 · 3554fd3a · 41/41 — bench: refresh dashboard for the fused L7 rolling deferral<animate attributeName="opacity" values="0;1" keyTimes="0;0.87179" calcMode="discrete" dur="19.5s" repeatCount="indefinite"/></text>
 </g>
 <rect x="586" y="496" width="330" height="90" fill="#ffffff" opacity="0.85" stroke="#cccccc"/>
 <g font-size="10.5" fill="#333333">
