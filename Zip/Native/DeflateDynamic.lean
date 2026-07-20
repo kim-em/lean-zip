@@ -819,14 +819,17 @@ def niceLen (level : UInt8) : Nat :=
     slack. The probe still runs — it is shallower, not skipped — so the ratio cost
     stays in the noise while the second walk's cycles roughly halve.
 
-    **L6 probes at depth 18 (the strict-dominance re-pair)**: the `/8` (= 8)
-    depth chosen by the post-singleton re-grid dominated miniz_oxide L6 on the
-    *weighted* plane but sat 0.8bp above it on the dashboard's per-file
-    geomean; the fine `gate-sweep` ld-grid shows depth 18 (with the
-    `goodMatch = 64` gate) is the shallowest probe whose geomean ratio clears
-    miniz L6 with real margin (0.32153 vs 0.32164, deterministic) while
-    keeping the speed edge — so the default level dominates on BOTH published
-    metrics. L7 (the old L6 config) stays at `/2`. **L5 probes at `/4` since the L5 re-grid**
+    **L6 probes at depth 10 behind the rolling deferral (#2837)**: the depth-18
+    probe (the pre-roll strict-dominance re-pair) was the shallowest *non-rolling*
+    probe whose geomean ratio cleared miniz_oxide L6, but it paid ~2% matcher
+    speed for it. With the L6 rolling lazy2 cap at 2 (`lazy2StepsLevel`), the
+    `gate-sweep` ld×steps grid shows the roll recovers the geomean the shallower
+    probe gives up: ld10/cap2 lands 0.31985 weighted / 0.32142 geomean Silesia
+    (vs miniz L6 0.32131/0.32163, deterministic) at ~+1% matcher speed over
+    ld18/cap1 — strictly dominant on both published planes, faster than the
+    superseded ld18 point. ld8 rows (any cap ≤ 4) stay 0.5-8bp above miniz on
+    geomean, and deeper probes only pay off at cap 1. L7 (the old L6 config)
+    stays at `/2`. **L5 probes at `/4` since the L5 re-grid**
     (`gate-sweep`, see `chainDepth`): the winning (chain 24, gate 64) split
     point took its probe at 6 — deep enough to keep the deferral wins the
     gate lets through, half the cost of the `/2` default.
@@ -837,7 +840,7 @@ def niceLen (level : UInt8) : Nat :=
     keeps the encoder contracts. -/
 def lazyDepth (level : UInt8) : Nat :=
   if level == 5 then chainDepth level / 4
-  else if level == 6 then 18
+  else if level == 6 then 10
   else chainDepth level / 2
 
 /-- Enable the hash3 length-3 singleton at the split tier (levels 6–8). Our
@@ -855,15 +858,22 @@ def useH3Level (level : UInt8) : Bool := decide (6 ≤ level ∧ level ≤ 8)
 /-- Rolling lazy2 deferral steps per level (#2837): with steps > 1 the lazy
     matcher keeps deferring while each next position strictly improves
     (libdeflate `deflate_compress_lazy2`), catching cascading-improvement runs
-    a single lookahead misses. Only L7 rolls (cap 4, the certified spike's
+    a single lookahead misses. L7 rolls at cap 4 (the certified spike's
     knee: cap 2 captures most of the gain, cap 64 adds nothing over 4):
     +0.053pp corpus-weighted Silesia at ~+2.4% matcher — ~5x more
-    ratio-efficient than deepening toward L8. L8's deeper chain makes each
+    ratio-efficient than deepening toward L8. **L6 rolls at cap 2 (#2837)**,
+    paired with the shallower depth-10 probe (`lazyDepth`): the roll is cheap
+    there (L6's `goodMatch = 64` gate means only sub-64 pending matches roll)
+    and buys back the geomean ratio the shallow probe loses — see the ld×steps
+    grid note on `lazyDepth`; cap 4 added ≤0.3bp over cap 2 for ~0.4% speed,
+    so L6 stays at the knee. L8's deeper chain makes each
     extra probe ~8x costlier (the spike measured +7.3% matcher there), so it
     stays at 1; the fast band never rolls. Pure parse heuristic — the tower
     (`mergedLoop_eq` and the contracts) is proven for every value. -/
 def lazy2StepsLevel (level : UInt8) : Nat :=
-  if level == 7 then 4 else 1
+  if level == 7 then 4
+  else if level == 6 then 2
+  else 1
 
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
     greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead

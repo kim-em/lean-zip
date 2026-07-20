@@ -47,36 +47,36 @@ structure Cfg where
   lazyD : Nat
   h3 : Bool := false
   split : Bool := true
+  lazy2 : Nat := 1
 
 /-- The grid: the production L5 row first (the certification row — single-block,
     must reproduce the shipped L5 bytes), the production L4/L6 rows as mixing-line
     anchors, then the L5-slot candidates: cheaper single-block points, shallow
     split points without the singleton, and shallow split points with it. -/
 def cfgs : List Cfg := [
-  ⟨"prod-l5-single-c128-gm259-ld64", 128, 259,  65, 64, false, false⟩,
-  ⟨"prod-l4-single-c64-gm8-ld32",     64,   8, 258, 32, false, false⟩,
-  ⟨"prod-l6-split-h3-c64-gm64-ld8",   64,  64,  65,  8, true,  true⟩,
-  ⟨"single-c64-gm259-ld32",           64, 259,  65, 32, false, false⟩,
-  ⟨"single-c96-gm64-ld24",            96,  64,  65, 24, false, false⟩,
-  ⟨"single-c128-gm64-ld16",          128,  64,  65, 16, false, false⟩,
-  ⟨"split-noh3-c32-gm64-ld8",         32,  64,  65,  8, false, true⟩,
-  ⟨"split-noh3-c48-gm64-ld12",        48,  64,  65, 12, false, true⟩,
-  ⟨"split-noh3-c64-gm32-ld8",         64,  32,  65,  8, false, true⟩,
-  ⟨"split-h3-c32-gm64-ld8",           32,  64,  65,  8, true,  true⟩,
-  ⟨"split-h3-c48-gm64-ld12",          48,  64,  65, 12, true,  true⟩,
-  ⟨"split-h3-c24-gm32-ld6",           24,  32,  65,  6, true,  true⟩,
-  -- Edge extension: the first grid's best margin sat at its shallowest no-h3
-  -- chain (c32), so probe one step past the edge in both singleton modes.
-  ⟨"split-noh3-c24-gm64-ld6",         24,  64,  65,  6, false, true⟩,
-  ⟨"split-noh3-c16-gm64-ld4",         16,  64,  65,  4, false, true⟩,
-  ⟨"split-h3-c16-gm64-ld4",           16,  64,  65,  4, true,  true⟩ ]
+  -- L6 slot re-grid (#2837 rolling deferral at L6): all cells run the exact
+  -- production L6 split config (split-h3, chain 64, gm 64, nl 65), varying the
+  -- lazy probe depth × rolling lazy2 cap. `l6-ld18-s1` is the certification
+  -- row: it must reproduce the shipped L6 bytes (`prod-deflateRaw-l6`).
+  ⟨"l6-ld8-s1",   64, 64, 65,  8, true, true, 1⟩,
+  ⟨"l6-ld8-s2",   64, 64, 65,  8, true, true, 2⟩,
+  ⟨"l6-ld8-s4",   64, 64, 65,  8, true, true, 4⟩,
+  ⟨"l6-ld10-s1",  64, 64, 65, 10, true, true, 1⟩,
+  ⟨"l6-ld10-s2",  64, 64, 65, 10, true, true, 2⟩,
+  ⟨"l6-ld10-s4",  64, 64, 65, 10, true, true, 4⟩,
+  ⟨"l6-ld12-s1",  64, 64, 65, 12, true, true, 1⟩,
+  ⟨"l6-ld12-s2",  64, 64, 65, 12, true, true, 2⟩,
+  ⟨"l6-ld12-s4",  64, 64, 65, 12, true, true, 4⟩,
+  ⟨"l6-ld18-s1",  64, 64, 65, 18, true, true, 1⟩,
+  ⟨"l6-ld18-s2",  64, 64, 65, 18, true, true, 2⟩,
+  ⟨"l6-ld18-s4",  64, 64, 65, 18, true, true, 4⟩ ]
 
 /-- One config through the exact production dispatch for its mode: `split = true`
     is the split-tier arm of `deflateRaw` (sized preps, obs-split arbitration,
     winner emitted); `split = false` is the single-block lazy-base arm (`deflateRawBasePPrep`
     forced — definitionally `deflateRawBaseP`). -/
 def runCfg (cfg : Cfg) (data : ByteArray) : Nat :=
-  let ptokens := lz77ChainLazyIterPMerged data cfg.chain 32768 1000000000 cfg.gm cfg.nl cfg.lazyD cfg.h3
+  let ptokens := lz77ChainLazyIterPMerged data cfg.chain 32768 1000000000 cfg.gm cfg.nl cfg.lazyD cfg.h3 cfg.lazy2
   if cfg.split then
     let cuts := chooseSplitsHeuristicP ptokens data.size
     let withObs : Nat × (Unit → ByteArray) :=
@@ -110,9 +110,9 @@ def ratioMain (paths : List String) : IO Unit := do
   for path in paths do
     let data ← IO.FS.readBinFile path
     let name := (path.splitOn "/").getLastD path
-    -- Certification reference: the *actual* production level-5 output (through
-    -- `deflateRaw`, prescan included) — the `prod-l5-single-*` row must match it.
-    IO.println s!"{name},prod-deflateRaw-l5,{data.size},{(Zip.Native.Deflate.deflateRaw data 5).size}"
+    -- Certification reference: the *actual* production level-6 output (through
+    -- `deflateRaw`, prescan included) — the `l6-ld18-s1` row must match it.
+    IO.println s!"{name},prod-deflateRaw-l6,{data.size},{(Zip.Native.Deflate.deflateRaw data 6).size}"
     for cfg in cfgs do
       IO.println s!"{name},{cfg.label},{data.size},{runCfg cfg data}"
       (← IO.getStdout).flush
