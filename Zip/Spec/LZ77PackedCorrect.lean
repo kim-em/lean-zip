@@ -212,7 +212,7 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
   unfold lzMatchP lzMatch
   split
   · rw [lz77ChainLazyIterPMerged_eq]
-    exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level) (lazy2StepsLevel level)
+    exact lz77ChainLazyIterP_eq data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
   · rw [lz77ChainIterPMerged_eq]
     exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
@@ -224,7 +224,7 @@ theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
   unfold lzMatchP lzMatch
   split
   · rw [lz77ChainLazyIterPMerged_eq]
-    exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level) (lazy2StepsLevel level)
+    exact lz77ChainLazyIterP_map data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
       (by omega) (by omega)
   · rw [lz77ChainIterPMerged_eq]
     exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)

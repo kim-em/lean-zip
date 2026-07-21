@@ -843,6 +843,94 @@ def lazyDepth (level : UInt8) : Nat :=
   else if level == 6 then 10
   else chainDepth level / 2
 
+/-- Number of contiguous sample regions the pre-scan reads, spread end to end
+    across the input (first at offset 0, last ending at `n`). A region that looks
+    even slightly compressible short-circuits the whole scan, so a normal
+    compressible file pays for at most the first region. Shared with the h3
+    content gate (`h3IncompressibleScan`). -/
+def prescanRegions : Nat := 4
+
+/-- Bytes per sample region. Each region is scanned *contiguously* and every
+    consecutive 4-gram is inserted, so repetition is detected densely the way the
+    matcher itself finds matches. At 32 KiB a region spans two of the common
+    page/block sizes (4/8/16 KiB), so a repeated block surfaces as a wall of
+    4-gram collisions. ≤`prescanRegions · prescanRegionBytes` (128 KiB) bytes are
+    scanned, independent of input size. -/
+def prescanRegionBytes : Nat := 32768
+
+/-- log2 of the per-region 4-gram presence-table size (2^20 slots). Sized so that,
+    over the ≈32 K 4-grams of one region, the false-collision rate of genuinely
+    random input is ≈1.6% (`S²/2·tableSize`) — half the repeat gate, so random data
+    reads as "no repeats" with a comfortable margin while keeping the per-region
+    allocation small. -/
+def prescanTableBits : Nat := 20
+
+/-- Minimum input size for the h3 content gate to engage. Below this the matcher
+    is cheap enough that the probe's cost is negligible and the region scan would
+    be net overhead, so small inputs keep the static `useH3Level` decision — which
+    also leaves every existing small-input output byte-identical. 1 MiB, matching
+    `prescanMinSize`. -/
+def h3ProbeMinSize : Nat := 1048576
+
+/-- Per-region 4-gram collision-fraction cutoff (percent) below which a region is
+    judged sparse in recurring 4-grams, i.e. low-compressibility. Tuned on Silesia:
+    the least-compressible region of each ratio-winning binary sits below 61%
+    (x-ray 9%, sao 20%, ooffice 46%, mozilla 58%) while every file where the probe
+    costs ratio has all regions at ≥64% (webster 64%, dickens 68%, mr 67%, samba
+    71%, xml 81%, reymont 82%, nci 94%). 61% centres that gap. -/
+def h3ProbeCollThresholdPercent : Nat := 61
+
+/-- Content-adaptive gate for the hash3 length-3 singleton probe (`useH3For`).
+    Returns `true` when the input looks *low-compressibility*: at least one sampled
+    region is sparse in recurring 4-grams (collision fraction below
+    `h3ProbeCollThresholdPercent`%), the signal that the lazy matcher will find few
+    length-≥4 matches so the length-3 singleton probe earns its cost. Shares the
+    incompressible pre-scan's region layout (`prescanRegions` contiguous
+    `prescanRegionBytes` windows spread end to end) and single-hash 4-gram presence
+    filter, but uses only the collision signal and fires on the *least*-compressible
+    region rather than requiring *every* region to be incompressible: the probe is
+    an incremental parse tweak, so biasing toward "on" whenever any region is hard
+    keeps the ratio-winning binaries covered. Tuned on Silesia it fires on
+    x-ray/sao/ooffice/mozilla (h3 wins ratio there) and on osdb (unavoidable — its
+    per-region signature dominates mozilla's on both entropy and collision, so no
+    monotone cut separates them; leaving it on merely reproduces the static knob,
+    which is `≤` master), and stays off for nci/webster/dickens/mr/reymont/samba/xml
+    where the probe costs both ratio and matcher speed. Opaque to correctness: the
+    result only selects between two encoder configs proven equivalent at the
+    contract level (`lz77ChainLazyIter_*` are `∀ useH3`). -/
+def h3IncompressibleScan (data : ByteArray) : Bool := Id.run do
+  let n := data.size
+  let tableSize := 1 <<< prescanTableBits
+  let shift : UInt32 := (32 - prescanTableBits).toUInt32
+  let regBytes := min prescanRegionBytes n
+  let span := n - regBytes
+  for r in [0:prescanRegions] do
+    let start := if prescanRegions ≤ 1 then 0 else min ((r * span) / (prescanRegions - 1)) span
+    let stop := min (start + regBytes) n
+    let mut table : Array UInt8 := Array.replicate tableSize 0
+    let mut sampled : Nat := 0       -- 4-grams hashed in this region
+    let mut collisions : Nat := 0    -- 4-grams hitting an already-seen slot
+    let mut p := start
+    while p + 3 < stop do
+      let a := data[p]!.toUInt32
+      let b := data[p+1]!.toUInt32
+      let c := data[p+2]!.toUInt32
+      let d := data[p+3]!.toUInt32
+      let word := a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24)
+      let idx := ((word * 2654435761) >>> shift).toNat
+      if table[idx]! != 0 then
+        collisions := collisions + 1
+      else
+        table := table.set! idx 1
+      sampled := sampled + 1
+      p := p + 1
+    -- A region sparse in recurring 4-grams: the matcher would find few usable
+    -- matches here, so the length-3 singleton is worth probing. Any such region
+    -- enables the gate (bias toward keeping the ratio wins).
+    if sampled > 0 && collisions * 100 < sampled * h3ProbeCollThresholdPercent then
+      return true
+  return false
+
 /-- Enable the hash3 length-3 singleton at the split tier (levels 6–8). Our
     lazy matcher walks hash4-keyed chains only, so length-3 matches are invisible
     below L9; on the barely-compressible Silesia binaries (x-ray/sao/ooffice)
@@ -854,6 +942,20 @@ def lazyDepth (level : UInt8) : Nat :=
     below the no-h3 frontier there); L9/L10 already carry their own singleton
     in the cache build. -/
 def useH3Level (level : UInt8) : Bool := decide (6 ≤ level ∧ level ≤ 8)
+
+/-- Data-adaptive replacement for the static `useH3Level` at the L6–8 dispatch:
+    enable the hash3 length-3 singleton only when the level selects it (6–8) AND
+    the input is classified low-compressibility by `h3IncompressibleScan`. On the
+    barely-compressible Silesia binaries (x-ray/sao/ooffice/mozilla) the probe
+    restores the whole weighted-ratio deficit to miniz_oxide L6; on structured or
+    text inputs (nci/webster/dickens/…) it costs both ratio (−0.3…−1.1%) and
+    12–21% matcher speed, so the gate drops it there — a win on both axes. Inputs
+    below `h3ProbeMinSize` keep the static decision (cheap matcher, scan not worth
+    it; also leaves existing small-input output byte-identical). Pure parse
+    heuristic: the matcher contracts hold for whichever Bool this returns (they are
+    `∀ useH3`), so the roundtrip proof does not depend on the classification. -/
+def useH3For (data : ByteArray) (level : UInt8) : Bool :=
+  useH3Level level && (data.size < h3ProbeMinSize || h3IncompressibleScan data)
 
 /-- Rolling lazy2 deferral steps per level (#2837): with steps > 1 the lazy
     matcher keeps deferring while each next position strictly improves
@@ -882,9 +984,10 @@ def lazy2StepsLevel (level : UInt8) : Nat :=
     contracts (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the
     choice is transparent to the roundtrip proof. The lazy tier probes its `pos+1`
     lookahead at `lazyDepth` (half-depth), a heuristic knob invisible to the proof.
-    Levels 6–8 additionally enable the hash3 length-3 singleton (`useH3Level`). -/
+    Levels 6–8 additionally enable the hash3 length-3 singleton, content-gated by
+    `useH3For` (on only when the input classifies as low-compressibility). -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level) (lazy2StepsLevel level)
+  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -893,7 +996,7 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
-  if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3Level level) (lazy2StepsLevel level)
+  if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-! ## Self-contained block-split dynamic compression
@@ -1905,27 +2008,6 @@ first sampled region and falls through to the normal path almost immediately. -/
     why the gate leaves the Canterbury/Silesia dashboard untouched — every corpus
     file is either compressible or under the size gate. -/
 def prescanMinSize : Nat := 1048576
-
-/-- Number of contiguous sample regions the pre-scan reads, spread end to end
-    across the input (first at offset 0, last ending at `n`). A region that looks
-    even slightly compressible short-circuits the whole scan, so a normal
-    compressible file pays for at most the first region. -/
-def prescanRegions : Nat := 4
-
-/-- Bytes per sample region. Each region is scanned *contiguously* and every
-    consecutive 4-gram is inserted, so repetition is detected densely the way the
-    matcher itself finds matches. At 32 KiB a region spans two of the common
-    page/block sizes (4/8/16 KiB), so a repeated block surfaces as a wall of
-    4-gram collisions. ≤`prescanRegions · prescanRegionBytes` (128 KiB) bytes are
-    scanned, independent of input size. -/
-def prescanRegionBytes : Nat := 32768
-
-/-- log2 of the per-region 4-gram presence-table size (2^20 slots). Sized so that,
-    over the ≈32 K 4-grams of one region, the false-collision rate of genuinely
-    random input is ≈1.6% (`S²/2·tableSize`) — half the repeat gate, so random data
-    reads as "no repeats" with a comfortable margin while keeping the per-region
-    allocation small. -/
-def prescanTableBits : Nat := 20
 
 /-- Order-0 entropy (bits/byte) of a 256-bucket byte histogram with `total`
     samples; `0` when `total = 0`. Pulled out so the per-region gate can call it
