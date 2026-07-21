@@ -90,6 +90,64 @@ jobs:
       - name: Test bench package
         run: cd bench && lake -R test
 
+  l6-gate:
+    # Cold single-shot L6 whole-tar dominance gate. Fetches Silesia, assembles
+    # the whole silesia.tar, builds the dev-only `bench` exe (needs the Rust
+    # miniz_oxide shim, like the `bench` job), and runs bench/l6_tar_gate.sh:
+    # it FAILS if lean native DEFLATE L6 stops strictly beating miniz_oxide L6
+    # on the whole tar in size AND cold single-shot time. Cold is load-bearing
+    # — see bench/l6_tar_gate.sh for why an in-process warm loop would mask the
+    # regression this gate exists to catch.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev pkg-config cargo bc
+
+      - name: Install elan
+        run: |
+          curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Lake build
+        id: cache
+        uses: actions/cache@v4
+        with:
+          # Mirror the `bench` job: the bench package builds the parent Zip
+          # library into the root .lake/, then its own targets into bench/.lake/.
+          path: |
+            .lake
+            bench/.lake
+          key: bench-v2-${{ hashFiles('lean-toolchain', 'lakefile.lean', 'Zip/**/*.lean', 'c/**', 'bench/lean-toolchain', 'bench/lake-manifest.json', 'bench/lakefile.lean', 'bench/**/*.lean', 'bench/c/**', 'bench/rust/**') }}
+          restore-keys: bench-v2-
+
+      - name: Clean stale Lake cache on fallback restore
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: rm -rf .lake bench/.lake
+
+      - name: Build the bench exe
+        run: cd bench && lake -R build bench
+
+      - name: Fetch Silesia corpus
+        run: bash bench/fetch_corpora.sh silesia
+
+      - name: Assemble silesia.tar
+        # Concatenate the 12 Silesia files (fixed, sorted order) into one tar so
+        # the gate compresses a ~202 MB whole-tar payload, matching the
+        # `hyperfine zip silesia.tar` benchmark the gate defends.
+        run: |
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+              --mtime='2020-01-01 00:00:00' \
+              -cf silesia.tar -C bench/corpora/silesia \
+              dickens mozilla mr nci ooffice osdb reymont samba sao webster x-ray xml
+          ls -l silesia.tar
+
+      - name: Run the cold L6 whole-tar gate
+        # Pin to the idlest core so the cold ratio is not corrupted by scheduler
+        # migration / SMT contention with concurrent runner work.
+        run: bash bench/pin_core.sh bash bench/l6_tar_gate.sh silesia.tar 9
+
   animation-sync:
     # The committed compress-Pareto animation must match what
     # bench/pareto_history.py renders from the current latest.json git
