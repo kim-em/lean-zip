@@ -819,17 +819,22 @@ def niceLen (level : UInt8) : Nat :=
     slack. The probe still runs — it is shallower, not skipped — so the ratio cost
     stays in the noise while the second walk's cycles roughly halve.
 
-    **L6 probes at depth 10 behind the rolling deferral (#2837)**: the depth-18
-    probe (the pre-roll strict-dominance re-pair) was the shallowest *non-rolling*
-    probe whose geomean ratio cleared miniz_oxide L6, but it paid ~2% matcher
-    speed for it. With the L6 rolling lazy2 cap at 2 (`lazy2StepsLevel`), the
-    `gate-sweep` ld×steps grid shows the roll recovers the geomean the shallower
-    probe gives up: ld10/cap2 lands 0.31985 weighted / 0.32142 geomean Silesia
-    (vs miniz L6 0.32131/0.32163, deterministic) at ~+1% matcher speed over
-    ld18/cap1 — strictly dominant on both published planes, faster than the
-    superseded ld18 point. ld8 rows (any cap ≤ 4) stay 0.5-8bp above miniz on
-    geomean, and deeper probes only pay off at cap 1. L7 (the old L6 config)
-    stays at `/2`. **L5 probes at `/4` since the L5 re-grid**
+    **L6 probes at depth 8 (`chainDepth/8`), no rolling — the whole-tar anchor
+    (#2837)**: the priority for L6 is strict domination of miniz_oxide L6 on the
+    single-stream `zip silesia.tar` workload (211 MB, one `deflateRaw` call), on
+    *both* size and wall time. Deeper/rolling variants (ld18 from the pre-roll
+    re-pair, then ld10/cap2) each bought geomean ratio margin but spent whole-tar
+    wall: lean's ~0.24s system-time fault tax (the materialized 45.9M-token,
+    ~367 MB array, level-independent) means added matcher compute pushes the
+    single-shot wall past miniz even when steady-state per-file throughput looks
+    faster. At ld8/no-roll the whole tar compresses to 67,944,422 B in ~5.72s vs
+    miniz 68,112,444 B / ~5.81s — smaller AND faster, the pinned invariant. It
+    still clears miniz on both *per-file* planes too (0.31969 weighted / 0.32132
+    geomean vs miniz 0.32131 / 0.32164), just by a slimmer geomean margin than the
+    superseded ld10/cap2 point; recovering that margin without breaking the
+    whole-tar win waits on shrinking the token footprint (fault-reserve +
+    unboxing). L7 keeps its own rolling (a genuine whole-tar win at that level).
+    **L5 probes at `/4` since the L5 re-grid**
     (`gate-sweep`, see `chainDepth`): the winning (chain 24, gate 64) split
     point took its probe at 6 — deep enough to keep the deferral wins the
     gate lets through, half the cost of the `/2` default.
@@ -840,7 +845,7 @@ def niceLen (level : UInt8) : Nat :=
     keeps the encoder contracts. -/
 def lazyDepth (level : UInt8) : Nat :=
   if level == 5 then chainDepth level / 4
-  else if level == 6 then 10
+  else if level == 6 then 8
   else chainDepth level / 2
 
 /-- Number of contiguous sample regions the pre-scan reads, spread end to end
@@ -963,18 +968,16 @@ def useH3For (data : ByteArray) (level : UInt8) : Bool :=
     a single lookahead misses. L7 rolls at cap 4 (the certified spike's
     knee: cap 2 captures most of the gain, cap 64 adds nothing over 4):
     +0.053pp corpus-weighted Silesia at ~+2.4% matcher — ~5x more
-    ratio-efficient than deepening toward L8. **L6 rolls at cap 2 (#2837)**,
-    paired with the shallower depth-10 probe (`lazyDepth`): the roll is cheap
-    there (L6's `goodMatch = 64` gate means only sub-64 pending matches roll)
-    and buys back the geomean ratio the shallow probe loses — see the ld×steps
-    grid note on `lazyDepth`; cap 4 added ≤0.3bp over cap 2 for ~0.4% speed,
-    so L6 stays at the knee. L8's deeper chain makes each
-    extra probe ~8x costlier (the spike measured +7.3% matcher there), so it
-    stays at 1; the fast band never rolls. Pure parse heuristic — the tower
-    (`mergedLoop_eq` and the contracts) is proven for every value. -/
+    ratio-efficient than deepening toward L8. **L6 does NOT roll (cap 1)**: the
+    ld10/cap2 roll won geomean ratio but cost single-stream `zip silesia.tar`
+    wall time (see `lazyDepth` — the whole-tar anchor takes priority over the
+    per-file geomean margin), so L6 is back at its ld8/no-roll config that
+    strictly beats miniz L6 on the whole tar in both size and time. L8's deeper
+    chain makes each extra probe ~8x costlier (the spike measured +7.3% matcher
+    there), so it stays at 1; the fast band never rolls. Pure parse heuristic —
+    the tower (`mergedLoop_eq` and the contracts) is proven for every value. -/
 def lazy2StepsLevel (level : UInt8) : Nat :=
   if level == 7 then 4
-  else if level == 6 then 2
   else 1
 
 /-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
