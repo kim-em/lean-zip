@@ -145,8 +145,11 @@ jobs:
 
       - name: Run the cold L6 whole-tar gate
         # Pin to the idlest core so the cold ratio is not corrupted by scheduler
-        # migration / SMT contention with concurrent runner work.
-        run: bash bench/pin_core.sh bash bench/l6_tar_gate.sh silesia.tar 9
+        # migration / SMT contention with concurrent runner work. N=15 (not 9):
+        # the median-of-N absorbs the noisier single-shot jitter of a 2-core
+        # GitHub runner, keeping the ~1.8% cold margin's median stable well below
+        # the 1.0 threshold. ~72s extra over N=9 — cheap insurance.
+        run: bash bench/pin_core.sh bash bench/l6_tar_gate.sh silesia.tar 15
 
   animation-sync:
     # The committed compress-Pareto animation must match what
