@@ -346,7 +346,7 @@
 <text x="62" y="46" opacity="0">2026-07-11 · 30a8de98 · 39/42 — perf: re-grid L5 onto the post-singleton frontier (light split tier) …<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.81407;0.83417" calcMode="discrete" dur="19.900000000000002s" repeatCount="indefinite"/></text>
 <text x="62" y="46" opacity="0">2026-07-18 · 4167938e · 40/42 — perf(tune): deepen L6&#x27;s lazy probe to 18 for strict miniz_oxide-L6 do…<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.83417;0.85427" calcMode="discrete" dur="19.900000000000002s" repeatCount="indefinite"/></text>
 <text x="62" y="46" opacity="0">2026-07-19 · fbc02fc2 · 41/42 — perf: rolling lazy2 deferral at L7, fused into the merged loop hot pa…<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.85427;0.87437" calcMode="discrete" dur="19.900000000000002s" repeatCount="indefinite"/></text>
-<text x="62" y="46" opacity="0">2026-07-21 · 5c73dd3f · 42/42 — bench: refresh dashboard for the L6 shallow-probe + rolling retune<animate attributeName="opacity" values="0;1" keyTimes="0;0.87437" calcMode="discrete" dur="19.900000000000002s" repeatCount="indefinite"/></text>
+<text x="62" y="46" opacity="0">2026-07-21 · dee3f2cf · 42/42 — bench: refresh dashboard for the L6 shallow-probe + rolling retune<animate attributeName="opacity" values="0;1" keyTimes="0;0.87437" calcMode="discrete" dur="19.900000000000002s" repeatCount="indefinite"/></text>
 </g>
 <rect x="586" y="496" width="330" height="90" fill="#ffffff" opacity="0.85" stroke="#cccccc"/>
 <g font-size="10.5" fill="#333333">
