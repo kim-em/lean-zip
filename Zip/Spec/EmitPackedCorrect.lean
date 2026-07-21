@@ -367,10 +367,10 @@ theorem emitTokensWithCodesPTG_eq (bw : BitWriter) (ws : Array UInt32)
 
 /-- The packed fixed-block core is the boxed one over the `unpackTok` view:
     the bodies are identical up to `emitTokensP_eq`. -/
-theorem deflateFixedBlockP_eq (data : ByteArray) (ptoks : Array UInt32) :
-    deflateFixedBlockP data ptoks = deflateFixedBlock data (ptoks.map unpackTok) := by
+theorem deflateFixedBlockP_eq (data : ByteArray) (ptoks : Array UInt32) (cap : Nat := 0) :
+    deflateFixedBlockP data ptoks cap = deflateFixedBlock data (ptoks.map unpackTok) := by
   unfold deflateFixedBlockP deflateFixedBlock
-  simp only [emitTokensP_eq]
+  simp only [BitWriter.emptyWithCapacity_eq, emitTokensP_eq]
 
 /-- The packed dynamic-block core is the boxed one over the `unpackTok` view
     (same `hlit`/`hdist` hypotheses): the bodies are identical up to
