@@ -348,7 +348,7 @@
 <text x="62" y="46" opacity="0">2026-07-19 · fbc02fc2 · 41/44 — perf: rolling lazy2 deferral at L7, fused into the merged loop hot pa…<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.82126;0.84058" calcMode="discrete" dur="20.7s" repeatCount="indefinite"/></text>
 <text x="62" y="46" opacity="0">2026-07-20 · 3d940c5d · 42/44 — perf: content-gate the L6-8 hash3 length-3 probe, completing strict m…<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.84058;0.85990" calcMode="discrete" dur="20.7s" repeatCount="indefinite"/></text>
 <text x="62" y="46" opacity="0">2026-07-21 · 74eda5e2 · 43/44 — perf(tune): anchor L6 at ld8/no-roll for strict whole-tar miniz domin…<animate attributeName="opacity" values="0;1;0" keyTimes="0;0.85990;0.87923" calcMode="discrete" dur="20.7s" repeatCount="indefinite"/></text>
-<text x="62" y="46" opacity="0">2026-07-21 · 9c6d3b82 · 44/44 — bench: refresh dashboard for the fault-reserve output-capacity change<animate attributeName="opacity" values="0;1" keyTimes="0;0.87923" calcMode="discrete" dur="20.7s" repeatCount="indefinite"/></text>
+<text x="62" y="46" opacity="0">2026-07-21 · 16eb4b4d · 44/44 — perf(deflate): reserve exact output capacity in the sized-prep emitte…<animate attributeName="opacity" values="0;1" keyTimes="0;0.87923" calcMode="discrete" dur="20.7s" repeatCount="indefinite"/></text>
 </g>
 <rect x="586" y="496" width="330" height="90" fill="#ffffff" opacity="0.85" stroke="#cccccc"/>
 <g font-size="10.5" fill="#333333">

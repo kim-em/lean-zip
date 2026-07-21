@@ -224,8 +224,14 @@ where
       let _ ← RawDeflate.compress data level.toUInt8
       pure ()
     | "compress-miniz" =>
-      let _ ← MinizOxide.compress data level.toUInt8
-      pure ()
+      -- Print the compressed size (mirrors the `csize` one-line format) so the
+      -- cold L6 whole-tar gate (bench/l6_tar_gate.sh) can read miniz's output
+      -- size while still timing this as a fresh single-shot process. The extra
+      -- print is negligible next to compressing a 200 MB tar, so it does not
+      -- perturb the cold timing the gate measures.
+      let out ← MinizOxide.compress data level.toUInt8
+      let ratio : Float := 100.0 * out.size.toFloat / data.size.toFloat
+      IO.println s!"size={data.size} lvl={level}: out={out.size} ratio={ratio.toString.take 5}%"
     | "compress-libdeflate" =>
       let _ ← Libdeflate.compress data level.toUInt8
       pure ()
