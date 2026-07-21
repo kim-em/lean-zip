@@ -1,0 +1,20 @@
+{
+ "meta": {
+  "date": "2026-07-21T15:51:14Z",
+  "machine": "Linux chungus2 x86_64",
+  "git_commit": "e076d2a6",
+  "note": "cold single-shot best-of-9 L6 whole silesia.tar (211957760 B); native vs miniz_oxide; ms are wall-clock of fresh subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native cold-faster)"
+ },
+ "native": {
+  "size": 67943851,
+  "ms_best": 5565.688,
+  "ms_median": 5725.251
+ },
+ "miniz": {
+  "size": 68112144,
+  "ms_best": 5836.564,
+  "ms_median": 5850.569
+ },
+ "size_margin_pct": 0.2471,
+ "time_ratio_median": 0.9783
+}

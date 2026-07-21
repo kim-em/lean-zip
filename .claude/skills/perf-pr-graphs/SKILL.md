@@ -82,6 +82,28 @@ stays current.
   committed dashboard half.
 - A PR touching both: produce both sets.
 
+## Whole-tar L6 (compress PRs — check this too)
+
+The per-file Pareto above tracks WARM per-file throughput, so it amortizes
+native's page-fault / CAF-build tax and measures small files where the
+split/probe economics differ. It therefore **misses** the `zip silesia.tar`
+COLD-stream workload — the 202 MB whole-tar L6 that Kim's `hyperfine` headline
+benchmarks — and a deeper L6 probe or rolling deferral can regress that number
+invisibly while every per-file row looks fine. Three PRs slipped through exactly
+this gap; the dedicated CI gate that once caught it was removed in favour of this
+committed dashboard datum.
+
+So for a **compress** PR, also read `bench/results/whole_tar_l6.json` before vs
+after (`git show origin/master:bench/results/whole_tar_l6.json` for BEFORE).
+Native L6 must stay **strictly smaller AND cold-faster** than miniz_oxide on the
+whole tar: `native.size < miniz.size` (`size_margin_pct > 0`) and
+`time_ratio_median < 1.0` (median per-rep native_ms/miniz_ms). This is a recorded
+measurement, not a pass/fail gate — but a compress PR that pushes
+`size_margin_pct` toward 0 or `time_ratio_median` toward/past 1.0 is regressing
+the headline workload, so call it out. `bench/run.sh` refreshes this file in-PR
+(both the full and `--native-only` paths, guarded on the silesia corpus) exactly
+like `latest.json`, so it lands in this PR's diff at step 8.
+
 ## Reading the frontier honestly (mixing curves — do not skip)
 
 When a compression change lands a **new operating point** (a new tier, a new

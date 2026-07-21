@@ -22,10 +22,28 @@ set -euo pipefail
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
 OUT="bench/results/latest.json"
+WTAR="bench/results/whole_tar_l6.json"
 PIN="bash bench/pin_core.sh"
 
 in_project_shell() {
   if [ -n "${IN_NIX_SHELL:-}" ]; then bash -c "$1"; else nix-shell --run "$1"; fi
+}
+
+# Whole-tar L6 measurement: record native vs miniz_oxide on the COLD whole
+# silesia.tar (compressed size + cold time) into bench/results/whole_tar_l6.json.
+# The per-file dashboard ($OUT) tracks WARM per-file throughput and misses the
+# `zip silesia.tar` cold-stream workload, where a deeper L6 probe / rolling can
+# regress invisibly (three PRs did). This is a MEASUREMENT that records — not a
+# gate — surfaced in the perf-graphs review. Pinned like the other measurement
+# steps; miniz here is deterministic and cheap, so it runs on both paths. Needs
+# the `bench` exe (distinct from bench-report). Guarded on the silesia corpus.
+refresh_whole_tar() {
+  if [ ! -d bench/corpora/silesia ] || [ -z "$(ls -A bench/corpora/silesia 2>/dev/null)" ]; then
+    echo "whole-tar L6: silesia corpus absent — skipping $WTAR refresh" >&2
+    return 0
+  fi
+  in_project_shell "lake -d bench build bench \
+    && $PIN bash bench/whole_tar_l6.sh bench/corpora/silesia 9 $WTAR"
 }
 
 # Fast path for Lean-only changes: refresh ONLY the native rows and splice them
@@ -47,8 +65,10 @@ if [ "${1:-}" = "--native-only" ]; then
     && python bench/plot.py $OUT bench/graphs \
     && python bench/pareto_history.py"
   rm -f "$TMP"
+  refresh_whole_tar
   echo "Native-only dashboard refresh done:"
   echo "  data   → $OUT (native rows refreshed; reference rows reused)"
+  echo "  data   → $WTAR (whole-tar L6: native vs miniz, cold)"
   echo "  graphs → bench/graphs/*.svg"
   exit 0
 fi
@@ -91,6 +111,11 @@ in_project_shell "$PIN lake -d bench env bench/.lake/build/bin/bench-report --de
 nix-shell -p nodejs_latest python3 --run \
   "$PIN python3 bench/decode_density.py bench/payloads-deflate $DD"
 
+# 3c. Whole-tar L6 measurement (native vs miniz_oxide, cold). Records the
+#    `zip silesia.tar` cold-stream workload the per-file Pareto misses into
+#    bench/results/whole_tar_l6.json. See refresh_whole_tar above.
+refresh_whole_tar
+
 # 4. Render (project shell: python + matplotlib). plot.py auto-detects the
 #    sibling decode_density.json and emits the decode-density chart too;
 #    pareto_history.py replays the git history of latest.json into the
@@ -100,5 +125,5 @@ in_project_shell "python bench/plot.py $OUT bench/graphs \
   && python bench/pareto_history.py"
 
 echo "Track D dashboard regenerated:"
-echo "  data   → $OUT  (+ decode_density.json)"
+echo "  data   → $OUT  (+ decode_density.json, whole_tar_l6.json)"
 echo "  graphs → bench/graphs/*.svg"
