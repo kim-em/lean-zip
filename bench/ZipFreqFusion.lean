@@ -124,7 +124,7 @@ call forces a genuine recomputation every iteration. -/
 
 @[noinline] def opSep (data : ByteArray) (mc ic nl salt : Nat) : Nat :=
   let t := lz77ChainIterPMerged data mc 32768 ic nl
-  t.size + sumFreqs (tokenFreqsP t) + (salt &&& 1)
+  t.size + sumFreqs (tokenFreqsPTA t) + (salt &&& 1)
 
 @[noinline] def opTotal (data : ByteArray) (salt : Nat) : Nat :=
   (deflateRaw data 1).size + (salt &&& 1)
@@ -149,8 +149,8 @@ def analyzeFile (name : String) (data : ByteArray) (iters reps : Nat) : IO Unit 
   -- tokenFreqsP over those tokens.
   let realToks := lz77ChainIterPMerged data maxChain 32768 insertCap niceLen
   let fused := fusedMatchWithFreqs data maxChain insertCap niceLen
-  let freqRef := tokenFreqsP realToks
-  let toksOk := fused.1 == realToks
+  let freqRef := tokenFreqsPTA realToks
+  let toksOk := fused.1 == realToks.toArray
   let freqOk := fused.2.1.val == freqRef.1 && fused.2.2.val == freqRef.2
   IO.println s!"  {name}: {size} bytes, {realToks.size} tokens; toksOk={toksOk} freqOk={freqOk}"
   unless toksOk && freqOk do

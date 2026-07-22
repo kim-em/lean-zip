@@ -6,7 +6,7 @@ fixed (matched *once*, outside every timed region), it times separately the
 pieces of the level-1 emit path so the fast-L1 design can be chosen from the
 attribution instead of assumed:
 
-1. `tokenFreqsP ptokens`                          — the frequency walk
+1. `tokenFreqsPTA ptokens`                        — the frequency walk
 2. `tokenFreqsP` + `dynamicCodeLengths + dynHeaderCodes + dynBlockBytesWith`
                                                    — freqs + the dynamic sizing/tree
                                                      build (as `deflateRawBaseP`
@@ -98,11 +98,11 @@ def analyzeFile (name : String) (data : ByteArray) : IO FileResult := do
   -- (1) frequency walk. Sum the frequency arrays (not `.size`, which is the
   -- constant 286/30 and would let the walk be elided) to keep the fold live.
   let freqsNs ← measureNs size reps fun _ =>
-    let f := tokenFreqsP ptokens
+    let f := tokenFreqsPTA ptokens
     f.1.foldl (· + ·) 0 + f.2.foldl (· + ·) 0
   -- (2) dynamic sizing/tree build (freqs → code lengths → header plan → dyn size)
   let dynSizeNs ← measureNs size reps fun _ =>
-    let f := tokenFreqsP ptokens
+    let f := tokenFreqsPTA ptokens
     let lens := dynamicCodeLengths f.1 f.2
     let plan := dynHeaderCodes lens.1 lens.2
     have hcl : plan.clCodes.size ≥ 19 :=
@@ -110,7 +110,7 @@ def analyzeFile (name : String) (data : ByteArray) : IO FileResult := do
     dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
   -- (3) fixed sizer
   let fixedSizeNs ← measureNs size reps fun _ =>
-    let f := tokenFreqsP ptokens
+    let f := tokenFreqsPTA ptokens
     fixedBlockBytes f.1 f.2
   -- (4) fixed-only emit (token walk + BitWriter)
   let fixedEmitNs ← measureNs size reps fun _ =>
@@ -120,7 +120,7 @@ def analyzeFile (name : String) (data : ByteArray) : IO FileResult := do
     (deflateRawBaseP data ptokens).size
 
   -- (6) which branch the base dispatch actually takes, and the sizes
-  let f := tokenFreqsP ptokens
+  let f := tokenFreqsPTA ptokens
   let lens := dynamicCodeLengths f.1 f.2
   let plan := dynHeaderCodes lens.1 lens.2
   have hcl : plan.clCodes.size ≥ 19 :=
