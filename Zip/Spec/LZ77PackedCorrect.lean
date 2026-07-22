@@ -47,14 +47,19 @@ private theorem trailingP_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Tok
     · simp only [hp, ↓reduceDIte]
 
 /-- The packed greedy `mainLoop` is the packed image of the boxed one:
-    identical control flow and chain state, `packTok` at each push. -/
+    identical control flow and chain state, `packTok` at each push. The producer
+    now accumulates a `TokenArray` (stage 2/7), so the statement threads
+    `.toArray`: given the accumulator invariant `ta.toArray = acc.map packTok`,
+    the `TokenArray` loop's view is the boxed loop's packed image. Each push step
+    that was `Array.map_push` is now `TokenArray.push_toArray` + `Array.map_push`. -/
 private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap niceLen : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos
-        (acc.map packTok) =
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (ta : TokenArray) (acc : Array LZ77Token)
+    (hta : ta.toArray = acc.map packTok) :
+    (lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos
+        ta).toArray =
       (lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos
         acc).map packTok := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos ta acc hashTable prev hta with
   | _ n ih =>
     unfold lz77ChainIterP.mainLoop lz77ChainIter.mainLoop
     simp only [chainWalkGuardedPackedU_eq]
@@ -62,21 +67,25 @@ private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain in
     · simp only [hlt, ↓reduceDIte]
       split
       · split
-        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
-        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
-      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+        · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
+        · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
+      · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
     · simp only [hlt, ↓reduceDIte]
+      rw [trailingPT_toArray, hta]
       exact trailingP_eq data pos acc
 
-/-- `lz77ChainIterP` produces exactly the `packTok` image of `lz77ChainIter`. -/
+/-- `lz77ChainIterP`'s `TokenArray` output views to exactly the `packTok` image of
+    `lz77ChainIter`. -/
 theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap niceLen : Nat) :
-    lz77ChainIterP data maxChain windowSize insertCap niceLen =
+    (lz77ChainIterP data maxChain windowSize insertCap niceLen).toArray =
       (lz77ChainIter data maxChain windowSize insertCap niceLen).map packTok := by
   unfold lz77ChainIterP lz77ChainIter
   split
-  · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
+  · rw [trailingPT_toArray, TokenArray.empty_toArray]
+    simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ 0 #[]
+      mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ 0 TokenArray.empty #[]
+        (by simp)
 
 set_option backward.split false in
 set_option maxRecDepth 4000 in
@@ -182,7 +191,7 @@ existing encodability theorems provide for the whole stream. -/
 /-- The boxed view of the packed greedy matcher is the boxed greedy matcher. -/
 theorem lz77ChainIterP_map (data : ByteArray) (maxChain windowSize insertCap niceLen : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    (lz77ChainIterP data maxChain windowSize insertCap niceLen).map unpackTok =
+    (lz77ChainIterP data maxChain windowSize insertCap niceLen).toArray.map unpackTok =
       lz77ChainIter data maxChain windowSize insertCap niceLen := by
   have henc := lz77ChainIter_encodable data maxChain windowSize insertCap niceLen hw hws
   rw [lz77ChainIterP_eq, Array.map_map]

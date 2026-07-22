@@ -690,12 +690,27 @@ private theorem mergedLoop_eq (data : ByteArray)
       · exact ih _ (by omega) _ _ _ _ _ hht' hps' hpv' rfl
     · simp only [hlt, ↓reduceDIte]
 
+/-- The `Array UInt32` view of the greedy `TokenArray` trailing loop is the
+    boxed-model `trailingP` on the viewed accumulator (stage 2/7 bridge): each
+    `TokenArray.push` becomes an `Array.push` under `.toArray` via
+    `TokenArray.push_toArray`. Shared by the plain-greedy (`LZ77PackedCorrect`) and
+    fused-greedy (`DeflateFreqsFusedCorrect`) correspondence proofs. -/
+theorem trailingPT_toArray (data : ByteArray) (pos : Nat) (acc : TokenArray) :
+    (trailingPT data pos acc).toArray = trailingP data pos acc.toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
+  | _ n ih =>
+    unfold trailingPT trailingP
+    by_cases hp : pos < data.size
+    · simp only [hp, ↓reduceDIte]
+      rw [ih _ (by omega) _ _ rfl, TokenArray.push_toArray]
+    · simp only [hp, ↓reduceDIte]
+
 /-- Greedy-tier lockstep equality (the twin of `mergedLoop_eq` minus the lazy
     branch and the hash3 seed): `lz77GreedyMergedLoop` on `prev ++ hashTable`
     is `lz77ChainIterP.mainLoop` on the separate arrays. -/
 private theorem greedyMergedLoop_eq (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap niceLen : Nat)
-    (hashTable prev : Array Nat) (pos : Nat) (acc : Array UInt32)
+    (hashTable prev : Array Nat) (pos : Nat) (acc : TokenArray)
     (hhs : 0 < hashSize) (hht : hashTable.size = hashSize) (hps : prev.size = prevSize)
     (hpv : min chainWinSize data.size ≤ prev.size) :
     lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen

@@ -187,47 +187,75 @@ theorem trailingPF_spec (data : ByteArray) (pos : Nat) (acc : Array UInt32)
     · simp only [h, ↓reduceDIte]
       exact Prod.ext rfl (Prod.ext (Subtype.ext hlit) (Subtype.ext hdist))
 
+/-- The `Array UInt32` view of the greedy `TokenArray` trailing loop is the
+    boxed-model `trailingP` on the viewed accumulator (stage 2/7 bridge). Local
+    copy of `Zip.Spec.LZ77MergedCorrect.trailingPT_toArray` to avoid importing that
+    module's transitive `LZ77ChainCorrect` (a name-clash source) into this file. -/
+private theorem trailingPT_toArray (data : ByteArray) (pos : Nat) (acc : TokenArray) :
+    (trailingPT data pos acc).toArray = trailingP data pos acc.toArray := by
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
+  | _ n ih =>
+    unfold trailingPT trailingP
+    by_cases hp : pos < data.size
+    · simp only [hp, ↓reduceDIte]
+      rw [ih _ (by omega) _ _ rfl, TokenArray.push_toArray]
+    · simp only [hp, ↓reduceDIte]
+
 /-- The fused greedy loop computes the plain greedy loop's tokens and their
-    `tokenFreqsP`, maintaining the invariant `(litF, distF) = tokenFreqsP acc`. -/
+    `tokenFreqsP`, maintaining the invariant `(litF, distF) = tokenFreqsP acc`.
+    The plain loop now accumulates a `TokenArray` (stage 2/7 of the token-stream
+    unboxing), so its output is threaded through `.toArray`; the fused loop keeps
+    its `Array UInt32` accumulator this stage, bridged to the `TokenArray` one by
+    `hta : ta.toArray = acc` (each `TokenArray.push` matching the fused
+    `Array.push` under `.toArray` via `TokenArray.push_toArray`). -/
 theorem lz77GreedyMergedLoopF_spec (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap niceLen : Nat)
-    (c : Array Nat) (pos : Nat) (acc : Array UInt32)
+    (c : Array Nat) (pos : Nat) (acc : Array UInt32) (ta : TokenArray)
     (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30})
+    (hta : ta.toArray = acc)
     (hlit : litF.val = (tokenFreqsP acc).1) (hdist : distF.val = (tokenFreqsP acc).2) :
     lz77GreedyMergedLoopF data windowSize hashSize prevSize maxChain insertCap niceLen c pos acc litF distF =
-      (lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c pos acc,
-       ⟨(tokenFreqsP (lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c pos acc)).1, (tokenFreqsP_size _).1⟩,
-       ⟨(tokenFreqsP (lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c pos acc)).2, (tokenFreqsP_size _).2⟩) := by
-  induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc litF distF c with
+      ((lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c pos ta).toArray,
+       ⟨(tokenFreqsP (lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c pos ta).toArray).1, (tokenFreqsP_size _).1⟩,
+       ⟨(tokenFreqsP (lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c pos ta).toArray).2, (tokenFreqsP_size _).2⟩) := by
+  induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc ta litF distF c hta with
   | _ n ih =>
     unfold lz77GreedyMergedLoopF lz77GreedyMergedLoop
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       split
       · split
-        · exact ih _ (by omega) _ _ _ _ _
+        · exact ih _ (by omega) _ _ _ _ _ _ (by rw [TokenArray.push_toArray, hta])
             (bumpRefLitFreqP_push acc _ _ (packTok_reference_tag _ _) hlit)
             (bumpRefDistFreqP_push acc _ _ (packTok_reference_tag _ _) hdist) rfl
-        · exact ih _ (by omega) _ _ _ _ _
+        · exact ih _ (by omega) _ _ _ _ _ _ (by rw [TokenArray.push_toArray, hta])
             (bumpLitFreqP_push acc _ _ (packTok_literal_tag _) hlit)
             (distFreq_push_lit acc _ _ (packTok_literal_tag _) hdist) rfl
-      · exact ih _ (by omega) _ _ _ _ _
+      · exact ih _ (by omega) _ _ _ _ _ _ (by rw [TokenArray.push_toArray, hta])
           (bumpLitFreqP_push acc _ _ (packTok_literal_tag _) hlit)
           (distFreq_push_lit acc _ _ (packTok_literal_tag _) hdist) rfl
     · simp only [hlt, ↓reduceDIte]
-      exact trailingPF_spec data pos acc litF distF hlit hdist
+      have hk : (trailingPT data pos ta).toArray = trailingP data pos acc := by
+        rw [trailingPT_toArray, hta]
+      rw [trailingPF_spec data pos acc litF distF hlit hdist]
+      simp only [hk]
 
 /-- **The fused greedy entry computes the merged matcher's tokens and their
     frequencies in one pass.** -/
 theorem lz77ChainIterPMergedF_eq (data : ByteArray) (maxChain windowSize insertCap niceLen : Nat) :
     lz77ChainIterPMergedF data maxChain windowSize insertCap niceLen =
-      (lz77ChainIterPMerged data maxChain windowSize insertCap niceLen,
-       ⟨(tokenFreqsP (lz77ChainIterPMerged data maxChain windowSize insertCap niceLen)).1, (tokenFreqsP_size _).1⟩,
-       ⟨(tokenFreqsP (lz77ChainIterPMerged data maxChain windowSize insertCap niceLen)).2, (tokenFreqsP_size _).2⟩) := by
+      ((lz77ChainIterPMerged data maxChain windowSize insertCap niceLen).toArray,
+       ⟨(tokenFreqsP (lz77ChainIterPMerged data maxChain windowSize insertCap niceLen).toArray).1, (tokenFreqsP_size _).1⟩,
+       ⟨(tokenFreqsP (lz77ChainIterPMerged data maxChain windowSize insertCap niceLen).toArray).2, (tokenFreqsP_size _).2⟩) := by
   unfold lz77ChainIterPMergedF lz77ChainIterPMerged
   split
-  · exact trailingPF_spec data 0 #[] initLitFreqF initDistFreqF tokenFreqsP_nil_fst tokenFreqsP_nil_snd
+  · have hk : (trailingPT data 0 TokenArray.empty).toArray = trailingP data 0 #[] := by
+      rw [trailingPT_toArray, TokenArray.empty_toArray]
+    rw [trailingPF_spec data 0 #[] initLitFreqF initDistFreqF tokenFreqsP_nil_fst tokenFreqsP_nil_snd]
+    simp only [hk]
   · exact lz77GreedyMergedLoopF_spec data windowSize 65536 (min chainWinSize data.size) maxChain
-      insertCap niceLen _ 0 _ initLitFreqF initDistFreqF tokenFreqsP_nil_fst tokenFreqsP_nil_snd
+      insertCap niceLen _ 0 _ TokenArray.empty initLitFreqF initDistFreqF
+      (by rw [TokenArray.empty_toArray, Array.emptyWithCapacity_eq])
+      tokenFreqsP_nil_fst tokenFreqsP_nil_snd
 
 end Zip.Native.Deflate

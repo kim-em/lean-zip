@@ -1000,7 +1000,7 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
   if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
-  else lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  else (lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)).toArray
 
 /-! ## Self-contained block-split dynamic compression
 
@@ -1920,7 +1920,7 @@ def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
 theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ level)) :
     deflateRawBaseF data level = deflateRawBase data level := by
   have hlz : lzMatchP data level =
-      lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level) := by
+      (lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)).toArray := by
     unfold lzMatchP; rw [if_neg h]
   unfold deflateRawBaseF deflateRawBase
   rw [hlz, lz77ChainIterPMergedF_eq]
