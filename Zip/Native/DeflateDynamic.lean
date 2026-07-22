@@ -1911,7 +1911,7 @@ theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
 def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
   let (ptokens, litF, distF) :=
     lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
-  deflateRawBasePF data ptokens (litF.val, distF.val)
+  deflateRawBasePF data ptokens.toArray (litF.val, distF.val)
 
 /-- On the greedy tier (`level ≤ 3`, i.e. `¬ 4 ≤ level`) the fused base candidate
     is byte-identical to `deflateRawBase`: the fused matcher returns exactly the

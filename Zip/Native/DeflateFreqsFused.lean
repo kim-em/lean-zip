@@ -35,11 +35,12 @@ def initLitFreqF : {a : Array Nat // a.size = 286} :=
 def initDistFreqF : {a : Array Nat // a.size = 30} :=
   ⟨Array.replicate 30 0, by rw [Array.size_replicate]⟩
 
-/-- Fused twin of `trailingP`: pushes each remaining byte as a literal token and
-    bumps the lit/len histogram at the same site (`bumpLitFreqP`). -/
-def trailingPF (data : ByteArray) (pos : Nat) (acc : Array UInt32)
+/-- Fused twin of `trailingPT`: pushes each remaining byte as a literal token
+    into a `TokenArray` accumulator (4 B/token, stage 4/7 of the token-stream
+    unboxing) and bumps the lit/len histogram at the same site (`bumpLitFreqP`). -/
+def trailingPF (data : ByteArray) (pos : Nat) (acc : TokenArray)
     (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30}) :
-    Array UInt32 × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
+    TokenArray × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
   if h : pos < data.size then
     let w := packTok (.literal data[pos])
     trailingPF data (pos + 1) (acc.push w) (bumpLitFreqP litF w) distF
@@ -55,9 +56,9 @@ termination_by data.size - pos
     `Zip/Spec/DeflateFreqsFusedCorrect.lean`. -/
 def lz77GreedyMergedLoopF (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap niceLen : Nat)
-    (c : Array Nat) (pos : Nat) (acc : Array UInt32)
+    (c : Array Nat) (pos : Nat) (acc : TokenArray)
     (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30}) :
-    Array UInt32 × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
+    TokenArray × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
   if hlt : pos + 2 < data.size then
     let h := lz77Greedy.hash3 data pos hashSize hlt
     let head := headProbeGuarded c (prevSize + h)
@@ -95,14 +96,14 @@ decreasing_by all_goals omega
     `Zip/Spec/DeflateFreqsFusedCorrect.lean`. -/
 def lz77ChainIterPMergedF (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (niceLen : Nat := 258) :
-    Array UInt32 × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
+    TokenArray × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
   if data.size < 3 then
-    trailingPF data 0 #[] initLitFreqF initDistFreqF
+    trailingPF data 0 TokenArray.empty initLitFreqF initDistFreqF
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
     lz77GreedyMergedLoopF data windowSize hashSize prevSize maxChain insertCap niceLen
       (.replicate (prevSize + hashSize) data.size) 0
-      (Array.emptyWithCapacity data.size) initLitFreqF initDistFreqF
+      TokenArray.empty initLitFreqF initDistFreqF
 
 end Zip.Native.Deflate
