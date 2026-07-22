@@ -505,7 +505,7 @@ set_option backward.split false in
 set_option maxHeartbeats 2000000 in
 private theorem mergedLoop_eq (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
-    (hashTable prev h3tab : Array Nat) (pos : Nat) (acc : Array UInt32)
+    (hashTable prev h3tab : Array Nat) (pos : Nat) (acc : TokenArray)
     (hhs : 0 < hashSize) (hht : hashTable.size = hashSize) (hps : prev.size = prevSize)
     (hpv : min chainWinSize data.size ≤ prev.size) :
     lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
@@ -529,7 +529,7 @@ private theorem mergedLoop_eq (data : ByteArray)
       -- `ih` (`pos < mp ⇒ data.size-(mp+pLen) < n`). The fused loop's top `pLen = 0`
       -- dispatch is stripped by `dif_neg hpl`, exposing the rolling-mode body (the old
       -- `rollDefer` body verbatim), so the seed-bridge `rw`s stay motive-correct.
-      have rdeq : ∀ (mp pLen pMatchPos step : Nat) (accd : Array UInt32) (htd prevd h3td : Array Nat)
+      have rdeq : ∀ (mp pLen pMatchPos step : Nat) (accd : TokenArray) (htd prevd h3td : Array Nat)
           (hhtd : htd.size = hashSize) (hpsd : prevd.size = prevSize)
           (hpvd : min chainWinSize data.size ≤ prevd.size) (hlo : pos < mp) (hpl : pLen ≠ 0),
           lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3

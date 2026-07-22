@@ -1828,8 +1828,8 @@ mutual
     production output is byte-identical. Proven equal to
     `(lz77ChainLazyIter.mainLoop ..).map packTok` in `LZ77PackedCorrect`. -/
 def lz77ChainLazyIterP.mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
-    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos : Nat) (acc : Array UInt32) :
-    Array UInt32 :=
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos : Nat) (acc : TokenArray) :
+    TokenArray :=
   if hlt : pos + 2 < data.size then
     let h := lz77Greedy.hash3 data pos hashSize hlt
     let head := headProbeGuarded hashTable h
@@ -1909,7 +1909,7 @@ def lz77ChainLazyIterP.mainLoop (data : ByteArray) (windowSize hashSize maxChain
       lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab (pos + 1)
         (acc.push (packTok (.literal (data[pos]'(by omega)))))
   else
-    trailingP data pos acc
+    trailingPT data pos acc
 termination_by 2 * (data.size - pos)
 decreasing_by all_goals (first | omega | (refine Nat.mul_lt_mul_of_pos_left ?_ (by decide); omega))
 
@@ -1920,7 +1920,7 @@ decreasing_by all_goals (first | omega | (refine Nat.mul_lt_mul_of_pos_left ?_ (
     proof-args cross the mutual boundary; termination via the interleaved measure. -/
 def lz77ChainLazyIterP.rollDefer (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
     (hashTable : Array Nat) (prev h3tab : Array Nat)
-    (mp pLen pMatchPos step : Nat) (acc : Array UInt32) : Array UInt32 :=
+    (mp pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
   if hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch then
     let hmh := lz77Greedy.hash3 data mp hashSize (by omega)
     let headmp := headProbeGuarded hashTable hmh
@@ -1954,21 +1954,22 @@ decreasing_by all_goals omega
 end
 
 /-- Packed-token twin of `lz77ChainLazyIter` (lazy one-byte-lookahead matcher):
-    identical control flow and chain state, `Array UInt32` accumulator. Threads
-    the rolling-lazy2 `lazy2Steps` knob (default `1`, the only value any call site
-    passes). Equal to `(lz77ChainLazyIter ..).map packTok` (`lz77ChainLazyIterP_eq`). -/
+    identical control flow and chain state, `TokenArray` accumulator (4 B/token,
+    stage 3/7 of the token-stream unboxing). Threads the rolling-lazy2 `lazy2Steps`
+    knob (default `1`, the only value any call site passes). Its `.toArray` view
+    equals `(lz77ChainLazyIter ..).map packTok` (`lz77ChainLazyIterP_eq`). -/
 def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
     (lazyDepth : Nat := maxChain) (useH3 : Bool := false) (lazy2Steps : Nat := 1) :
-    Array UInt32 :=
+    TokenArray :=
   if data.size < 3 then
-    trailingP data 0 #[]
+    trailingPT data 0 TokenArray.empty
   else
     let hashSize := 65536
     lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
       (.replicate 32768 data.size) 0
-      (Array.emptyWithCapacity data.size)
+      TokenArray.empty
 
 /-! ## SPIKE (#2767 salvage): merged-array lazy matcher (single `Array Nat`)
 
@@ -2336,7 +2337,7 @@ decreasing_by
     `LZ77MergedCorrect`). -/
 def lz77LazyMergedLoop (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
-    (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat) (acc : Array UInt32) : Array UInt32 :=
+    (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
   if hpz : pLen = 0 then
     -- Fresh-position mode (formerly `mainLoop`): full chain walk at `pos`.
     if hlt : pos + 2 < data.size then
@@ -2408,7 +2409,7 @@ def lz77LazyMergedLoop (data : ByteArray)
         lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 c h3tab (pos + 1) 0 0 0
           (acc.push (packTok (.literal (data[pos]'(by omega)))))
     else
-      trailingP data pos acc
+      trailingPT data pos acc
   else
     -- Rolling mode (formerly `rollDefer`): a `pLen > 0` pending match starts at
     -- `pos` (`pos` plays the role of the old `rollDefer` `mp`). No fresh chain walk;
@@ -2460,15 +2461,15 @@ decreasing_by all_goals (first | assumption | omega)
 def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
     (lazyDepth : Nat := maxChain) (useH3 : Bool := false) (lazy2Steps : Nat := 1) :
-    Array UInt32 :=
+    TokenArray :=
   if data.size < 3 then
-    trailingP data 0 #[]
+    trailingPT data 0 TokenArray.empty
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
     lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
       (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0 0 0 0
-      (Array.emptyWithCapacity data.size)
+      TokenArray.empty
 
 /-- Merged-array twin of `lz77ChainIterP.mainLoop` (the greedy tier, levels
     1–3): identical control flow, but the chain state is the single combined
