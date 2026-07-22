@@ -378,6 +378,13 @@ lean_exe fuzz_handle_read where
 lean_exe «csize-file» where
   root := `ZipCsizeFile
 
+-- Honest lean side of the end-to-end CLI comparison: read a file, raw-DEFLATE
+-- compress it, print the compressed size. Timed head-to-head against the rust
+-- `miniz-compress-file` bin by bench/whole_tar_l6.sh (`end_to_end` section).
+@[default_target]
+lean_exe «compress-file» where
+  root := `ZipCompressFile
+
 @[default_target]
 lean_exe «rung4-accept» where
   root := `ZipRung4Accept

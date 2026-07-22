@@ -1,20 +1,42 @@
 {
  "meta": {
-  "date": "2026-07-21T15:51:14Z",
+  "date": "2026-07-22T13:33:08Z",
   "machine": "Linux chungus2 x86_64",
-  "git_commit": "e076d2a6",
-  "note": "cold single-shot best-of-9 L6 whole silesia.tar (211957760 B); native vs miniz_oxide; ms are wall-clock of fresh subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native cold-faster)"
+  "git_commit": "502832f7",
+  "tar_bytes": 211957760,
+  "reps": 9
  },
- "native": {
-  "size": 67943851,
-  "ms_best": 5565.688,
-  "ms_median": 5725.251
+ "codec": {
+  "note": "CODEC comparison, measured THROUGH the lean bench harness so both sides pay the same readBinFile + 202 MB ByteArray-alloc I/O and it CANCELS: native (bench csize) vs miniz_oxide (bench compress-miniz) on the whole silesia.tar (211957760 B), cold best-of-9. ms are wall-clock of fresh bench subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native codec-CPU faster). This guards a ratio-tuning codec regression; it is NOT the end-to-end zip wall (see end_to_end).",
+  "native": {
+   "size": 67943851,
+   "ms_best": 5714.395,
+   "ms_median": 5763.210
+  },
+  "miniz": {
+   "size": 68112144,
+   "ms_best": 5850.334,
+   "ms_median": 5876.288
+  },
+  "size_margin_pct": 0.2471,
+  "time_ratio_median": 0.9768
  },
- "miniz": {
-  "size": 68112144,
-  "ms_best": 5836.564,
-  "ms_median": 5850.569
- },
- "size_margin_pct": 0.2471,
- "time_ratio_median": 0.9783
+ "end_to_end": {
+  "note": "END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-9, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead). Rust is currently marginally wall-ahead: lean's compression CPU is faster (lower user_ms) but its file-read/alloc system time (sys_ms) is higher, so the gap is entirely the lean CLI I/O path. wall/user/sys captured via the bash time builtin.",
+  "lean": {
+   "size": 67943851,
+   "wall_ms_best": 5766.000,
+   "wall_ms_median": 5812.000,
+   "user_ms": 5577.000,
+   "sys_ms": 212.000
+  },
+  "rust": {
+   "size": 68112144,
+   "wall_ms_best": 5768.000,
+   "wall_ms_median": 5782.000,
+   "user_ms": 5682.000,
+   "sys_ms": 83.000
+  },
+  "wall_ratio_median": 1.0045
+ }
 }

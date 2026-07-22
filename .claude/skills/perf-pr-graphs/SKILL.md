@@ -94,15 +94,38 @@ this gap; the dedicated CI gate that once caught it was removed in favour of thi
 committed dashboard datum.
 
 So for a **compress** PR, also read `bench/results/whole_tar_l6.json` before vs
-after (`git show origin/master:bench/results/whole_tar_l6.json` for BEFORE).
-Native L6 must stay **strictly smaller AND cold-faster** than miniz_oxide on the
-whole tar: `native.size < miniz.size` (`size_margin_pct > 0`) and
-`time_ratio_median < 1.0` (median per-rep native_ms/miniz_ms). This is a recorded
-measurement, not a pass/fail gate — but a compress PR that pushes
-`size_margin_pct` toward 0 or `time_ratio_median` toward/past 1.0 is regressing
-the headline workload, so call it out. `bench/run.sh` refreshes this file in-PR
-(both the full and `--native-only` paths, guarded on the silesia corpus) exactly
-like `latest.json`, so it lands in this PR's diff at step 8.
+after (`git show origin/master:bench/results/whole_tar_l6.json` for BEFORE). It
+has **two honest sections** — read both, and do not conflate them:
+
+**`codec`** — native vs miniz_oxide measured THROUGH the same lean `bench`
+harness (`bench csize` vs `bench compress-miniz`). Both sides run inside one
+lean process, so both pay the identical `readBinFile` + 202 MB ByteArray-alloc
+I/O tax and it **cancels** — this isolates the codec CPU. So
+`codec.time_ratio_median` is a **codec-CPU ratio**, a regression guard for
+ratio-tuning knobs, **not** the end-to-end wall. Native L6 must stay strictly
+smaller AND codec-faster: `codec.native.size < codec.miniz.size`
+(`codec.size_margin_pct > 0`) and `codec.time_ratio_median < 1.0` (median per-rep
+native_ms/miniz_ms). A compress PR that pushes `size_margin_pct` toward 0 or
+`time_ratio_median` toward/past 1.0 is regressing the codec, so call it out.
+
+**`end_to_end`** — two REAL, separate CLI tools timed as fresh processes: the
+lean `compress-file` exe (`readBinFile` → `deflateRaw` → print size) vs the rust
+`miniz-compress-file` bin (`std::fs::read` → `compress_to_vec` → print len). This
+IS the honest `zip silesia.tar` wall Kim benchmarks with `hyperfine`, because
+each side pays its OWN file-read/alloc path (the very tax the `codec` section
+cancels out). Report it honestly: **rust is currently marginally wall-ahead**
+(`end_to_end.wall_ratio_median` slightly > 1.0, lean/rust). That is NOT a codec
+loss — lean's compression CPU is faster (`end_to_end.lean.user_ms <
+end_to_end.rust.user_ms`); the whole gap is the lean CLI's file-read/alloc
+**system** time (`end_to_end.lean.sys_ms > end_to_end.rust.sys_ms`). A compress
+PR that improves the codec while `wall_ratio_median` stays > 1.0 has NOT closed
+the end-to-end gap — say so plainly; closing it means shrinking the lean CLI I/O
+path, not the codec.
+
+Both are recorded measurements, not pass/fail gates. `bench/run.sh` refreshes
+this file in-PR (both the full and `--native-only` paths, guarded on the silesia
+corpus) exactly like `latest.json` — building the lean `compress-file` exe and
+the rust `miniz-compress-file` bin — so it lands in this PR's diff at step 8.
 
 ## Reading the frontier honestly (mixing curves — do not skip)
 

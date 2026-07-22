@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
-# Record the cold single-shot L6 whole-tar comparison: lean native DEFLATE vs
-# miniz_oxide on the whole silesia.tar, in BOTH compressed size and cold time.
+# Record the cold L6 whole-tar comparison in TWO honest sections, both written
+# to bench/results/whole_tar_l6.json:
+#
+#   [codec]      lean native DEFLATE vs miniz_oxide, measured THROUGH the same
+#                lean `bench` harness — so both sides pay lean's `readBinFile` +
+#                202 MB ByteArray-alloc I/O tax and it CANCELS. This isolates
+#                the codec CPU. `time_ratio_median` here is a codec-CPU ratio
+#                (native genuinely compresses faster); it is a regression guard
+#                for ratio-tuning knobs, NOT the end-to-end `zip silesia.tar` wall.
+#
+#   [end_to_end] two REAL, separate CLI tools — the lean `compress-file` exe and
+#                the rust `miniz-compress-file` bin — each a fresh process doing
+#                read-file → compress → report. This IS the end-to-end wall Kim
+#                benchmarks with `hyperfine zip silesia.tar`, and it includes
+#                each language's own file-read/alloc path (which the codec
+#                section cancels out). Report it honestly: rust is currently
+#                marginally ahead on wall because lean's compression CPU is
+#                faster (lower user time) but its file-read/alloc system time is
+#                higher — the gap is entirely the lean CLI's I/O path.
 #
 #   bench/whole_tar_l6.sh <corpusDir> [N=9] [outJson=bench/results/whole_tar_l6.json]
 #
@@ -10,7 +27,7 @@
 # differ — so a config that regresses the whole 202 MB `zip silesia.tar` COLD
 # stream (a deeper L6 probe, rolling deferral) can look fine per-file while the
 # real workload regresses. Three PRs slipped through exactly this gap. This
-# script RECORDS the whole-tar L6 number as committed dashboard data
+# script RECORDS the whole-tar L6 numbers as committed dashboard data
 # (bench/results/whole_tar_l6.json) so a regression surfaces in the perf-graphs
 # review already mandatory for perf PRs.
 #
@@ -19,11 +36,13 @@
 # every time (~0.24 s). An in-process warm loop amortizes that tax after the
 # first rep and inflates native's apparent time margin from ~2% (cold) to
 # ~4.5% (warm) — enough to green-light a config that is actually ~2.8% SLOWER
-# cold. So every timed rep here spawns FRESH `bench` subprocesses.
+# cold. So every timed rep here spawns FRESH subprocesses.
 #
-# Native side : `bench csize 0 @<tar> 6`          — prints native L6 out-size
-# miniz side  : `bench compress-miniz 0 @<tar> 6` — prints miniz L6 out-size
-# Both are single-shot: one compress of the whole tar, then exit.
+# CODEC side  : `bench csize 0 @<tar> 6`          — native L6 out-size, through harness
+#               `bench compress-miniz 0 @<tar> 6` — miniz L6 out-size,  through harness
+# E2E   side  : `compress-file <tar> 6`           — lean CLI: read → deflateRaw → size
+#               `miniz-compress-file <tar> 6`     — rust CLI: std::fs::read → compress_to_vec → len
+# All are single-shot: one compress of the whole tar, then exit.
 #
 # This is a MEASUREMENT that RECORDS — it is NOT a pass/fail gate. It never
 # asserts dominance and never exits nonzero on a regression; the perf-graphs
@@ -75,6 +94,33 @@ if [ -z "$BENCH" ]; then
   exit 2
 fi
 
+# Locate the honest lean CLI (`compress-file`), built alongside `bench`.
+LEAN_CLI=""
+for cand in \
+  "$SCRIPT_DIR/.lake/build/bin/compress-file" \
+  "$SCRIPT_DIR/../bench/.lake/build/bin/compress-file" \
+  ".lake/build/bin/compress-file" \
+  "bench/.lake/build/bin/compress-file"; do
+  if [ -x "$cand" ]; then LEAN_CLI="$cand"; break; fi
+done
+if [ -z "$LEAN_CLI" ]; then
+  echo "ERROR: could not find the built 'compress-file' exe (run: lake -d bench build compress-file)" >&2
+  exit 2
+fi
+
+# Locate the honest rust CLI (`miniz-compress-file`), the miniz_oxide crate bin.
+RUST_CLI=""
+for cand in \
+  "$SCRIPT_DIR/rust/miniz_oxide_shim/target/release/miniz-compress-file" \
+  "rust/miniz_oxide_shim/target/release/miniz-compress-file" \
+  "bench/rust/miniz_oxide_shim/target/release/miniz-compress-file"; do
+  if [ -x "$cand" ]; then RUST_CLI="$cand"; break; fi
+done
+if [ -z "$RUST_CLI" ]; then
+  echo "ERROR: could not find the built 'miniz-compress-file' bin (run: cargo build --release --manifest-path bench/rust/miniz_oxide_shim/Cargo.toml)" >&2
+  exit 2
+fi
+
 # Assemble a DETERMINISTIC silesia.tar in a temp dir (cleaned on exit). Same
 # command the removed l6_tar_gate used — reuse it exactly for reproducibility.
 TMPDIR_TAR="$(mktemp -d)"
@@ -87,10 +133,12 @@ tar --sort=name --owner=0 --group=0 --numeric-owner \
 
 TAR_BYTES="$(wc -c < "$TAR")"
 
-echo "== whole-tar L6 measurement (native vs miniz, cold) =="
+echo "== whole-tar L6 measurement (codec + end-to-end, cold) =="
 echo "corpus  : $CORPUS"
 echo "tar     : $TAR (${TAR_BYTES} B)"
 echo "bench   : $BENCH"
+echo "leanCLI : $LEAN_CLI"
+echo "rustCLI : $RUST_CLI"
 echo "reps    : $N"
 echo "out     : $OUT"
 echo
@@ -98,14 +146,42 @@ echo
 # Parse `out=<n>` from a `size=... lvl=6: out=<n> ratio=...%` line.
 parse_out() { awk 'match($0, /out=[0-9]+/) { print substr($0, RSTART+4, RLENGTH-4); exit }'; }
 
-# --- sizes: one run of each, capture out-sizes ---
+# min + median of a list of floats (args), printed as "<min> <median>".
+best_median() {
+  printf '%s\n' "$@" | sort -n | awk '
+    { v[NR]=$1 }
+    END {
+      n=NR
+      if (n % 2 == 1) med = v[(n+1)/2]
+      else            med = (v[n/2] + v[n/2+1]) / 2.0
+      printf "%.3f %.3f", v[1], med
+    }'
+}
+
+# median of a list of floats (args).
+median() {
+  printf '%s\n' "$@" | sort -n | awk '
+    { v[NR]=$1 }
+    END {
+      n=NR
+      if (n % 2 == 1) printf "%.3f", v[(n+1)/2]
+      else            printf "%.3f", (v[n/2] + v[n/2+1]) / 2.0
+    }'
+}
+
+# ============================ CODEC (through harness) ========================
+# Both sides run inside the lean `bench` process, so lean's readBinFile + big
+# ByteArray alloc I/O tax is paid identically on both and cancels. This isolates
+# codec CPU: `time_ratio_median` is a codec-CPU ratio, NOT the end-to-end wall.
+echo "--- codec: native vs miniz, THROUGH the lean bench harness (I/O cancels) ---"
+
 NATIVE_LINE="$("$BENCH" csize 0 "@$TAR" 6)"
 MINIZ_LINE="$("$BENCH" compress-miniz 0 "@$TAR" 6)"
 NATIVE_SIZE="$(printf '%s\n' "$NATIVE_LINE" | parse_out)"
 MINIZ_SIZE="$(printf '%s\n' "$MINIZ_LINE"  | parse_out)"
 
 if ! [[ "$NATIVE_SIZE" =~ ^[0-9]+$ ]] || ! [[ "$MINIZ_SIZE" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: could not parse out-sizes" >&2
+  echo "ERROR: could not parse codec out-sizes" >&2
   echo "  native line: $NATIVE_LINE" >&2
   echo "  miniz  line: $MINIZ_LINE" >&2
   exit 1
@@ -113,9 +189,7 @@ fi
 
 SIZE_MARGIN="$(awk -v a="$NATIVE_SIZE" -v b="$MINIZ_SIZE" 'BEGIN{printf "%.4f", 100.0*(b-a)/b}')"
 echo "size: native L6 out=$NATIVE_SIZE  miniz L6 out=$MINIZ_SIZE  (native ${SIZE_MARGIN}% smaller)"
-echo
 
-# nanosecond wall clock around a fresh subprocess.
 run_native() { "$BENCH" csize 0 "@$TAR" 6 >/dev/null; }
 run_miniz()  { "$BENCH" compress-miniz 0 "@$TAR" 6 >/dev/null; }
 now() { date +%s.%N; }
@@ -147,22 +221,9 @@ for ((i=1; i<=N; i++)); do
 done
 echo
 
-# median + min of a list of floats (args), printed as "<min> <median>".
-best_median() {
-  printf '%s\n' "$@" | sort -n | awk '
-    { v[NR]=$1 }
-    END {
-      n=NR
-      if (n % 2 == 1) med = v[(n+1)/2]
-      else            med = (v[n/2] + v[n/2+1]) / 2.0
-      printf "%.3f %.3f", v[1], med
-    }'
-}
-
 read -r NAT_BEST NAT_MED  <<<"$(best_median "${NAT_MS[@]}")"
 read -r MIZ_BEST MIZ_MED  <<<"$(best_median "${MIZ_MS[@]}")"
 
-# median of the per-rep ratios.
 RATIO_MED="$(printf '%s\n' "${RATIOS[@]}" | sort -n | awk '
   { v[NR]=$1 }
   END {
@@ -171,16 +232,88 @@ RATIO_MED="$(printf '%s\n' "${RATIOS[@]}" | sort -n | awk '
     else            printf "%.4f", (v[n/2] + v[n/2+1]) / 2.0
   }')"
 
-echo "native : size=$NATIVE_SIZE  ms_best=$NAT_BEST  ms_median=$NAT_MED"
-echo "miniz  : size=$MINIZ_SIZE  ms_best=$MIZ_BEST  ms_median=$MIZ_MED"
-echo "size_margin_pct=$SIZE_MARGIN  time_ratio_median=$RATIO_MED"
+echo "codec native : size=$NATIVE_SIZE  ms_best=$NAT_BEST  ms_median=$NAT_MED"
+echo "codec miniz  : size=$MINIZ_SIZE  ms_best=$MIZ_BEST  ms_median=$MIZ_MED"
+echo "codec size_margin_pct=$SIZE_MARGIN  time_ratio_median=$RATIO_MED"
+echo
+
+# ============================ END-TO-END (real CLIs) ========================
+# Two separate CLI tools as fresh processes: lean `compress-file` vs rust
+# `miniz-compress-file`. Each pays ITS OWN file-read/alloc path, so this is the
+# honest `zip silesia.tar` wall. We capture wall AND user+sys via the bash `time`
+# builtin (no /usr/bin/time needed): TIMEFORMAT '%R %U %S' → real user sys (s).
+echo "--- end-to-end: real lean CLI vs real rust CLI (fresh processes, own I/O) ---"
+
+LEAN_SIZE="$("$LEAN_CLI" "$TAR" 6 | tr -dc '0-9')"
+RUST_SIZE="$("$RUST_CLI" "$TAR" 6 | tr -dc '0-9')"
+if ! [[ "$LEAN_SIZE" =~ ^[0-9]+$ ]] || ! [[ "$RUST_SIZE" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: could not read end-to-end CLI out-sizes (lean='$LEAN_SIZE' rust='$RUST_SIZE')" >&2
+  exit 1
+fi
+echo "size: lean CLI out=$LEAN_SIZE  rust CLI out=$RUST_SIZE"
+
+# Run CMD as a fresh process; echo "<wall_ms> <user_ms> <sys_ms>" via bash time.
+TIMING="$TMPDIR_TAR/timing.txt"
+timed() {
+  # `time` report → group stderr → $TIMING; the command's own stdout/stderr are
+  # discarded inside the group so only the three timing floats land in $TIMING.
+  TIMEFORMAT='%R %U %S'
+  { time "$@" >/dev/null 2>/dev/null; } 2>"$TIMING"
+  local r u s
+  read -r r u s < "$TIMING"
+  awk -v r="$r" -v u="$u" -v s="$s" 'BEGIN{printf "%.3f %.3f %.3f", r*1000, u*1000, s*1000}'
+}
+
+echo "cold reps (lean_wall_ms / rust_wall_ms):"
+printf "  %-4s %-12s %-12s %-8s %-6s\n" "rep" "lean(ms)" "rust(ms)" "ratio" "first"
+
+LEAN_WALL=(); LEAN_USER=(); LEAN_SYS=()
+RUST_WALL=(); RUST_USER=(); RUST_SYS=()
+E2E_RATIOS=()
+for ((i=1; i<=N; i++)); do
+  if (( i % 2 == 1 )); then
+    read -r lw lu ls <<<"$(timed "$LEAN_CLI" "$TAR" 6)"
+    read -r rw ru rs <<<"$(timed "$RUST_CLI" "$TAR" 6)"
+    first="lean"
+  else
+    read -r rw ru rs <<<"$(timed "$RUST_CLI" "$TAR" 6)"
+    read -r lw lu ls <<<"$(timed "$LEAN_CLI" "$TAR" 6)"
+    first="rust"
+  fi
+  r="$(awk -v l="$lw" -v x="$rw" 'BEGIN{printf "%.4f", l/x}')"
+  LEAN_WALL+=("$lw"); LEAN_USER+=("$lu"); LEAN_SYS+=("$ls")
+  RUST_WALL+=("$rw"); RUST_USER+=("$ru"); RUST_SYS+=("$rs")
+  E2E_RATIOS+=("$r")
+  printf "  %-4s %-12s %-12s %-8s %-6s\n" "$i" "$lw" "$rw" "$r" "$first"
+done
+echo
+
+read -r LEAN_WALL_BEST LEAN_WALL_MED <<<"$(best_median "${LEAN_WALL[@]}")"
+read -r RUST_WALL_BEST RUST_WALL_MED <<<"$(best_median "${RUST_WALL[@]}")"
+LEAN_USER_MED="$(median "${LEAN_USER[@]}")"
+LEAN_SYS_MED="$(median "${LEAN_SYS[@]}")"
+RUST_USER_MED="$(median "${RUST_USER[@]}")"
+RUST_SYS_MED="$(median "${RUST_SYS[@]}")"
+
+E2E_RATIO_MED="$(printf '%s\n' "${E2E_RATIOS[@]}" | sort -n | awk '
+  { v[NR]=$1 }
+  END {
+    n=NR
+    if (n % 2 == 1) print v[(n+1)/2]
+    else            printf "%.4f", (v[n/2] + v[n/2+1]) / 2.0
+  }')"
+
+echo "e2e lean : size=$LEAN_SIZE  wall_best=$LEAN_WALL_BEST  wall_med=$LEAN_WALL_MED  user_med=$LEAN_USER_MED  sys_med=$LEAN_SYS_MED"
+echo "e2e rust : size=$RUST_SIZE  wall_best=$RUST_WALL_BEST  wall_med=$RUST_WALL_MED  user_med=$RUST_USER_MED  sys_med=$RUST_SYS_MED"
+echo "e2e wall_ratio_median=$E2E_RATIO_MED  (lean/rust; >1.0 = rust wall-ahead)"
 echo
 
 # --- write JSON (meta style mirrors bench/results/latest.json) ---
 DATE_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 MACHINE="$(uname -mns)"
 GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-NOTE="cold single-shot best-of-${N} L6 whole silesia.tar (${TAR_BYTES} B); native vs miniz_oxide; ms are wall-clock of fresh subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native cold-faster)"
+CODEC_NOTE="CODEC comparison, measured THROUGH the lean bench harness so both sides pay the same readBinFile + 202 MB ByteArray-alloc I/O and it CANCELS: native (bench csize) vs miniz_oxide (bench compress-miniz) on the whole silesia.tar (${TAR_BYTES} B), cold best-of-${N}. ms are wall-clock of fresh bench subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native codec-CPU faster). This guards a ratio-tuning codec regression; it is NOT the end-to-end zip wall (see end_to_end)."
+E2E_NOTE="END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-${N}, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead). Rust is currently marginally wall-ahead: lean's compression CPU is faster (lower user_ms) but its file-read/alloc system time (sys_ms) is higher, so the gap is entirely the lean CLI I/O path. wall/user/sys captured via the bash time builtin."
 
 mkdir -p "$(dirname "$OUT")"
 cat > "$OUT" <<EOF
@@ -189,20 +322,42 @@ cat > "$OUT" <<EOF
   "date": "$DATE_UTC",
   "machine": "$MACHINE",
   "git_commit": "$GIT_COMMIT",
-  "note": "$NOTE"
+  "tar_bytes": $TAR_BYTES,
+  "reps": $N
  },
- "native": {
-  "size": $NATIVE_SIZE,
-  "ms_best": $NAT_BEST,
-  "ms_median": $NAT_MED
+ "codec": {
+  "note": "$CODEC_NOTE",
+  "native": {
+   "size": $NATIVE_SIZE,
+   "ms_best": $NAT_BEST,
+   "ms_median": $NAT_MED
+  },
+  "miniz": {
+   "size": $MINIZ_SIZE,
+   "ms_best": $MIZ_BEST,
+   "ms_median": $MIZ_MED
+  },
+  "size_margin_pct": $SIZE_MARGIN,
+  "time_ratio_median": $RATIO_MED
  },
- "miniz": {
-  "size": $MINIZ_SIZE,
-  "ms_best": $MIZ_BEST,
-  "ms_median": $MIZ_MED
- },
- "size_margin_pct": $SIZE_MARGIN,
- "time_ratio_median": $RATIO_MED
+ "end_to_end": {
+  "note": "$E2E_NOTE",
+  "lean": {
+   "size": $LEAN_SIZE,
+   "wall_ms_best": $LEAN_WALL_BEST,
+   "wall_ms_median": $LEAN_WALL_MED,
+   "user_ms": $LEAN_USER_MED,
+   "sys_ms": $LEAN_SYS_MED
+  },
+  "rust": {
+   "size": $RUST_SIZE,
+   "wall_ms_best": $RUST_WALL_BEST,
+   "wall_ms_median": $RUST_WALL_MED,
+   "user_ms": $RUST_USER_MED,
+   "sys_ms": $RUST_SYS_MED
+  },
+  "wall_ratio_median": $E2E_RATIO_MED
+ }
 }
 EOF
 

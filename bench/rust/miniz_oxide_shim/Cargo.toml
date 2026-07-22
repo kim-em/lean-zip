@@ -8,6 +8,14 @@ description = "C-ABI shim around miniz_oxide for the lean-zip Track D comparator
 [lib]
 crate-type = ["staticlib"]
 
+# Honest rust side of the end-to-end CLI comparison (bench/whole_tar_l6.sh's
+# `end_to_end` section): read a file, raw-DEFLATE compress it with the same
+# `compress_to_vec(&data, level)` codec the staticlib shim uses, print the
+# compressed length. `cargo build --release` emits target/release/miniz-compress-file.
+[[bin]]
+name = "miniz-compress-file"
+path = "src/bin/compress_file.rs"
+
 [dependencies]
 miniz_oxide = "0.8"
 
