@@ -27,9 +27,13 @@ let the existing packed-layer proofs port by substituting the array-map lemmas
 `DeflateFreqsAdditive` keep reasoning on `Array UInt32`.
 
 The `TokenArray` invariant `bytes.size % 4 = 0` is carried as a proof field
-(erased at runtime, so the footprint is exactly the `ByteArray`).  It makes the
-bridge lemmas unconditional: every `TokenArray` is built from `empty` via `push`,
-both of which discharge the alignment obligation. -/
+(erased at runtime, so the footprint is exactly the `ByteArray`).  The invariant
+is precisely 4-byte *alignment* of the underlying `ByteArray` — the constructor
+accepts any byte length that is a multiple of four, not only streams built via
+`empty`/`push`.  In practice every `TokenArray` value is produced by `empty`,
+`push`, and `extract`, each of which discharges the alignment obligation, and it
+is that alignment invariant (not the construction provenance) that makes the
+bridge lemmas unconditional. -/
 
 namespace ByteArray
 
