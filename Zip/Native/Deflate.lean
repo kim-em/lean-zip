@@ -2611,6 +2611,24 @@ def emitTokensP (bw : BitWriter) (tokens : Array UInt32) (i : Nat) : BitWriter :
   else bw
 termination_by tokens.size - i
 
+/-- `TokenArray` twin of `emitTokensP` (stage 6/7 of the token-stream
+    unboxing): identical body reading each packed word from the 4-byte-per-token
+    `TokenArray` via `.get` instead of the 8-byte `Array UInt32` slot, so the
+    fixed-block emit never materializes the boxed token buffer. Equal to
+    `emitTokensP` over the `.toArray` view (`emitTokensTA_toArray`). -/
+def emitTokensTA (bw : BitWriter) (tokens : TokenArray) (i : Nat) : BitWriter :=
+  if h : i < tokens.size then
+    let w := tokens.get i h
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      have : w.toUInt8.toNat < fixedLitCodes.size := by
+        have := UInt8.toNat_lt w.toUInt8; rw [Deflate.fixedLitCodes_size]; omega
+      let (code, len) := fixedLitCodes[w.toUInt8.toNat]
+      emitTokensTA (bw.writeHuffCode code len) tokens (i + 1)
+    else
+      emitTokensTA (emitRefFixedP bw w) tokens (i + 1)
+  else bw
+termination_by tokens.size - i
+
 /-- Write a fixed Huffman DEFLATE block from LZ77 tokens. -/
 def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray :=
   let bw := BitWriter.empty
@@ -2632,7 +2650,7 @@ def deflateFixedBlock (data : ByteArray) (tokens : Array LZ77Token) : ByteArray 
     same body with `emitTokensP` in place of `emitTokens`. Equal to
     `deflateFixedBlock` over the boxed view (`deflateFixedBlockP_eq` in
     `Zip/Spec/EmitPackedCorrect.lean`). -/
-def deflateFixedBlockP (data : ByteArray) (tokens : Array UInt32) (cap : Nat := 0) : ByteArray :=
+def deflateFixedBlockP (data : ByteArray) (tokens : TokenArray) (cap : Nat := 0) : ByteArray :=
   let bw := BitWriter.emptyWithCapacity cap
   let bw := bw.writeBits 1 1  -- BFINAL
   let bw := bw.writeBits 2 1  -- BTYPE = 01
@@ -2642,7 +2660,7 @@ def deflateFixedBlockP (data : ByteArray) (tokens : Array UInt32) (cap : Nat := 
     let bw := bw.writeHuffCode code len
     bw.flush
   else
-    let bw := emitTokensP bw tokens 0
+    let bw := emitTokensTA bw tokens 0
     let (code, len) := fixedLitCodes[256]
     let bw := bw.writeHuffCode code len
     bw.flush

@@ -230,6 +230,32 @@ decreasing_by all_goals (rw [hstep]; omega)
   else
     emitTokensWithCodesPT bw tokens litT distT hlit hdist 0
 
+/-- `TokenArray` twin of `emitTokensWithCodesPT` (stage 6/7 of the token-stream
+    unboxing): the packed-table dynamic emit loop reading each packed word from
+    the 4-byte-per-token `TokenArray` via `.get` instead of the 8-byte
+    `Array UInt32` slot, so the dynamic-block emit never materializes the boxed
+    token buffer.  The Huffman code tables stay `Array UInt32` (they are the
+    per-block ≤316-entry `packCodeTab` outputs, not the token stream).  Equal to
+    `emitTokensWithCodesPT` over the `.toArray` view
+    (`emitTokensWithCodesTAPT_toArray`). -/
+def emitTokensWithCodesTAPT (bw : BitWriter) (tokens : TokenArray)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (i : Nat) : BitWriter :=
+  if h : i < tokens.size then
+    let w := tokens.get i h
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      have : w.toUInt8.toNat < litT.size := by
+        have := UInt8.toNat_lt w.toUInt8; omega
+      let e := litT[w.toUInt8.toNat]
+      emitTokensWithCodesTAPT (bw.writeRevCode e.toUInt16 (e >>> 16).toUInt8) tokens litT distT
+        hlit hdist (i + 1)
+    else
+      emitTokensWithCodesTAPT (emitRefWithCodesPT bw litT distT w) tokens litT distT
+        hlit hdist (i + 1)
+  else bw
+termination_by tokens.size - i
+
 /-- Write the dynamic Huffman tree header via BitWriter.
     This is the native equivalent of spec `encodeDynamicTrees`, writing
     bits through BitWriter instead of producing `List Bool`.
@@ -450,7 +476,7 @@ def deflateDynamicBlockCore (data : ByteArray) (tokens : Array LZ77Token)
     body with `emitTokensWithCodesP` in place of `emitTokensWithCodes`.
     Equal to `deflateDynamicBlockCore` over the boxed view
     (`deflateDynamicBlockCoreP_eq` in `Zip/Spec/EmitPackedCorrect.lean`). -/
-def deflateDynamicBlockCoreP (data : ByteArray) (tokens : Array UInt32)
+def deflateDynamicBlockCoreP (data : ByteArray) (tokens : TokenArray)
     (litLens distLens : List Nat)
     (hlit : litLens.length = 286) (hdist : distLens.length = 30) : ByteArray :=
   let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
@@ -477,8 +503,8 @@ def deflateDynamicBlockCoreP (data : ByteArray) (tokens : Array UInt32)
       rw [packCodeTab_size]; exact hlit_size
     have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
       rw [packCodeTab_size]; exact hdist_size
-    let bw := emitTokensWithCodesPTG bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
-      hlitT_size hdistT_size
+    let bw := emitTokensWithCodesTAPT bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
+      hlitT_size hdistT_size 0
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
@@ -493,7 +519,7 @@ def deflateDynamicBlockCoreP (data : ByteArray) (tokens : Array UInt32)
     `dynHeaderCodes litLens distLens`; only then is the output
     `deflateDynamicBlockCoreP data tokens litLens distLens` (proved by
     `deflateDynamicBlockCorePWith_dynHeaderCodes`). -/
-def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : Array UInt32)
+def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : TokenArray)
     (litLens distLens : List Nat) (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19)
     (hlit : litLens.length = 286) (hdist : distLens.length = 30) (cap : Nat := 0) : ByteArray :=
   let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
@@ -520,8 +546,8 @@ def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : Array UInt32)
       rw [packCodeTab_size]; exact hlit_size
     have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
       rw [packCodeTab_size]; exact hdist_size
-    let bw := emitTokensWithCodesPTG bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
-      hlitT_size hdistT_size
+    let bw := emitTokensWithCodesTAPT bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
+      hlitT_size hdistT_size 0
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
@@ -529,7 +555,7 @@ def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : Array UInt32)
 /-- The plan-taking emitter with the canonical plan equals the original packed
     emitter: the only difference is the header write, bridged by
     `writeDynamicHeaderWith_dynHeaderCodes`. -/
-theorem deflateDynamicBlockCorePWith_dynHeaderCodes (data : ByteArray) (tokens : Array UInt32)
+theorem deflateDynamicBlockCorePWith_dynHeaderCodes (data : ByteArray) (tokens : TokenArray)
     (litLens distLens : List Nat) (hcl : (dynHeaderCodes litLens distLens).clCodes.size ≥ 19)
     (hlit : litLens.length = 286) (hdist : distLens.length = 30) (cap : Nat) :
     deflateDynamicBlockCorePWith data tokens litLens distLens (dynHeaderCodes litLens distLens)
@@ -998,9 +1024,9 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     per token instead of a boxed `LZ77Token`. The boxed view recovers
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
-def lzMatchP (data : ByteArray) (level : UInt8) : Array UInt32 :=
-  if 4 ≤ level then (lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)).toArray
-  else (lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)).toArray
+def lzMatchP (data : ByteArray) (level : UInt8) : TokenArray :=
+  if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
+  else lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-! ## Self-contained block-split dynamic compression
 
@@ -1469,13 +1495,13 @@ boxed reference via `deflateDynamicBlocksSharedAtP_eq`
     pass. The full ten-counter arrays are materialized only at a divergence
     check (every `checkTokens` tokens, once the floors clear), where the shared
     boxed `splitEndBlockCheck` reads them. -/
-def chooseSplitsHeuristicP.go (toks : Array UInt32)
+def chooseSplitsHeuristicP.go (toks : TokenArray)
     (minBlockBytes softMaxBlockBytes checkTokens : Nat) (i : Nat)
     (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : Nat)
     (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : Nat)
     (blockBytes remaining : Nat) (cuts : Array Nat) : Array Nat :=
   if h : i < toks.size then
-    let t := toks[i]
+    let t := toks.get i h
     let c := splitTokenClassP t
     let tb := splitTokenBytesP t
     let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
@@ -1541,7 +1567,7 @@ decreasing_by all_goals omega
     fusing that pass away (#2762). The main walk then tracks the running byte
     suffix in `remaining` (start `totalBytes`, minus each token's bytes) rather
     than a `doneBytes` prefix, and computes `splitTokenBytesP` once per token. -/
-def chooseSplitsHeuristicP (toks : Array UInt32) (totalBytes : Nat)
+def chooseSplitsHeuristicP (toks : TokenArray) (totalBytes : Nat)
     (minBlockBytes : Nat := splitMinBlockBytes)
     (softMaxBlockBytes : Nat := splitSoftMaxBlockBytes)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
@@ -1554,7 +1580,7 @@ def chooseSplitsHeuristicP (toks : Array UInt32) (totalBytes : Nat)
     token group onto a running writer, with `emitTokensWithCodesP` in place of
     `emitTokensWithCodes`. Equal to `emitDynBlock` over the boxed view
     (`emitDynBlockP_eq` in `Zip/Spec/LZ77PackedCorrect.lean`). -/
-def emitDynBlockP (bw : BitWriter) (data : ByteArray) (ptoks : Array UInt32)
+def emitDynBlockP (bw : BitWriter) (data : ByteArray) (ptoks : TokenArray)
     (litLens distLens : List Nat)
     (hlit : litLens.length = 286) (hdist : distLens.length = 30)
     (isFinal : Bool) : BitWriter :=
@@ -1577,16 +1603,16 @@ def emitDynBlockP (bw : BitWriter) (data : ByteArray) (ptoks : Array UInt32)
   have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
     rw [packCodeTab_size]; exact hdist_size
   let bw := if data.size == 0 then bw
-            else emitTokensWithCodesPT bw ptoks (packCodeTab litCodes) (packCodeTab distCodes)
+            else emitTokensWithCodesTAPT bw ptoks (packCodeTab litCodes) (packCodeTab distCodes)
               hlitT_size hdistT_size 0
   let (code, len) := litCodes[256]'h256
   bw.writeHuffCode code len
 
 /-- Packed twin of `emitSharedBlock`: the group's frequencies come from
     `tokenFreqsP` (dense packed tables) and the emit from `emitDynBlockP`. -/
-def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : Array UInt32)
+def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : TokenArray)
     (isFinal : Bool) : BitWriter :=
-  let f := tokenFreqsP group
+  let f := tokenFreqsPTA group
   let lens := dynamicCodeLengths f.1 f.2
   emitDynBlockP bw data group lens.1 lens.2
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 isFinal
@@ -1599,7 +1625,7 @@ def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : Array UInt32)
     (non-monotone, dense) degrades to one-token blocks, each paying a full tree
     header. `deflateRaw` only ever feeds it `chooseSplitsHeuristicP`'s strictly
     increasing, byte-floored cuts. -/
-def emitSharedBlocksAtP (data : ByteArray) (toks : Array UInt32) (cuts : List Nat)
+def emitSharedBlocksAtP (data : ByteArray) (toks : TokenArray) (cuts : List Nat)
     (pos : Nat) (bw : BitWriter) : BitWriter :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
   let bw := emitSharedBlockP bw data (toks.extract pos j) (decide (j ≥ toks.size))
@@ -1618,7 +1644,7 @@ decreasing_by
     `deflateDynamicBlocksSharedAtTokens data (toks.map unpackTok) (fun _ => cuts)`
     (`deflateDynamicBlocksSharedAtP_eq`), through which the roundtrip and
     padding theorems transfer for **any** cut list. -/
-def deflateDynamicBlocksSharedAtP (data : ByteArray) (toks : Array UInt32)
+def deflateDynamicBlocksSharedAtP (data : ByteArray) (toks : TokenArray)
     (cuts : List Nat) : ByteArray :=
   if data.size == 0 then
     let f := tokenFreqs #[]
@@ -1638,10 +1664,10 @@ def deflateDynamicBlocksSharedAtP (data : ByteArray) (toks : Array UInt32)
     would recompute (`emitSharedBlocksAtSizedP_eq`). This is what makes the
     size-arbitrated dispatch (#2753) a net win: the per-block trees are built
     **once**, during sizing, and the emit pass reuses them. -/
-def sharedPartitionSizedP (toks : Array UInt32) (cuts : List Nat) (pos : Nat) :
+def sharedPartitionSizedP (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
     Nat × List SizedTrees :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
-  let f := tokenFreqsP (toks.extract pos j)
+  let f := tokenFreqsPTA (toks.extract pos j)
   let t := sizedTrees f.1 f.2
   let blockBits := 3 + (writeDynamicHeader BitWriter.empty t.val.1 t.val.2).bitLength
     + symbolBitCount f.1 f.2 t.val.1.toArray t.val.2.toArray
@@ -1664,10 +1690,10 @@ decreasing_by
     `tokenFreqsP (toks.extract pos toks.size)` (`sharedPartitionSizedFreqsP_snd`),
     so the base candidate can reuse these frequencies instead of re-walking the
     whole stream (`tokenFreqsP` is 4.7% L6 dickens / 3.0% mozilla of compress). -/
-def sharedPartitionSizedFreqsP (toks : Array UInt32) (cuts : List Nat) (pos : Nat) :
+def sharedPartitionSizedFreqsP (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
     (Nat × List SizedTrees) × (Array Nat × Array Nat) :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
-  let f := tokenFreqsP (toks.extract pos j)
+  let f := tokenFreqsPTA (toks.extract pos j)
   let t := sizedTrees f.1 f.2
   let blockBits := 3 + (writeDynamicHeader BitWriter.empty t.val.1 t.val.2).bitLength
     + symbolBitCount f.1 f.2 t.val.1.toArray t.val.2.toArray
@@ -1686,7 +1712,7 @@ decreasing_by
     `cuts`) instead of being recomputed from the group via `tokenFreqsP` +
     `dynamicCodeLengths`. Byte-identical to `emitSharedBlocksAtP` when `trees` is
     `sharedPartitionSizedP`'s output (`emitSharedBlocksAtSizedP_eq`). -/
-def emitSharedBlocksAtSizedP (data : ByteArray) (toks : Array UInt32) (cuts : List Nat)
+def emitSharedBlocksAtSizedP (data : ByteArray) (toks : TokenArray) (cuts : List Nat)
     (trees : List SizedTrees) (pos : Nat) (bw : BitWriter) : BitWriter :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
   let t := trees.headD emptySizedTrees
@@ -1708,7 +1734,7 @@ decreasing_by
     so its roundtrip transfers for **any** cut list; component 1 equals that
     output's `.size` (`SizeHelpers` conformance). `deflateRaw` sizes every split
     candidate this way and forces only the winner's thunk. -/
-def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : Array UInt32)
+def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : TokenArray)
     (cuts : List Nat) : Nat × (Unit → ByteArray) :=
   if data.size == 0 then
     let out := deflateDynamicBlocksSharedAtP data toks cuts
@@ -1729,11 +1755,11 @@ def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : Array UInt32)
     sizing pass already built, instead of a second whole-stream `tokenFreqsP`
     walk. `deflateRaw` (levels 5–8, cuts non-empty) forces this once and feeds
     component 2 to `deflateRawBasePPrepF`. -/
-def deflateObsSplitSizedFreqsP (data : ByteArray) (toks : Array UInt32)
+def deflateObsSplitSizedFreqsP (data : ByteArray) (toks : TokenArray)
     (cuts : List Nat) : (Nat × (Unit → ByteArray)) × (Array Nat × Array Nat) :=
   if data.size == 0 then
     let out := deflateDynamicBlocksSharedAtP data toks cuts
-    ((out.size, fun _ => out), tokenFreqsP toks)
+    ((out.size, fun _ => out), tokenFreqsPTA toks)
   else
     let sp := sharedPartitionSizedFreqsP toks cuts 0
     (((sp.1.1 + 7) / 8,
@@ -1792,8 +1818,8 @@ def deflateRawBaseTokens (data : ByteArray) (tokens : Array LZ77Token) : ByteArr
     rather than rebuilt in each — the #2627 dedup; equal to the un-deduped form by
     `dynBlockBytesWith_dynHeaderCodes` / `deflateDynamicBlockCorePWith_dynHeaderCodes`
     (used in `deflateRawBase_def`). -/
-def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
-  let f := tokenFreqsP ptokens
+def deflateRawBaseP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
+  let f := tokenFreqsPTA ptokens
   let lens := dynamicCodeLengths f.1 f.2
   let plan := dynHeaderCodes lens.1 lens.2
   have hcl : plan.clCodes.size ≥ 19 :=
@@ -1811,7 +1837,7 @@ def deflateRawBaseP (data : ByteArray) (ptokens : Array UInt32) : ByteArray :=
     `deflateRawBasePPrepF`. Used by `deflateRawBaseF` to consume the frequencies
     the fused matcher already produced. At `f = tokenFreqsP ptokens` this is
     definitionally `deflateRawBaseP` (`deflateRawBasePF_tokenFreqsP`). -/
-def deflateRawBasePF (data : ByteArray) (ptokens : Array UInt32)
+def deflateRawBasePF (data : ByteArray) (ptokens : TokenArray)
     (f : Array Nat × Array Nat) : ByteArray :=
   let lens := dynamicCodeLengths f.1 f.2
   let plan := dynHeaderCodes lens.1 lens.2
@@ -1826,8 +1852,8 @@ def deflateRawBasePF (data : ByteArray) (ptokens : Array UInt32)
     (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes
 
 /-- `deflateRawBasePF` at the whole-stream frequencies is `deflateRawBaseP`. -/
-theorem deflateRawBasePF_tokenFreqsP (data : ByteArray) (ptokens : Array UInt32) :
-    deflateRawBasePF data ptokens (tokenFreqsP ptokens) = deflateRawBaseP data ptokens :=
+theorem deflateRawBasePF_tokenFreqsP (data : ByteArray) (ptokens : TokenArray) :
+    deflateRawBasePF data ptokens (tokenFreqsPTA ptokens) = deflateRawBaseP data ptokens :=
   rfl
 
 /-- The base candidate *sized and prepared* from one shared token pass: the
@@ -1839,8 +1865,8 @@ theorem deflateRawBasePF_tokenFreqsP (data : ByteArray) (ptokens : Array UInt32)
     ptokens` (`deflateRawBasePPrep_emit`) and component 1 equals its `.size`
     (`SizeHelpers` conformance), so byte-identity to the emit-then-`pickSmaller`
     dispatch is preserved. -/
-def deflateRawBasePPrep (data : ByteArray) (ptokens : Array UInt32) : Nat × (Unit → ByteArray) :=
-  let f := tokenFreqsP ptokens
+def deflateRawBasePPrep (data : ByteArray) (ptokens : TokenArray) : Nat × (Unit → ByteArray) :=
+  let f := tokenFreqsPTA ptokens
   let lens := dynamicCodeLengths f.1 f.2
   let plan := dynHeaderCodes lens.1 lens.2
   have hcl : plan.clCodes.size ≥ 19 :=
@@ -1857,7 +1883,7 @@ def deflateRawBasePPrep (data : ByteArray) (ptokens : Array UInt32) : Nat × (Un
       (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes)
 
 /-- The prep's emit thunk is exactly `deflateRawBaseP` (same shared plan). -/
-theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : Array UInt32) :
+theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : TokenArray) :
     (deflateRawBasePPrep data ptokens).2 () = deflateRawBaseP data ptokens := rfl
 
 /-- `deflateRawBasePPrep` with the whole-stream frequencies supplied as a
@@ -1869,7 +1895,7 @@ theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : Array UInt32) :
     `deflateRawBasePPrep` (`deflateRawBasePPrepF_tokenFreqsP`), keeping the emit
     theorem clean. Only the frequency-derived sizing/tree work uses `f`; the emit
     branches consume `ptokens` directly, exactly as `deflateRawBasePPrep`. -/
-def deflateRawBasePPrepF (data : ByteArray) (ptokens : Array UInt32)
+def deflateRawBasePPrepF (data : ByteArray) (ptokens : TokenArray)
     (f : Array Nat × Array Nat) : Nat × (Unit → ByteArray) :=
   let lens := dynamicCodeLengths f.1 f.2
   let plan := dynHeaderCodes lens.1 lens.2
@@ -1887,8 +1913,8 @@ def deflateRawBasePPrepF (data : ByteArray) (ptokens : Array UInt32)
       (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes)
 
 /-- `deflateRawBasePPrepF` at the whole-stream frequencies is `deflateRawBasePPrep`. -/
-theorem deflateRawBasePPrepF_tokenFreqsP (data : ByteArray) (ptokens : Array UInt32) :
-    deflateRawBasePPrepF data ptokens (tokenFreqsP ptokens) = deflateRawBasePPrep data ptokens :=
+theorem deflateRawBasePPrepF_tokenFreqsP (data : ByteArray) (ptokens : TokenArray) :
+    deflateRawBasePPrepF data ptokens (tokenFreqsPTA ptokens) = deflateRawBasePPrep data ptokens :=
   rfl
 
 /-- `deflateRawBaseP` over this level's *packed* `lzMatchP` stream
@@ -1911,7 +1937,7 @@ theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
 def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
   let (ptokens, litF, distF) :=
     lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
-  deflateRawBasePF data ptokens.toArray (litF.val, distF.val)
+  deflateRawBasePF data ptokens (litF.val, distF.val)
 
 /-- On the greedy tier (`level ≤ 3`, i.e. `¬ 4 ≤ level`) the fused base candidate
     is byte-identical to `deflateRawBase`: the fused matcher returns exactly the
@@ -1920,10 +1946,11 @@ def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
 theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ level)) :
     deflateRawBaseF data level = deflateRawBase data level := by
   have hlz : lzMatchP data level =
-      (lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)).toArray := by
+      lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level) := by
     unfold lzMatchP; rw [if_neg h]
   unfold deflateRawBaseF deflateRawBase
   rw [hlz, lz77ChainIterPMergedF_eq]
+  simp only [← tokenFreqsPTA_toArray]
   exact deflateRawBasePF_tokenFreqsP data _
 
 theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
