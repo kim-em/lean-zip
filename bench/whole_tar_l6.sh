@@ -121,17 +121,6 @@ if [ -z "$RUST_CLI" ]; then
   exit 2
 fi
 
-# Locate a GNU-time binary for PEAK-RSS capture: `time -v` reports "Maximum
-# resident set size (kbytes)". Prefer /usr/bin/time; else the first `time` on
-# PATH that is a real binary supporting -v (the nix project shell provides GNU
-# time there, NOT the shell builtin). Empty ⇒ fall back to /proc VmHWM polling.
-TIME_BIN=""
-for cand in /usr/bin/time "$(command -v time 2>/dev/null || true)"; do
-  if [ -n "$cand" ] && [ -x "$cand" ] && "$cand" -v true >/dev/null 2>&1; then
-    TIME_BIN="$cand"; break
-  fi
-done
-
 # Assemble a DETERMINISTIC silesia.tar in a temp dir (cleaned on exit). Same
 # command the removed l6_tar_gate used — reuse it exactly for reproducibility.
 TMPDIR_TAR="$(mktemp -d)"
@@ -275,27 +264,6 @@ timed() {
   awk -v r="$r" -v u="$u" -v s="$s" 'BEGIN{printf "%.3f %.3f %.3f", r*1000, u*1000, s*1000}'
 }
 
-# Peak RSS (kB) of a fresh run of CMD. Peak RSS is deterministic run-to-run
-# (allocation shape, not timing), so one measured run per side suffices. Primary
-# path: GNU `time -v` → "Maximum resident set size (kbytes)". Fallback: poll
-# VmHWM (a monotone high-water mark) from /proc/<pid>/status while it runs.
-maxrss_kb() {
-  if [ -n "$TIME_BIN" ]; then
-    local rpt="$TMPDIR_TAR/rss.txt"
-    "$TIME_BIN" -v "$@" >/dev/null 2>"$rpt" || true
-    awk -F': ' '/Maximum resident set size/ { gsub(/[^0-9]/,"",$2); print $2; exit }' "$rpt"
-  else
-    "$@" >/dev/null 2>/dev/null &
-    local pid=$! hwm=0 cur
-    while kill -0 "$pid" 2>/dev/null; do
-      cur="$(awk '/VmHWM/{print $2; exit}' "/proc/$pid/status" 2>/dev/null || echo 0)"
-      if [ -n "$cur" ] && [ "$cur" -gt "$hwm" ] 2>/dev/null; then hwm="$cur"; fi
-    done
-    wait "$pid" 2>/dev/null || true
-    echo "$hwm"
-  fi
-}
-
 echo "cold reps (lean_wall_ms / rust_wall_ms):"
 printf "  %-4s %-12s %-12s %-8s %-6s\n" "rep" "lean(ms)" "rust(ms)" "ratio" "first"
 
@@ -340,29 +308,12 @@ echo "e2e rust : size=$RUST_SIZE  wall_best=$RUST_WALL_BEST  wall_med=$RUST_WALL
 echo "e2e wall_ratio_median=$E2E_RATIO_MED  (lean/rust; >1.0 = rust wall-ahead)"
 echo
 
-# --- peak RSS: the whole-tar memory footprint of each real CLI ---------------
-# Lean's DEFLATE holds its whole token stream in memory (the footprint the
-# unboxing work targets); rust's miniz keeps only a bounded window. Peak RSS is
-# deterministic, so one measured run per side (GNU time -v) is enough.
-echo "--- end-to-end: peak resident set size (fresh process, GNU time -v) ---"
-if [ -n "$TIME_BIN" ]; then echo "rss via: $TIME_BIN -v"; else echo "rss via: /proc VmHWM polling (no GNU time found)"; fi
-LEAN_MAXRSS="$(maxrss_kb "$LEAN_CLI" "$TAR" 6)"
-RUST_MAXRSS="$(maxrss_kb "$RUST_CLI" "$TAR" 6)"
-if ! [[ "$LEAN_MAXRSS" =~ ^[0-9]+$ ]] || ! [[ "$RUST_MAXRSS" =~ ^[0-9]+$ ]] || [ "$RUST_MAXRSS" -eq 0 ]; then
-  echo "ERROR: could not capture peak RSS (lean='$LEAN_MAXRSS' rust='$RUST_MAXRSS')" >&2
-  exit 1
-fi
-RSS_RATIO="$(awk -v l="$LEAN_MAXRSS" -v r="$RUST_MAXRSS" 'BEGIN{printf "%.4f", l/r}')"
-echo "e2e peak RSS: lean_maxrss_kb=$LEAN_MAXRSS  rust_maxrss_kb=$RUST_MAXRSS  rss_ratio=$RSS_RATIO  (lean/rust)"
-echo
-
 # --- write JSON (meta style mirrors bench/results/latest.json) ---
 DATE_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 MACHINE="$(uname -mns)"
 GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 CODEC_NOTE="CODEC comparison, measured THROUGH the lean bench harness so both sides pay the same readBinFile + 202 MB ByteArray-alloc I/O and it CANCELS: native (bench csize) vs miniz_oxide (bench compress-miniz) on the whole silesia.tar (${TAR_BYTES} B), cold best-of-${N}. ms are wall-clock of fresh bench subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native codec-CPU faster). This guards a ratio-tuning codec regression; it is NOT the end-to-end zip wall (see end_to_end)."
-E2E_NOTE="END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-${N}, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead). Rust is currently marginally wall-ahead: lean's compression CPU is faster (lower user_ms) but its file-read/alloc system time (sys_ms) is higher, so the gap is entirely the lean CLI I/O path. wall/user/sys captured via the bash time builtin. PEAK RSS (maxrss_kb) is the whole-tar memory footprint of each CLI, captured with GNU time -v (Maximum resident set size); it is deterministic so one measured run per side suffices. rss_ratio is lean_maxrss_kb/rust_maxrss_kb: lean holds its whole DEFLATE token stream in memory while rust's miniz keeps only a bounded window, so this ratio is the memory cost of the token pipeline (the target of the token-unboxing work)."
-META_NOTE="Whole-tar L6 comparison: codec-CPU (native vs miniz through the bench harness) plus end-to-end wall of the real lean/rust CLIs. Peak RSS (end_to_end.{lean,rust}.maxrss_kb + rss_ratio) is now tracked too — the whole-tar memory footprint, so a compress PR can be reviewed on memory as well as speed/ratio."
+E2E_NOTE="END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-${N}, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead). Rust is currently marginally wall-ahead: lean's compression CPU is faster (lower user_ms) but its file-read/alloc system time (sys_ms) is higher, so the gap is entirely the lean CLI I/O path. wall/user/sys captured via the bash time builtin."
 
 mkdir -p "$(dirname "$OUT")"
 cat > "$OUT" <<EOF
@@ -372,8 +323,7 @@ cat > "$OUT" <<EOF
   "machine": "$MACHINE",
   "git_commit": "$GIT_COMMIT",
   "tar_bytes": $TAR_BYTES,
-  "reps": $N,
-  "note": "$META_NOTE"
+  "reps": $N
  },
  "codec": {
   "note": "$CODEC_NOTE",
@@ -397,19 +347,16 @@ cat > "$OUT" <<EOF
    "wall_ms_best": $LEAN_WALL_BEST,
    "wall_ms_median": $LEAN_WALL_MED,
    "user_ms": $LEAN_USER_MED,
-   "sys_ms": $LEAN_SYS_MED,
-   "maxrss_kb": $LEAN_MAXRSS
+   "sys_ms": $LEAN_SYS_MED
   },
   "rust": {
    "size": $RUST_SIZE,
    "wall_ms_best": $RUST_WALL_BEST,
    "wall_ms_median": $RUST_WALL_MED,
    "user_ms": $RUST_USER_MED,
-   "sys_ms": $RUST_SYS_MED,
-   "maxrss_kb": $RUST_MAXRSS
+   "sys_ms": $RUST_SYS_MED
   },
-  "wall_ratio_median": $E2E_RATIO_MED,
-  "rss_ratio": $RSS_RATIO
+  "wall_ratio_median": $E2E_RATIO_MED
  }
 }
 EOF
