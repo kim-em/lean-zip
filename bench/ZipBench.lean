@@ -225,10 +225,15 @@ where
       pure ()
     | "compress-miniz" =>
       -- Print the compressed size (mirrors the `csize` one-line format) so the
-      -- cold L6 whole-tar measurement (bench/whole_tar_l6.sh) can read miniz's
-      -- output size while still timing this as a fresh single-shot process. The
-      -- extra print is negligible next to compressing a 200 MB tar, so it does
-      -- not perturb the cold timing the measurement records.
+      -- whole-tar measurement (bench/whole_tar_l6.sh) can read miniz's output
+      -- size while still timing this as a fresh single-shot process. This feeds
+      -- the CODEC section of that measurement: run THROUGH this same lean `bench`
+      -- harness, this path pays the identical `readBinFile` + big-ByteArray I/O
+      -- tax that `csize` (native) pays, so that I/O cancels and the codec-CPU
+      -- ratio is isolated. It is NOT the end-to-end `zip silesia.tar` wall — that
+      -- is the separate `compress-file` / `miniz-compress-file` CLIs. The extra
+      -- print is negligible next to compressing a 200 MB tar, so it does not
+      -- perturb the cold timing the measurement records.
       let out ← MinizOxide.compress data level.toUInt8
       let ratio : Float := 100.0 * out.size.toFloat / data.size.toFloat
       IO.println s!"size={data.size} lvl={level}: out={out.size} ratio={ratio.toString.take 5}%"

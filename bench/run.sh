@@ -29,20 +29,29 @@ in_project_shell() {
   if [ -n "${IN_NIX_SHELL:-}" ]; then bash -c "$1"; else nix-shell --run "$1"; fi
 }
 
-# Whole-tar L6 measurement: record native vs miniz_oxide on the COLD whole
-# silesia.tar (compressed size + cold time) into bench/results/whole_tar_l6.json.
+# Whole-tar L6 measurement: record BOTH honest sections on the COLD whole
+# silesia.tar into bench/results/whole_tar_l6.json —
+#   codec:      native vs miniz_oxide through the same lean `bench` harness
+#               (readBinFile I/O cancels), a codec-CPU regression guard;
+#   end_to_end: the real lean `compress-file` CLI vs the real rust
+#               `miniz-compress-file` CLI as fresh processes, the honest
+#               `zip silesia.tar` wall (currently rust marginally ahead on the
+#               lean CLI's file-read/alloc path).
 # The per-file dashboard ($OUT) tracks WARM per-file throughput and misses the
 # `zip silesia.tar` cold-stream workload, where a deeper L6 probe / rolling can
 # regress invisibly (three PRs did). This is a MEASUREMENT that records — not a
 # gate — surfaced in the perf-graphs review. Pinned like the other measurement
 # steps; miniz here is deterministic and cheap, so it runs on both paths. Needs
-# the `bench` exe (distinct from bench-report). Guarded on the silesia corpus.
+# the `bench` + `compress-file` lean exes and the rust `miniz-compress-file` bin
+# (built via the shim's cargo, which emits both the staticlib and the bin).
+# Guarded on the silesia corpus.
 refresh_whole_tar() {
   if [ ! -d bench/corpora/silesia ] || [ -z "$(ls -A bench/corpora/silesia 2>/dev/null)" ]; then
     echo "whole-tar L6: silesia corpus absent — skipping $WTAR refresh" >&2
     return 0
   fi
-  in_project_shell "lake -d bench build bench \
+  in_project_shell "lake -d bench build bench compress-file \
+    && cargo build --release --manifest-path bench/rust/miniz_oxide_shim/Cargo.toml \
     && $PIN bash bench/whole_tar_l6.sh bench/corpora/silesia 9 $WTAR"
 }
 
@@ -68,7 +77,7 @@ if [ "${1:-}" = "--native-only" ]; then
   refresh_whole_tar
   echo "Native-only dashboard refresh done:"
   echo "  data   → $OUT (native rows refreshed; reference rows reused)"
-  echo "  data   → $WTAR (whole-tar L6: native vs miniz, cold)"
+  echo "  data   → $WTAR (whole-tar L6: codec native-vs-miniz + end-to-end lean-CLI-vs-rust-CLI, cold)"
   echo "  graphs → bench/graphs/*.svg"
   exit 0
 fi
@@ -111,9 +120,10 @@ in_project_shell "$PIN lake -d bench env bench/.lake/build/bin/bench-report --de
 nix-shell -p nodejs_latest python3 --run \
   "$PIN python3 bench/decode_density.py bench/payloads-deflate $DD"
 
-# 3c. Whole-tar L6 measurement (native vs miniz_oxide, cold). Records the
-#    `zip silesia.tar` cold-stream workload the per-file Pareto misses into
-#    bench/results/whole_tar_l6.json. See refresh_whole_tar above.
+# 3c. Whole-tar L6 measurement (codec native-vs-miniz + end-to-end
+#    lean-CLI-vs-rust-CLI, cold). Records the `zip silesia.tar` cold-stream
+#    workload the per-file Pareto misses into bench/results/whole_tar_l6.json.
+#    See refresh_whole_tar above.
 refresh_whole_tar
 
 # 4. Render (project shell: python + matplotlib). plot.py auto-detects the
