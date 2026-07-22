@@ -313,7 +313,10 @@ where
     -- literal/reference split and how many references have ≥8 bytes of runway
     -- (the threshold below which word-at-a-time compare cannot pay).
     | "match-hist" =>
-      let ptoks := Zip.Native.Deflate.lzMatchP data level.toUInt8
+      -- `lzMatchP` now returns a packed `TokenArray` (no `ForIn`); this is a
+      -- diagnostic histogram, not the hot path, so unpack to the `Array UInt32`
+      -- model to iterate.
+      let ptoks := (Zip.Native.Deflate.lzMatchP data level.toUInt8).toArray
       let mut lits : Nat := 0
       let mut refs : Nat := 0
       let mut totLen : Nat := 0
