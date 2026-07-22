@@ -1,4 +1,5 @@
 import ZipCommon.Binary
+import Zip.Native.Wide
 import Std.Tactic.BVDecide
 
 /-! # Packed token container for the LZ77 stream
@@ -13,6 +14,25 @@ This file introduces `TokenArray`, a newtype over a `ByteArray` that stores each
 token in exactly 4 little-endian bytes (halving the footprint to 4 B/token).  It
 is a *pure addition*: nothing consumes it yet.  Later stages retype the LZ77
 producers and consumers to `TokenArray`, one `*Correct.lean` file at a time.
+
+Halving the token bytes only pays off if the per-token pack/unpack stays as
+cheap as the boxed `Array UInt32`'s one call per element.  Two runtime measures
+keep it there (both measured on silesia.tar, same-worktree sandwich):
+
+* the accumulators seed with `emptyWithCapacity data.size`, so the backing
+  `ByteArray` never grows by doubling — the doubling transient (up to ~2× the
+  live token bytes) is what regressed *peak* RSS in the un-presized first
+  attempt (`#2866`/`#2867`);
+* `push`/`get` compile (`@[implemented_by]`) to the single-call wide primitives
+  `ByteArray.pushUInt64LE` / `ByteArray.ugetUInt32LE` (`Zip/Native/Wide.lean`)
+  rather than four `ByteArray.push` / `getElem` calls each.  The 4→1 call-count
+  reduction matches the boxed one-call-per-token cost; without it the byte
+  layout costs ~+3–13% compress CPU (worst on the greedy tier, where the token
+  stream is longest).  The reference bodies stay the four-op forms, so every
+  bridge/refinement proof below is unchanged — only the compiled runtime swaps.
+
+Net on silesia.tar: peak RSS −25% to −30% (L1–L6) with compress wall neutral to
+~3% faster and byte-identical output.
 
 The proof-facing model stays `Array UInt32`: `TokenArray.toArray` exposes the
 `Array UInt32` view, and the four bridge lemmas
@@ -37,12 +57,29 @@ bridge lemmas unconditional. -/
 
 namespace ByteArray
 
+/-- Runtime implementation of `pushUInt32LE`: append the four little-endian
+    bytes of `v` in a single FFI call via the wide store `pushUInt64LE` (which,
+    on the exclusive-with-slack hot path, is one wide store into capacity slack
+    plus a size bump — the C writes eight byte-stores the optimizer coalesces).
+    The four low bytes of `v.toUInt64` LSB-first are exactly the four bytes of
+    `v`, so this agrees with the reference body below byte-for-byte.  The point
+    is the call count: 4 `ByteArray.push` calls per token collapse to 1, matching
+    the boxed `Array.push`'s one-call-per-token cost while keeping the 4 B/token
+    footprint. -/
+@[inline] def pushUInt32LEImpl (b : ByteArray) (v : UInt32) : ByteArray :=
+  b.pushUInt64LE v.toUInt64 4 (by
+    have h : (4 : USize).toNat = 4 :=
+      USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (show (4:Nat) < 2 ^ 32 by omega) USize.le_size)
+    omega)
+
 /-- Append a `UInt32` as four little-endian bytes (low byte first), matching
-    `Binary.writeUInt32LE` / `Binary.readUInt32LE`.  Four `push`es keep the growth
-    in place (amortised O(1)) rather than allocating a temporary.
+    `Binary.writeUInt32LE` / `Binary.readUInt32LE`.  The reference body (four
+    `push`es) is the trusted specification; the compiled path
+    (`pushUInt32LEImpl`) does it in one wide FFI call.
 
     TODO upstream to lean-zip-common (alongside `Binary.writeUInt32LE`). -/
-@[inline] def pushUInt32LE (b : ByteArray) (v : UInt32) : ByteArray :=
+@[implemented_by pushUInt32LEImpl]
+def pushUInt32LE (b : ByteArray) (v : UInt32) : ByteArray :=
   (((b.push v.toUInt8).push (v >>> 8).toUInt8).push (v >>> 16).toUInt8).push (v >>> 24).toUInt8
 
 @[simp] theorem size_pushUInt32LE (b : ByteArray) (v : UInt32) :
@@ -145,7 +182,35 @@ private theorem byte_bound (ta : TokenArray) {i : Nat} (h : i < ta.size) :
   simp only [size] at h
   omega
 
+/-- A `Nat` below `USize.size` round-trips through `USize` unchanged (local copy
+    of `Zip.Native.Deflate.toUSize_toNat_of_lt`, which lives downstream). -/
+private theorem toUSize_toNat_of_lt {n : Nat} (h : n < USize.size) : n.toUSize.toNat = n := by
+  simp only [Nat.toUSize]; exact Nat.mod_eq_of_lt h
+
+/-- Runtime implementation of `get` via a single wide load.  When the backing
+    `ByteArray` is `USize`-addressable — the runtime-checked `hsz` guard, always
+    true for a real in-memory array — the four token bytes are read as one
+    `ugetUInt32LE` FFI call instead of four bounds-checked `getElem`s; otherwise
+    it falls back to the byte-recombination formula (the reference body below).
+    Both branches compute the same `UInt32`, so this agrees with the model; the
+    point, as with `pushUInt32LEImpl`, is the 4→1 call-count reduction on the
+    hot token-consumer loops (emit, freq histogram, block-split sizing).  This
+    mirrors the input-reader guard used by `lz77Greedy.hash3` (#2706). -/
+@[inline] def getImpl (ta : TokenArray) (i : Nat) (h : i < ta.size) : UInt32 :=
+  have hb := ta.byte_bound h
+  if hsz : ta.bytes.size.toUSize.toNat = ta.bytes.size then
+    ta.bytes.ugetUInt32LE (4 * i).toUSize (by
+      have hds : ta.bytes.size < USize.size := by
+        rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+      rw [toUSize_toNat_of_lt (show 4 * i < USize.size by omega)]; omega)
+  else
+    (ta.bytes[4 * i]'(by omega)).toUInt32
+      ||| ((ta.bytes[4 * i + 1]'(by omega)).toUInt32 <<< 8)
+      ||| ((ta.bytes[4 * i + 2]'(by omega)).toUInt32 <<< 16)
+      ||| ((ta.bytes[4 * i + 3]'(by omega)).toUInt32 <<< 24)
+
 /-- Read the `i`-th token as a little-endian `UInt32` (proven-in-bounds). -/
+@[implemented_by getImpl]
 def get (ta : TokenArray) (i : Nat) (h : i < ta.size) : UInt32 :=
   have hb := ta.byte_bound h
   (ta.bytes[4 * i]'(by omega)).toUInt32
