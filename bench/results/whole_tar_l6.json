@@ -1,42 +1,46 @@
 {
  "meta": {
-  "date": "2026-07-22T13:33:08Z",
+  "date": "2026-07-22T20:15:26Z",
   "machine": "Linux chungus2 x86_64",
-  "git_commit": "502832f7",
+  "git_commit": "67fc3081",
   "tar_bytes": 211957760,
-  "reps": 9
+  "reps": 9,
+  "note": "Whole-tar L6 comparison: codec-CPU (native vs miniz through the bench harness) plus end-to-end wall of the real lean/rust CLIs. Peak RSS (end_to_end.{lean,rust}.maxrss_kb + rss_ratio) is now tracked too — the whole-tar memory footprint, so a compress PR can be reviewed on memory as well as speed/ratio."
  },
  "codec": {
   "note": "CODEC comparison, measured THROUGH the lean bench harness so both sides pay the same readBinFile + 202 MB ByteArray-alloc I/O and it CANCELS: native (bench csize) vs miniz_oxide (bench compress-miniz) on the whole silesia.tar (211957760 B), cold best-of-9. ms are wall-clock of fresh bench subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native codec-CPU faster). This guards a ratio-tuning codec regression; it is NOT the end-to-end zip wall (see end_to_end).",
   "native": {
    "size": 67943851,
-   "ms_best": 5714.395,
-   "ms_median": 5763.210
+   "ms_best": 5741.887,
+   "ms_median": 5840.687
   },
   "miniz": {
    "size": 68112144,
-   "ms_best": 5850.334,
-   "ms_median": 5876.288
+   "ms_best": 5851.261,
+   "ms_median": 5955.201
   },
   "size_margin_pct": 0.2471,
-  "time_ratio_median": 0.9768
+  "time_ratio_median": 0.9847
  },
  "end_to_end": {
-  "note": "END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-9, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead). Rust is currently marginally wall-ahead: lean's compression CPU is faster (lower user_ms) but its file-read/alloc system time (sys_ms) is higher, so the gap is entirely the lean CLI I/O path. wall/user/sys captured via the bash time builtin.",
+  "note": "END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-9, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead). Rust is currently marginally wall-ahead: lean's compression CPU is faster (lower user_ms) but its file-read/alloc system time (sys_ms) is higher, so the gap is entirely the lean CLI I/O path. wall/user/sys captured via the bash time builtin. PEAK RSS (maxrss_kb) is the whole-tar memory footprint of each CLI, captured with GNU time -v (Maximum resident set size); it is deterministic so one measured run per side suffices. rss_ratio is lean_maxrss_kb/rust_maxrss_kb: lean holds its whole DEFLATE token stream in memory while rust's miniz keeps only a bounded window, so this ratio is the memory cost of the token pipeline (the target of the token-unboxing work).",
   "lean": {
    "size": 67943851,
-   "wall_ms_best": 5766.000,
-   "wall_ms_median": 5812.000,
-   "user_ms": 5577.000,
-   "sys_ms": 212.000
+   "wall_ms_best": 5817.000,
+   "wall_ms_median": 5834.000,
+   "user_ms": 5593.000,
+   "sys_ms": 208.000,
+   "maxrss_kb": 664048
   },
   "rust": {
    "size": 68112144,
-   "wall_ms_best": 5768.000,
-   "wall_ms_median": 5782.000,
-   "user_ms": 5682.000,
-   "sys_ms": 83.000
+   "wall_ms_best": 5770.000,
+   "wall_ms_median": 5796.000,
+   "user_ms": 5676.000,
+   "sys_ms": 83.000,
+   "maxrss_kb": 276116
   },
-  "wall_ratio_median": 1.0045
+  "wall_ratio_median": 1.0097,
+  "rss_ratio": 2.4050
  }
 }

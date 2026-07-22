@@ -36,7 +36,9 @@ in_project_shell() {
 #   end_to_end: the real lean `compress-file` CLI vs the real rust
 #               `miniz-compress-file` CLI as fresh processes, the honest
 #               `zip silesia.tar` wall (currently rust marginally ahead on the
-#               lean CLI's file-read/alloc path).
+#               lean CLI's file-read/alloc path), plus each CLI's peak RSS
+#               (maxrss_kb + rss_ratio, via GNU time -v) — the whole-tar
+#               memory footprint.
 # The per-file dashboard ($OUT) tracks WARM per-file throughput and misses the
 # `zip silesia.tar` cold-stream workload, where a deeper L6 probe / rolling can
 # regress invisibly (three PRs did). This is a MEASUREMENT that records — not a
@@ -77,7 +79,7 @@ if [ "${1:-}" = "--native-only" ]; then
   refresh_whole_tar
   echo "Native-only dashboard refresh done:"
   echo "  data   → $OUT (native rows refreshed; reference rows reused)"
-  echo "  data   → $WTAR (whole-tar L6: codec native-vs-miniz + end-to-end lean-CLI-vs-rust-CLI, cold)"
+  echo "  data   → $WTAR (whole-tar L6: codec native-vs-miniz + end-to-end lean-CLI-vs-rust-CLI wall + peak RSS, cold)"
   echo "  graphs → bench/graphs/*.svg"
   exit 0
 fi
