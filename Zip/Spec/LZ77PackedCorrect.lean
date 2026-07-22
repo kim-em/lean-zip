@@ -233,7 +233,7 @@ theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap
 
 /-- `lzMatchP` is the `packTok` image of `lzMatch` at every level. -/
 theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
-    lzMatchP data level = (lzMatch data level).map packTok := by
+    (lzMatchP data level).toArray = (lzMatch data level).map packTok := by
   unfold lzMatchP lzMatch
   split
   · rw [lz77ChainLazyIterPMerged_eq]
@@ -245,7 +245,7 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
     stage B+ consumers of `lzMatchP` inherit every `lzMatch` contract through
     this equation. -/
 theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
-    (lzMatchP data level).map unpackTok = lzMatch data level := by
+    (lzMatchP data level).toArray.map unpackTok = lzMatch data level := by
   unfold lzMatchP lzMatch
   split
   · rw [lz77ChainLazyIterPMerged_eq]
@@ -276,9 +276,12 @@ theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
   unfold deflateRawBase deflateRawBaseP deflateRawBaseTokens
   -- The packed dispatch shares one `dynHeaderCodes` plan across sizing and emit
   -- (#2627); collapse the plan-taking variants back to the un-deduped forms, then
-  -- finish with the boxed/packed emitter and frequency equalities.
+  -- finish with the boxed/packed emitter and frequency equalities.  The
+  -- `TokenArray` frequency walk routes to the boxed model through
+  -- `tokenFreqsPTA_toArray` (the `.toArray` view) then `tokenFreqsP_eq`.
   simp only [dynBlockBytesWith_dynHeaderCodes, deflateDynamicBlockCorePWith_dynHeaderCodes,
-    deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsP_eq, lzMatchP_map]
+    deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsPTA_toArray, tokenFreqsP_eq,
+    lzMatchP_map]
 
 /-! ## The packed shared-window split candidate equals the boxed one (#2737)
 
@@ -322,32 +325,32 @@ private theorem extract_map {α β : Type} (f : α → β) (a : Array α) (s e :
 
 /-- The packed per-block emitter is the boxed one over the `unpackTok` view:
     the bodies are identical up to `emitTokensWithCodesP_eq`. -/
-theorem emitDynBlockP_eq (bw : BitWriter) (data : ByteArray) (ws : Array UInt32)
+theorem emitDynBlockP_eq (bw : BitWriter) (data : ByteArray) (ta : TokenArray)
     (litLens distLens : List Nat)
     (hlit : litLens.length = 286) (hdist : distLens.length = 30) (isFinal : Bool) :
-    emitDynBlockP bw data ws litLens distLens hlit hdist isFinal =
-      emitDynBlock bw data (ws.map unpackTok) litLens distLens hlit hdist isFinal := by
+    emitDynBlockP bw data ta litLens distLens hlit hdist isFinal =
+      emitDynBlock bw data (ta.toArray.map unpackTok) litLens distLens hlit hdist isFinal := by
   unfold emitDynBlockP emitDynBlock
-  simp only [emitTokensWithCodesPTG_eq, emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
+  simp only [emitTokensWithCodesTAPT_toArray, emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
 
 /-- The packed shared-window block emitter is the boxed one over the
     `unpackTok` view: the trees agree by `tokenFreqsP_eq`, the emit by
     `emitDynBlockP_eq`. -/
-theorem emitSharedBlockP_eq (bw : BitWriter) (data : ByteArray) (ws : Array UInt32)
+theorem emitSharedBlockP_eq (bw : BitWriter) (data : ByteArray) (ta : TokenArray)
     (isFinal : Bool) :
-    emitSharedBlockP bw data ws isFinal =
-      emitSharedBlock bw data (ws.map unpackTok) isFinal := by
+    emitSharedBlockP bw data ta isFinal =
+      emitSharedBlock bw data (ta.toArray.map unpackTok) isFinal := by
   unfold emitSharedBlockP emitSharedBlock
-  simp only [tokenFreqsP_eq, emitDynBlockP_eq]
+  simp only [tokenFreqsPTA_toArray, tokenFreqsP_eq, emitDynBlockP_eq]
 
 /-- The packed cut-list block fold is the boxed one over the `unpackTok` view
     (fuel-quantified form for the induction): the map preserves size, so the
     clamped cuts coincide, and each block agrees by `emitSharedBlockP_eq` +
     `extract_map`. -/
-private theorem emitSharedBlocksAtP_eq_fuel (data : ByteArray) (ws : Array UInt32) :
-    ∀ (fuel pos : Nat), ws.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
-      emitSharedBlocksAtP data ws cuts pos bw =
-        emitSharedBlocksAt data (ws.map unpackTok) cuts pos bw := by
+private theorem emitSharedBlocksAtP_eq_fuel (data : ByteArray) (ta : TokenArray) :
+    ∀ (fuel pos : Nat), ta.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
+      emitSharedBlocksAtP data ta cuts pos bw =
+        emitSharedBlocksAt data (ta.toArray.map unpackTok) cuts pos bw := by
   intro fuel
   induction fuel with
   | zero => intro pos hf; omega
@@ -355,29 +358,29 @@ private theorem emitSharedBlocksAtP_eq_fuel (data : ByteArray) (ws : Array UInt3
     intro pos hf cuts bw
     conv => lhs; unfold emitSharedBlocksAtP
     conv => rhs; unfold emitSharedBlocksAt
-    simp only [Array.size_map, emitSharedBlockP_eq, extract_map]
-    by_cases hend : min (max (cuts.headD ws.size) (pos + 1)) ws.size ≥ ws.size
+    simp only [Array.size_map, ← TokenArray.size_toArray, TokenArray.extract_toArray, emitSharedBlockP_eq, extract_map]
+    by_cases hend : min (max (cuts.headD ta.size) (pos + 1)) ta.size ≥ ta.size
     · simp only [if_pos hend]
     · simp only [if_neg hend]
-      exact ih (min (max (cuts.headD ws.size) (pos + 1)) ws.size) (by omega) cuts.tail _
+      exact ih (min (max (cuts.headD ta.size) (pos + 1)) ta.size) (by omega) cuts.tail _
 
 /-- The packed cut-list block fold is the boxed one over the `unpackTok` view,
     for any cut list and start position. -/
-theorem emitSharedBlocksAtP_eq (data : ByteArray) (ws : Array UInt32)
+theorem emitSharedBlocksAtP_eq (data : ByteArray) (ta : TokenArray)
     (cuts : List Nat) (pos : Nat) (bw : BitWriter) :
-    emitSharedBlocksAtP data ws cuts pos bw =
-      emitSharedBlocksAt data (ws.map unpackTok) cuts pos bw :=
-  emitSharedBlocksAtP_eq_fuel data ws (ws.size - pos + 1) pos (by omega) cuts bw
+    emitSharedBlocksAtP data ta cuts pos bw =
+      emitSharedBlocksAt data (ta.toArray.map unpackTok) cuts pos bw :=
+  emitSharedBlocksAtP_eq_fuel data ta (ta.size - pos + 1) pos (by omega) cuts bw
 
 /-- The packed observation-divergence split candidate is byte-identical to the
     boxed reference at the same (constant) cut list: `deflateRaw`'s level 6–8
     split branch and the roundtrip proofs see
     `deflateDynamicBlocksSharedAtTokens … (fun _ => cuts)` through this
     rewrite, and the `DeflateBlockSplit` theorems hold for any selector. -/
-theorem deflateDynamicBlocksSharedAtP_eq (data : ByteArray) (ws : Array UInt32)
+theorem deflateDynamicBlocksSharedAtP_eq (data : ByteArray) (ta : TokenArray)
     (cuts : List Nat) :
-    deflateDynamicBlocksSharedAtP data ws cuts =
-      deflateDynamicBlocksSharedAtTokens data (ws.map unpackTok) (fun _ => cuts) := by
+    deflateDynamicBlocksSharedAtP data ta cuts =
+      deflateDynamicBlocksSharedAtTokens data (ta.toArray.map unpackTok) (fun _ => cuts) := by
   unfold deflateDynamicBlocksSharedAtP deflateDynamicBlocksSharedAtTokens
   split
   · rfl
@@ -394,63 +397,63 @@ coincide (the alphabet-size proofs are proof-irrelevant). -/
 
 /-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
     reference packed emitter (fuel-quantified form for the induction). -/
-private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ws : Array UInt32) :
-    ∀ (fuel pos : Nat), ws.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
-      emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts pos).2 pos bw
-        = emitSharedBlocksAtP data ws cuts pos bw := by
+private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ta : TokenArray) :
+    ∀ (fuel pos : Nat), ta.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
+      emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts pos).2 pos bw
+        = emitSharedBlocksAtP data ta cuts pos bw := by
   intro fuel
   induction fuel with
   | zero => intro pos hf; omega
   | succ fuel ih =>
     intro pos hf cuts bw
-    by_cases hend : min (max (cuts.headD ws.size) (pos + 1)) ws.size ≥ ws.size
-    · have hsnd : (sharedPartitionSizedP ws cuts pos).2 =
-          [sizedTrees (tokenFreqsP (ws.extract pos
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).1
-            (tokenFreqsP (ws.extract pos
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).2] := by
+    by_cases hend : min (max (cuts.headD ta.size) (pos + 1)) ta.size ≥ ta.size
+    · have hsnd : (sharedPartitionSizedP ta cuts pos).2 =
+          [sizedTrees (tokenFreqsPTA (ta.extract pos
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).1
+            (tokenFreqsPTA (ta.extract pos
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).2] := by
         conv => lhs; unfold sharedPartitionSizedP
         simp only [if_pos hend]
       rw [hsnd]
       conv => lhs; unfold emitSharedBlocksAtSizedP
       conv => rhs; unfold emitSharedBlocksAtP
       simp only [if_pos hend, List.headD_cons, emitSharedBlockP, sizedTrees]
-    · have hsnd : (sharedPartitionSizedP ws cuts pos).2 =
-          sizedTrees (tokenFreqsP (ws.extract pos
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).1
-            (tokenFreqsP (ws.extract pos
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).2 ::
-          (sharedPartitionSizedP ws cuts.tail
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size)).2 := by
+    · have hsnd : (sharedPartitionSizedP ta cuts pos).2 =
+          sizedTrees (tokenFreqsPTA (ta.extract pos
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).1
+            (tokenFreqsPTA (ta.extract pos
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).2 ::
+          (sharedPartitionSizedP ta cuts.tail
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size)).2 := by
         conv => lhs; unfold sharedPartitionSizedP
         simp only [if_neg hend]
       rw [hsnd]
       conv => lhs; unfold emitSharedBlocksAtSizedP
       conv => rhs; unfold emitSharedBlocksAtP
       simp only [if_neg hend, List.headD_cons, List.tail_cons, emitSharedBlockP, sizedTrees]
-      exact ih (min (max (cuts.headD ws.size) (pos + 1)) ws.size) (by omega) cuts.tail _
+      exact ih (min (max (cuts.headD ta.size) (pos + 1)) ta.size) (by omega) cuts.tail _
 
 /-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
     reference packed emitter, for any cut list and start position. -/
-theorem emitSharedBlocksAtSizedP_eq (data : ByteArray) (ws : Array UInt32)
+theorem emitSharedBlocksAtSizedP_eq (data : ByteArray) (ta : TokenArray)
     (cuts : List Nat) (pos : Nat) (bw : BitWriter) :
-    emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts pos).2 pos bw
-      = emitSharedBlocksAtP data ws cuts pos bw :=
-  emitSharedBlocksAtSizedP_eq_fuel data ws (ws.size - pos + 1) pos (by omega) cuts bw
+    emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts pos).2 pos bw
+      = emitSharedBlocksAtP data ta cuts pos bw :=
+  emitSharedBlocksAtSizedP_eq_fuel data ta (ta.size - pos + 1) pos (by omega) cuts bw
 
 /-- The packed sized-tree split candidate's emit thunk is byte-identical to the
     reference `deflateDynamicBlocksSharedAtP`: the roundtrip and padding theorems
     transfer through this, exactly as for the un-sized packed candidate. -/
-theorem deflateDynamicBlocksSharedAtSizedP_emit (data : ByteArray) (ws : Array UInt32)
+theorem deflateDynamicBlocksSharedAtSizedP_emit (data : ByteArray) (ta : TokenArray)
     (cuts : List Nat) :
-    (deflateDynamicBlocksSharedAtSizedP data ws cuts).2 () =
-      deflateDynamicBlocksSharedAtP data ws cuts := by
+    (deflateDynamicBlocksSharedAtSizedP data ta cuts).2 () =
+      deflateDynamicBlocksSharedAtP data ta cuts := by
   unfold deflateDynamicBlocksSharedAtSizedP
   split
   · rfl
   · rename_i h
-    show (emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts 0).2 0
-      BitWriter.empty).flush = deflateDynamicBlocksSharedAtP data ws cuts
+    show (emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts 0).2 0
+      BitWriter.empty).flush = deflateDynamicBlocksSharedAtP data ta cuts
     rw [emitSharedBlocksAtSizedP_eq]
     unfold deflateDynamicBlocksSharedAtP
     rw [if_neg h]

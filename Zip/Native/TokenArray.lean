@@ -174,6 +174,51 @@ private theorem get_push_eq (ta : TokenArray) (w : UInt32)
       ByteArray.getElem_pushUInt32LE_offset ta.bytes w (k := 3) (by omega) (by simp)]
   simpa using ByteArray.uint32_le_roundtrip w
 
+/-- Byte-level slice on token boundaries: tokens `[i, j)` as a fresh
+    `TokenArray`.  Because every token is exactly four bytes, the token range
+    `[i, j)` is the byte range `[4·i, 4·j)`, and the alignment invariant is
+    preserved (a difference of multiples of four).  This is the packed twin of
+    `Array.extract` — the shared-block split family slices the token stream with
+    it, and `extract_toArray` bridges it to the `Array UInt32` model. -/
+def extract (ta : TokenArray) (i j : Nat) : TokenArray :=
+  ⟨ta.bytes.extract (4 * i) (4 * j), by
+    have := ta.aligned
+    rw [ByteArray.size_extract]; omega⟩
+
+@[simp] theorem size_extract (ta : TokenArray) (i j : Nat) :
+    (ta.extract i j).size = min j ta.size - i := by
+  have := ta.aligned
+  simp only [extract, size, ByteArray.size_extract]
+  omega
+
+/-- Reading token `k` of `ta.extract i j` reads token `i + k` of `ta`. -/
+theorem get_extract (ta : TokenArray) (i j k : Nat) (h : k < (ta.extract i j).size)
+    (h' : i + k < ta.size) :
+    (ta.extract i j).get k h = ta.get (i + k) h' := by
+  simp only [get, extract]
+  have key : ∀ (a b : Nat) (hla : a < (ta.bytes.extract (4 * i) (4 * j)).size)
+      (hlb : b < ta.bytes.size), 4 * i + a = b →
+      (ta.bytes.extract (4 * i) (4 * j))[a]'hla = ta.bytes[b]'hlb := by
+    intro a b hla hlb hab
+    rw [ByteArray.getElem_extract]; congr 1
+  rw [key (4 * k) (4 * (i + k)) _ _ (by omega),
+      key (4 * k + 1) (4 * (i + k) + 1) _ _ (by omega),
+      key (4 * k + 2) (4 * (i + k) + 2) _ _ (by omega),
+      key (4 * k + 3) (4 * (i + k) + 3) _ _ (by omega)]
+
+/-- The load-bearing slice bridge: extracting a token range from the container
+    matches extracting it from the `Array UInt32` model. -/
+@[simp] theorem extract_toArray (ta : TokenArray) (i j : Nat) :
+    (ta.extract i j).toArray = ta.toArray.extract i j := by
+  apply Array.ext
+  · rw [← size_toArray, size_extract, Array.size_extract, ← size_toArray]
+  · intro k h1 h2
+    have hk : k < (ta.extract i j).size := by rw [← size_toArray] at h1; exact h1
+    have hik : i + k < ta.size := by
+      rw [size_extract] at hk; omega
+    rw [← get_toArray (ta.extract i j) k hk, get_extract ta i j k hk hik,
+        Array.getElem_extract, get_toArray]
+
 /-- The load-bearing bridge lemma: pushing a token onto the container matches
     pushing its word onto the `Array UInt32` model.  This is the drop-in
     replacement for `Array.map_push` in the ported packed-layer proofs. -/
