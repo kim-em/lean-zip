@@ -401,7 +401,7 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
     unless iterShallow == recShallow do
       throw (IO.userError s!"lz77ChainLazyIter vs lz77ChainLazy (lazyDepth=32) mismatch on {name}: \
         {iterShallow.size} vs {recShallow.size} tokens")
-    let packedShallow := Zip.Native.Deflate.lz77ChainLazyIterP data 64 32768 1000000000 259 258 32
+    let packedShallow := (Zip.Native.Deflate.lz77ChainLazyIterP data 64 32768 1000000000 259 258 32).toArray
     unless packedShallow == iterShallow.map Zip.Native.Deflate.packTok do
       throw (IO.userError s!"lz77ChainLazyIterP vs lz77ChainLazyIter (lazyDepth=32) mismatch on {name}: \
         {packedShallow.size} vs {iterShallow.size} tokens")
