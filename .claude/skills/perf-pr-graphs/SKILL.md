@@ -122,19 +122,6 @@ PR that improves the codec while `wall_ratio_median` stays > 1.0 has NOT closed
 the end-to-end gap — say so plainly; closing it means shrinking the lean CLI I/O
 path, not the codec.
 
-Also read **peak RSS** here: `end_to_end.lean.maxrss_kb` /
-`end_to_end.rust.maxrss_kb` and `end_to_end.rss_ratio` (lean/rust), captured with
-GNU `time -v` (Maximum resident set size, deterministic — one run per side). This
-is the whole-tar **memory footprint**, a distinct axis from wall/ratio: lean's
-DEFLATE holds its entire token stream in memory while rust's miniz keeps only a
-bounded window, so `rss_ratio` is the cost of the token pipeline. A **compress**
-PR — especially any token-representation / parse-buffering change — must be read
-on this axis too, not just speed and ratio: check `lean.maxrss_kb` and
-`rss_ratio` before vs after. A codec change that trims memory (the token-unboxing
-refactor cut `lean.maxrss_kb` ~33% while leaving output byte-identical and the
-wall flat) is a real win even when speed and ratio do not move; conversely a
-speed win that inflates `rss_ratio` is a trade to call out, not a free lunch.
-
 Both are recorded measurements, not pass/fail gates. `bench/run.sh` refreshes
 this file in-PR (both the full and `--native-only` paths, guarded on the silesia
 corpus) exactly like `latest.json` — building the lean `compress-file` exe and

@@ -142,24 +142,6 @@ theorem emitTokensP_eq (bw : BitWriter) (ws : Array UInt32) (i : Nat) :
           exact ih _ (by omega) _ _ rfl
     · simp only [Array.size_map, hi, ↓reduceDIte]
 
-/-- The `TokenArray` fixed-code emit loop equals the `Array UInt32` one over the
-    `.toArray` view: identical control flow, each `.get` read bridged to the
-    boxed slot by `TokenArray.get_toArray`. -/
-theorem emitTokensTA_toArray (bw : BitWriter) (ta : TokenArray) (i : Nat) :
-    emitTokensTA bw ta i = emitTokensP bw ta.toArray i := by
-  induction hn : ta.size - i using Nat.strongRecOn generalizing bw i with
-  | _ n ih =>
-    unfold emitTokensTA emitTokensP
-    by_cases hi : i < ta.size
-    · have hi' : i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_pos hi, dif_pos hi']
-      simp only [TokenArray.get_toArray]
-      by_cases hc : ta.toArray[i] &&& ((1 : UInt32) <<< 31) = 0
-      · rw [if_pos hc, if_pos hc]; exact ih _ (by omega) _ _ rfl
-      · rw [if_neg hc, if_neg hc]; exact ih _ (by omega) _ _ rfl
-    · have hi' : ¬ i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_neg hi, dif_neg hi']
-
 /-! ## Branch equations for `emitRefWithCodesP` -/
 
 /-- `emitRefWithCodesP` when the length field has no length code: no-op. -/
@@ -381,45 +363,24 @@ theorem emitTokensWithCodesPTG_eq (bw : BitWriter) (ws : Array UInt32)
     simp only [USize.toNat_zero]
   · rfl
 
-/-- The `TokenArray` packed-table emit loop equals the `Array UInt32` one over
-    the `.toArray` view: identical control flow, each `.get` read bridged to the
-    boxed slot by `TokenArray.get_toArray`. -/
-theorem emitTokensWithCodesTAPT_toArray (bw : BitWriter) (ta : TokenArray)
-    (litT distT : Array UInt32)
-    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) (i : Nat) :
-    emitTokensWithCodesTAPT bw ta litT distT hlit hdist i =
-      emitTokensWithCodesPT bw ta.toArray litT distT hlit hdist i := by
-  induction hn : ta.size - i using Nat.strongRecOn generalizing bw i with
-  | _ n ih =>
-    unfold emitTokensWithCodesTAPT emitTokensWithCodesPT
-    by_cases hi : i < ta.size
-    · have hi' : i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_pos hi, dif_pos hi']
-      simp only [TokenArray.get_toArray]
-      by_cases hc : ta.toArray[i] &&& ((1 : UInt32) <<< 31) = 0
-      · rw [if_pos hc, if_pos hc]; exact ih _ (by omega) _ _ rfl
-      · rw [if_neg hc, if_neg hc]; exact ih _ (by omega) _ _ rfl
-    · have hi' : ¬ i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_neg hi, dif_neg hi']
-
 /-! ## The packed single-block cores equal the boxed ones -/
 
 /-- The packed fixed-block core is the boxed one over the `unpackTok` view:
     the bodies are identical up to `emitTokensP_eq`. -/
-theorem deflateFixedBlockP_eq (data : ByteArray) (ptoks : TokenArray) (cap : Nat := 0) :
-    deflateFixedBlockP data ptoks cap = deflateFixedBlock data (ptoks.toArray.map unpackTok) := by
+theorem deflateFixedBlockP_eq (data : ByteArray) (ptoks : Array UInt32) (cap : Nat := 0) :
+    deflateFixedBlockP data ptoks cap = deflateFixedBlock data (ptoks.map unpackTok) := by
   unfold deflateFixedBlockP deflateFixedBlock
-  simp only [BitWriter.emptyWithCapacity_eq, emitTokensTA_toArray, emitTokensP_eq]
+  simp only [BitWriter.emptyWithCapacity_eq, emitTokensP_eq]
 
 /-- The packed dynamic-block core is the boxed one over the `unpackTok` view
     (same `hlit`/`hdist` hypotheses): the bodies are identical up to
     `emitTokensWithCodesP_eq`. -/
-theorem deflateDynamicBlockCoreP_eq (data : ByteArray) (ptoks : TokenArray)
+theorem deflateDynamicBlockCoreP_eq (data : ByteArray) (ptoks : Array UInt32)
     (litLens distLens : List Nat)
     (hlit : litLens.length = 286) (hdist : distLens.length = 30) :
     deflateDynamicBlockCoreP data ptoks litLens distLens hlit hdist =
-      deflateDynamicBlockCore data (ptoks.toArray.map unpackTok) litLens distLens hlit hdist := by
+      deflateDynamicBlockCore data (ptoks.map unpackTok) litLens distLens hlit hdist := by
   unfold deflateDynamicBlockCoreP deflateDynamicBlockCore
-  simp only [emitTokensWithCodesTAPT_toArray, emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
+  simp only [emitTokensWithCodesPTG_eq, emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
 
 end Zip.Native.Deflate

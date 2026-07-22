@@ -34,7 +34,6 @@ import Zip.Spec.DynamicTreesComplete
 import Zip.Spec.InflateCorrect
 import Zip.Spec.InflateComplete
 import Zip.Native.Wide
-import Zip.Native.TokenArray
 import Zip.Native.Adler32
 import Zip.Native.Crc32
 import Zip.Native.Inflate
