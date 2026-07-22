@@ -136,8 +136,8 @@ end Rung4Spike
 
 /-- Production merged matcher at a given `lazy2Steps` through the L-knob dispatch. -/
 def prodMerged (data : ByteArray) (level : UInt8) (lazy2Steps : Nat) : Array UInt32 :=
-  lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level)
-    (niceLen level) (lazyDepth level) (useH3Level level) lazy2Steps
+  (lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level)
+    (niceLen level) (lazyDepth level) (useH3Level level) lazy2Steps).toArray
 
 def label (path : String) : String :=
   (System.FilePath.mk path).fileName.getD path
@@ -164,7 +164,7 @@ def main (args : List String) : IO Unit := do
     -- `prod4 == dispatch`: the split-tier dispatch (`lzMatchP`, which at L7 runs
     --   `lazy2StepsLevel 7 = 4`) equals the direct lazy2Steps=4 production loop.
     let okMirror1 := prod1 == spike1
-    let okDispatch := prod4 == lzMatchP data level
+    let okDispatch := prod4 == (lzMatchP data level).toArray
     -- Non-vacuity: outputs must be non-empty.
     if prod4.size == 0 || spike4.size == 0 || prod1.size == 0 then allOk := false
     if !ok4 || !okMirror1 || !okDispatch then allOk := false

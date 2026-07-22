@@ -53,7 +53,7 @@ def configs : List (Nat × Nat) :=
 
 /-- Distinct symbol for the ratio path so CSE cannot merge it with the timed
     calls (which would make the work appear to run in ~0 ns). -/
-@[noinline] def matchForRatio (data : ByteArray) (cd ic : Nat) : Array UInt32 :=
+@[noinline] def matchForRatio (data : ByteArray) (cd ic : Nat) : TokenArray :=
   lz77ChainIterP data cd 32768 ic
 
 structure Cell where

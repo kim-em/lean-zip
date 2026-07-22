@@ -23,7 +23,7 @@ frequencies (EOB-corrected sum of the per-block `tokenFreqsP`). This file proves
 namespace Zip.Native.Deflate
 
 /-- Fuel form of `sharedPartitionSizedFreqsP_fst`. -/
-private theorem sharedPartitionSizedFreqsP_fst_fuel (toks : Array UInt32) :
+private theorem sharedPartitionSizedFreqsP_fst_fuel (toks : TokenArray) :
     ∀ (fuel pos : Nat), toks.size - pos < fuel → ∀ (cuts : List Nat),
       (sharedPartitionSizedFreqsP toks cuts pos).1 = sharedPartitionSizedP toks cuts pos := by
   intro fuel
@@ -41,14 +41,14 @@ private theorem sharedPartitionSizedFreqsP_fst_fuel (toks : Array UInt32) :
       rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega) cuts.tail]
 
 /-- Component 1 of `sharedPartitionSizedFreqsP` is exactly `sharedPartitionSizedP`. -/
-theorem sharedPartitionSizedFreqsP_fst (toks : Array UInt32) (cuts : List Nat) (pos : Nat) :
+theorem sharedPartitionSizedFreqsP_fst (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
     (sharedPartitionSizedFreqsP toks cuts pos).1 = sharedPartitionSizedP toks cuts pos :=
   sharedPartitionSizedFreqsP_fst_fuel toks (toks.size - pos + 1) pos (by omega) cuts
 
 /-- Fuel form of `sharedPartitionSizedFreqsP_snd`. -/
-private theorem sharedPartitionSizedFreqsP_snd_fuel (toks : Array UInt32) :
+private theorem sharedPartitionSizedFreqsP_snd_fuel (toks : TokenArray) :
     ∀ (fuel pos : Nat), toks.size - pos < fuel → ∀ (cuts : List Nat),
-      (sharedPartitionSizedFreqsP toks cuts pos).2 = tokenFreqsP (toks.extract pos toks.size) := by
+      (sharedPartitionSizedFreqsP toks cuts pos).2 = tokenFreqsPTA (toks.extract pos toks.size) := by
   intro fuel
   induction fuel with
   | zero => intro pos hf; omega
@@ -60,19 +60,20 @@ private theorem sharedPartitionSizedFreqsP_snd_fuel (toks : Array UInt32) :
       rw [show min (max (cuts.headD toks.size) (pos + 1)) toks.size = toks.size from by omega]
     · conv => lhs; unfold sharedPartitionSizedFreqsP
       simp only [if_neg hend]
-      rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega) cuts.tail,
-        ← tokenFreqsP_append, Array.extract_append_extract,
+      rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega) cuts.tail]
+      simp only [tokenFreqsPTA_toArray, TokenArray.extract_toArray]
+      rw [← tokenFreqsP_append, Array.extract_append_extract,
         show min pos (min (max (cuts.headD toks.size) (pos + 1)) toks.size) = pos from by omega,
         show max (min (max (cuts.headD toks.size) (pos + 1)) toks.size) toks.size = toks.size from by omega]
 
 /-- Component 2 of `sharedPartitionSizedFreqsP` is the whole-stream histogram of the
     covered suffix — the EOB-corrected sum of the per-block frequencies. -/
-theorem sharedPartitionSizedFreqsP_snd (toks : Array UInt32) (cuts : List Nat) (pos : Nat) :
-    (sharedPartitionSizedFreqsP toks cuts pos).2 = tokenFreqsP (toks.extract pos toks.size) :=
+theorem sharedPartitionSizedFreqsP_snd (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
+    (sharedPartitionSizedFreqsP toks cuts pos).2 = tokenFreqsPTA (toks.extract pos toks.size) :=
   sharedPartitionSizedFreqsP_snd_fuel toks (toks.size - pos + 1) pos (by omega) cuts
 
 /-- The split candidate prep is exactly `deflateDynamicBlocksSharedAtSizedP`. -/
-theorem deflateObsSplitSizedFreqsP_fst (data : ByteArray) (toks : Array UInt32) (cuts : List Nat) :
+theorem deflateObsSplitSizedFreqsP_fst (data : ByteArray) (toks : TokenArray) (cuts : List Nat) :
     (deflateObsSplitSizedFreqsP data toks cuts).1 = deflateDynamicBlocksSharedAtSizedP data toks cuts := by
   unfold deflateObsSplitSizedFreqsP deflateDynamicBlocksSharedAtSizedP
   split
@@ -81,18 +82,20 @@ theorem deflateObsSplitSizedFreqsP_fst (data : ByteArray) (toks : Array UInt32) 
     rw [sharedPartitionSizedFreqsP_fst]
 
 /-- The frequencies paired with the split candidate prep are `tokenFreqsP toks`. -/
-theorem deflateObsSplitSizedFreqsP_snd (data : ByteArray) (toks : Array UInt32) (cuts : List Nat) :
-    (deflateObsSplitSizedFreqsP data toks cuts).2 = tokenFreqsP toks := by
+theorem deflateObsSplitSizedFreqsP_snd (data : ByteArray) (toks : TokenArray) (cuts : List Nat) :
+    (deflateObsSplitSizedFreqsP data toks cuts).2 = tokenFreqsPTA toks := by
   unfold deflateObsSplitSizedFreqsP
   split
   · rfl
   · dsimp only []
-    rw [sharedPartitionSizedFreqsP_snd, Array.extract_eq_self_of_le (Nat.le_refl _)]
+    rw [sharedPartitionSizedFreqsP_snd]
+    simp only [tokenFreqsPTA_toArray, TokenArray.extract_toArray]
+    rw [Array.extract_eq_self_of_le (Nat.le_of_eq (TokenArray.size_toArray toks).symm)]
 
 /-- Feeding the split-sizing frequencies to the freq-taking base prep recovers
     `deflateRawBasePPrep`: the base candidate's second whole-stream frequency walk
     is replaced by a reuse of the per-block frequencies, with identical output. -/
-theorem deflateRawBasePPrepF_obsFreqs (data : ByteArray) (toks : Array UInt32) (cuts : List Nat) :
+theorem deflateRawBasePPrepF_obsFreqs (data : ByteArray) (toks : TokenArray) (cuts : List Nat) :
     deflateRawBasePPrepF data toks (deflateObsSplitSizedFreqsP data toks cuts).2
       = deflateRawBasePPrep data toks := by
   rw [deflateObsSplitSizedFreqsP_snd, deflateRawBasePPrepF_tokenFreqsP]
@@ -104,7 +107,7 @@ theorem deflateRawBasePPrepF_obsFreqs (data : ByteArray) (toks : Array UInt32) (
     observable changes, so `deflateRaw`'s output is byte-for-byte unchanged. This is
     the composed statement the roundtrip/padding specs (`inflate_deflateRaw`,
     `deflateRaw_pad`, `deflateRaw_goR_pad`) rewrite through. -/
-theorem withObs_reuse_eq (data : ByteArray) (toks : Array UInt32) (cuts : List Nat) :
+theorem withObs_reuse_eq (data : ByteArray) (toks : TokenArray) (cuts : List Nat) :
     (let obsFreqs := deflateObsSplitSizedFreqsP data toks cuts
      let basePrep := deflateRawBasePPrepF data toks obsFreqs.2
      if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1)

@@ -24,7 +24,7 @@ private def checkView (label : String) (data : ByteArray) : IO Unit := do
       throw (IO.userError
         s!"{label} level {level}: size mismatch ({packed.size} packed vs {boxed.size} boxed)")
     for i in [0:boxed.size] do
-      unless unpackTok packed[i]! == boxed[i]! do
+      unless unpackTok packed.toArray[i]! == boxed[i]! do
         throw (IO.userError s!"{label} level {level}: token mismatch at index {i}")
 
 /-- Stage B gate: the packed base candidate must be byte-identical to the
@@ -56,7 +56,7 @@ private def checkBaseP (label : String) (data : ByteArray) : IO Unit := do
 private def checkCoresP (label : String) (data : ByteArray) : IO Unit := do
   for level in [(1 : UInt8), 4, 6, 9] do
     let ptoks := lzMatchP data level
-    let toks := ptoks.map unpackTok
+    let toks := ptoks.toArray.map unpackTok
     let fixedP := deflateFixedBlockP data ptoks
     let fixedB := deflateFixedBlock data toks
     unless fixedP == fixedB do
@@ -86,7 +86,7 @@ private def checkCoresP (label : String) (data : ByteArray) : IO Unit := do
 private def checkSplitP (label : String) (data : ByteArray) : IO Unit := do
   for level in [(4 : UInt8), 6, 8] do
     let ptoks := lzMatchP data level
-    let toks := ptoks.map unpackTok
+    let toks := ptoks.toArray.map unpackTok
     let cutsP := chooseSplitsHeuristicP ptoks data.size
     let cutsB := chooseSplitsHeuristic toks
     unless cutsP == cutsB do

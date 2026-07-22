@@ -61,7 +61,7 @@ def blockFreqs (ptokens : Array UInt32) (blockToks : Nat) : Array (Array Nat × 
 def reps : Nat := 7
 
 def analyzeFile (name : String) (data : ByteArray) (blockToks : Nat) : IO Unit := do
-  let ptokens := lzMatchP data 6
+  let ptokens := (lzMatchP data 6).toArray
   let blocks := blockFreqs ptokens blockToks
   -- Replicate the file's blocks so a single build pass is milliseconds (the
   -- split-block regime of a large member), and time single passes (`iters = 1`)

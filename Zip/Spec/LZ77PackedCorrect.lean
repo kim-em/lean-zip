@@ -47,14 +47,19 @@ private theorem trailingP_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Tok
     · simp only [hp, ↓reduceDIte]
 
 /-- The packed greedy `mainLoop` is the packed image of the boxed one:
-    identical control flow and chain state, `packTok` at each push. -/
+    identical control flow and chain state, `packTok` at each push. The producer
+    now accumulates a `TokenArray` (stage 2/7), so the statement threads
+    `.toArray`: given the accumulator invariant `ta.toArray = acc.map packTok`,
+    the `TokenArray` loop's view is the boxed loop's packed image. Each push step
+    that was `Array.map_push` is now `TokenArray.push_toArray` + `Array.map_push`. -/
 private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap niceLen : Nat)
-    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos
-        (acc.map packTok) =
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (ta : TokenArray) (acc : Array LZ77Token)
+    (hta : ta.toArray = acc.map packTok) :
+    (lz77ChainIterP.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos
+        ta).toArray =
       (lz77ChainIter.mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev pos
         acc).map packTok := by
-  induction h : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev with
+  induction h : data.size - pos using Nat.strongRecOn generalizing pos ta acc hashTable prev hta with
   | _ n ih =>
     unfold lz77ChainIterP.mainLoop lz77ChainIter.mainLoop
     simp only [chainWalkGuardedPackedU_eq]
@@ -62,21 +67,26 @@ private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain in
     · simp only [hlt, ↓reduceDIte]
       split
       · split
-        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
-        · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
-      · rw [← Array.map_push, ih _ (by omega) _ _ _ _ rfl]
+        · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
+        · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
+      · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
     · simp only [hlt, ↓reduceDIte]
+      rw [trailingPT_toArray, hta]
       exact trailingP_eq data pos acc
 
-/-- `lz77ChainIterP` produces exactly the `packTok` image of `lz77ChainIter`. -/
+/-- `lz77ChainIterP`'s `TokenArray` output views to exactly the `packTok` image of
+    `lz77ChainIter`. -/
 theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap niceLen : Nat) :
-    lz77ChainIterP data maxChain windowSize insertCap niceLen =
+    (lz77ChainIterP data maxChain windowSize insertCap niceLen).toArray =
       (lz77ChainIter data maxChain windowSize insertCap niceLen).map packTok := by
   unfold lz77ChainIterP lz77ChainIter
   split
-  · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
+  · rw [trailingPT_toArray, TokenArray.empty_toArray]
+    simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ 0 #[]
+      mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ 0
+        (TokenArray.emptyWithCapacity data.size) #[]
+        (by simp)
 
 set_option backward.split false in
 set_option maxRecDepth 4000 in
@@ -90,9 +100,10 @@ mutual
     so both sides land on the same walk; `Array.map_push` commutes `packTok` through
     each push. -/
 private theorem rollDefer_P_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
-    (hashTable : Array Nat) (prev h3tab : Array Nat) (mp pLen pMatchPos step : Nat) (acc : Array LZ77Token) :
-    lz77ChainLazyIterP.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step
-        (acc.map packTok) =
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (mp pLen pMatchPos step : Nat)
+    (ta : TokenArray) (acc : Array LZ77Token) (hta : ta.toArray = acc.map packTok) :
+    (lz77ChainLazyIterP.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step
+        ta).toArray =
       (lz77ChainLazyIter.rollDefer data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab mp pLen pMatchPos step
         acc).map packTok := by
   unfold lz77ChainLazyIterP.rollDefer lz77ChainLazyIter.rollDefer
@@ -101,14 +112,14 @@ private theorem rollDefer_P_eq (data : ByteArray) (windowSize hashSize maxChain 
     simp (config := { maxSteps := 4000000 }) only [chainWalkGuardedPackedU_eq]
     split
     · -- roll: literal at mp, then rollDefer at mp+1
-      simp only [← Array.map_push]
-      rw [rollDefer_P_eq]
+      apply rollDefer_P_eq
+      rw [TokenArray.push_toArray, hta, Array.map_push]
     · -- no improvement: commit reference(pLen), then mainLoop
-      simp only [← Array.map_push]
-      rw [mainLoopLazyP_eq]
+      apply mainLoopLazyP_eq
+      rw [TokenArray.push_toArray, hta, Array.map_push]
   · rw [dif_neg hcan, dif_neg hcan]
-    simp only [← Array.map_push]
-    rw [mainLoopLazyP_eq]
+    apply mainLoopLazyP_eq
+    rw [TokenArray.push_toArray, hta, Array.map_push]
 termination_by 2 * (data.size - mp) + 1
 decreasing_by all_goals omega
 
@@ -119,9 +130,10 @@ decreasing_by all_goals omega
     in lockstep. `set_option backward.split false` keeps the `split` on the
     `rollDefer`-live goal from blowing its motive (the rung-3 fix). -/
 private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (useH3 : Bool)
-    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos : Nat) (acc : Array LZ77Token) :
-    lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab pos
-        (acc.map packTok) =
+    (hashTable : Array Nat) (prev h3tab : Array Nat) (pos : Nat)
+    (ta : TokenArray) (acc : Array LZ77Token) (hta : ta.toArray = acc.map packTok) :
+    (lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab pos
+        ta).toArray =
       (lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 hashTable prev h3tab pos
         acc).map packTok := by
   unfold lz77ChainLazyIterP.mainLoop lz77ChainLazyIter.mainLoop
@@ -132,7 +144,10 @@ private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChai
     generalize h3Seed useH3 data h3tab windowSize pos hlt = sd
     generalize hash3Single data pos hlt = hsg
     simp (config := { maxSteps := 4000000 }) only [chainWalkGuardedPackedU_eq]
-    -- Branch tree: hge / hle / h3lt / gate / lazyAccept / hle2 / h1 (rung 5: no hpl2)
+    -- Branch tree: hge / hle / h3lt / gate / lazyAccept / hle2 / h1 (rung 5: no hpl2).
+    -- Each leaf commits its push(es) into the `TokenArray` accumulator and recurses;
+    -- the invariant `ta.toArray = acc.map packTok` is re-established per push via
+    -- `TokenArray.push_toArray` (stage 3/7).
     split
     · split
       · split
@@ -141,22 +156,32 @@ private theorem mainLoopLazyP_eq (data : ByteArray) (windowSize hashSize maxChai
             · split
               · split
                 · -- roll arm: literal push, then rollDefer
-                  rw [← Array.map_push, rollDefer_P_eq]
+                  apply rollDefer_P_eq
+                  rw [TokenArray.push_toArray, hta, Array.map_push]
                 · -- ¬h1: single deferral, two pushes
-                  rw [← Array.map_push, ← Array.map_push, mainLoopLazyP_eq]
+                  apply mainLoopLazyP_eq
+                  rw [TokenArray.push_toArray, TokenArray.push_toArray, hta,
+                    Array.map_push, Array.map_push]
               · -- ¬hle2: reference(matchLen)
-                rw [← Array.map_push, mainLoopLazyP_eq]
+                apply mainLoopLazyP_eq
+                rw [TokenArray.push_toArray, hta, Array.map_push]
             · -- ¬lazyAccept: reference(matchLen)
-              rw [← Array.map_push, mainLoopLazyP_eq]
+              apply mainLoopLazyP_eq
+              rw [TokenArray.push_toArray, hta, Array.map_push]
           · -- gated: reference(matchLen)
-            rw [← Array.map_push, mainLoopLazyP_eq]
+            apply mainLoopLazyP_eq
+            rw [TokenArray.push_toArray, hta, Array.map_push]
         · -- ¬h3lt: reference(matchLen)
-          rw [← Array.map_push, mainLoopLazyP_eq]
+          apply mainLoopLazyP_eq
+          rw [TokenArray.push_toArray, hta, Array.map_push]
       · -- ¬hle: literal
-        rw [← Array.map_push, mainLoopLazyP_eq]
+        apply mainLoopLazyP_eq
+        rw [TokenArray.push_toArray, hta, Array.map_push]
     · -- ¬hge: literal
-      rw [← Array.map_push, mainLoopLazyP_eq]
+      apply mainLoopLazyP_eq
+      rw [TokenArray.push_toArray, hta, Array.map_push]
   · simp only [hlt, ↓reduceDIte]
+    rw [trailingPT_toArray, hta]
     exact trailingP_eq data pos acc
 termination_by 2 * (data.size - pos)
 decreasing_by all_goals (first | omega | (refine Nat.mul_lt_mul_of_pos_left ?_ (by decide); omega))
@@ -166,13 +191,14 @@ end
 /-- `lz77ChainLazyIterP` produces exactly the `packTok` image of
     `lz77ChainLazyIter`. -/
 theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat) :
-    lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps =
+    (lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps).toArray =
       (lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps).map packTok := by
   unfold lz77ChainLazyIterP lz77ChainLazyIter
   split
-  · simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
+  · rw [trailingPT_toArray, TokenArray.empty_toArray]
+    simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 _ _ _ 0 #[]
+      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 _ _ _ 0 (TokenArray.emptyWithCapacity data.size) #[] (by simp)
 
 /-! ## View direction: the boxed view recovers the boxed matchers
 
@@ -182,7 +208,7 @@ existing encodability theorems provide for the whole stream. -/
 /-- The boxed view of the packed greedy matcher is the boxed greedy matcher. -/
 theorem lz77ChainIterP_map (data : ByteArray) (maxChain windowSize insertCap niceLen : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    (lz77ChainIterP data maxChain windowSize insertCap niceLen).map unpackTok =
+    (lz77ChainIterP data maxChain windowSize insertCap niceLen).toArray.map unpackTok =
       lz77ChainIter data maxChain windowSize insertCap niceLen := by
   have henc := lz77ChainIter_encodable data maxChain windowSize insertCap niceLen hw hws
   rw [lz77ChainIterP_eq, Array.map_map]
@@ -194,7 +220,7 @@ theorem lz77ChainIterP_map (data : ByteArray) (maxChain windowSize insertCap nic
 /-- The boxed view of the packed lazy matcher is the boxed lazy matcher. -/
 theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
-    (lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps).map unpackTok =
+    (lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps).toArray.map unpackTok =
       lz77ChainLazyIter data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps := by
   have henc := lz77ChainLazyIter_encodable data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps hw hws
   rw [lz77ChainLazyIterP_eq, Array.map_map]
@@ -208,7 +234,7 @@ theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap
 
 /-- `lzMatchP` is the `packTok` image of `lzMatch` at every level. -/
 theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
-    lzMatchP data level = (lzMatch data level).map packTok := by
+    (lzMatchP data level).toArray = (lzMatch data level).map packTok := by
   unfold lzMatchP lzMatch
   split
   · rw [lz77ChainLazyIterPMerged_eq]
@@ -220,7 +246,7 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
     stage B+ consumers of `lzMatchP` inherit every `lzMatch` contract through
     this equation. -/
 theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
-    (lzMatchP data level).map unpackTok = lzMatch data level := by
+    (lzMatchP data level).toArray.map unpackTok = lzMatch data level := by
   unfold lzMatchP lzMatch
   split
   · rw [lz77ChainLazyIterPMerged_eq]
@@ -251,9 +277,12 @@ theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
   unfold deflateRawBase deflateRawBaseP deflateRawBaseTokens
   -- The packed dispatch shares one `dynHeaderCodes` plan across sizing and emit
   -- (#2627); collapse the plan-taking variants back to the un-deduped forms, then
-  -- finish with the boxed/packed emitter and frequency equalities.
+  -- finish with the boxed/packed emitter and frequency equalities.  The
+  -- `TokenArray` frequency walk routes to the boxed model through
+  -- `tokenFreqsPTA_toArray` (the `.toArray` view) then `tokenFreqsP_eq`.
   simp only [dynBlockBytesWith_dynHeaderCodes, deflateDynamicBlockCorePWith_dynHeaderCodes,
-    deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsP_eq, lzMatchP_map]
+    deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsPTA_toArray, tokenFreqsP_eq,
+    lzMatchP_map]
 
 /-! ## The packed shared-window split candidate equals the boxed one (#2737)
 
@@ -297,32 +326,32 @@ private theorem extract_map {α β : Type} (f : α → β) (a : Array α) (s e :
 
 /-- The packed per-block emitter is the boxed one over the `unpackTok` view:
     the bodies are identical up to `emitTokensWithCodesP_eq`. -/
-theorem emitDynBlockP_eq (bw : BitWriter) (data : ByteArray) (ws : Array UInt32)
+theorem emitDynBlockP_eq (bw : BitWriter) (data : ByteArray) (ta : TokenArray)
     (litLens distLens : List Nat)
     (hlit : litLens.length = 286) (hdist : distLens.length = 30) (isFinal : Bool) :
-    emitDynBlockP bw data ws litLens distLens hlit hdist isFinal =
-      emitDynBlock bw data (ws.map unpackTok) litLens distLens hlit hdist isFinal := by
+    emitDynBlockP bw data ta litLens distLens hlit hdist isFinal =
+      emitDynBlock bw data (ta.toArray.map unpackTok) litLens distLens hlit hdist isFinal := by
   unfold emitDynBlockP emitDynBlock
-  simp only [emitTokensWithCodesPTG_eq, emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
+  simp only [emitTokensWithCodesTAPT_toArray, emitTokensWithCodesPT_eq, emitTokensWithCodesP_eq]
 
 /-- The packed shared-window block emitter is the boxed one over the
     `unpackTok` view: the trees agree by `tokenFreqsP_eq`, the emit by
     `emitDynBlockP_eq`. -/
-theorem emitSharedBlockP_eq (bw : BitWriter) (data : ByteArray) (ws : Array UInt32)
+theorem emitSharedBlockP_eq (bw : BitWriter) (data : ByteArray) (ta : TokenArray)
     (isFinal : Bool) :
-    emitSharedBlockP bw data ws isFinal =
-      emitSharedBlock bw data (ws.map unpackTok) isFinal := by
+    emitSharedBlockP bw data ta isFinal =
+      emitSharedBlock bw data (ta.toArray.map unpackTok) isFinal := by
   unfold emitSharedBlockP emitSharedBlock
-  simp only [tokenFreqsP_eq, emitDynBlockP_eq]
+  simp only [tokenFreqsPTA_toArray, tokenFreqsP_eq, emitDynBlockP_eq]
 
 /-- The packed cut-list block fold is the boxed one over the `unpackTok` view
     (fuel-quantified form for the induction): the map preserves size, so the
     clamped cuts coincide, and each block agrees by `emitSharedBlockP_eq` +
     `extract_map`. -/
-private theorem emitSharedBlocksAtP_eq_fuel (data : ByteArray) (ws : Array UInt32) :
-    ∀ (fuel pos : Nat), ws.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
-      emitSharedBlocksAtP data ws cuts pos bw =
-        emitSharedBlocksAt data (ws.map unpackTok) cuts pos bw := by
+private theorem emitSharedBlocksAtP_eq_fuel (data : ByteArray) (ta : TokenArray) :
+    ∀ (fuel pos : Nat), ta.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
+      emitSharedBlocksAtP data ta cuts pos bw =
+        emitSharedBlocksAt data (ta.toArray.map unpackTok) cuts pos bw := by
   intro fuel
   induction fuel with
   | zero => intro pos hf; omega
@@ -330,29 +359,29 @@ private theorem emitSharedBlocksAtP_eq_fuel (data : ByteArray) (ws : Array UInt3
     intro pos hf cuts bw
     conv => lhs; unfold emitSharedBlocksAtP
     conv => rhs; unfold emitSharedBlocksAt
-    simp only [Array.size_map, emitSharedBlockP_eq, extract_map]
-    by_cases hend : min (max (cuts.headD ws.size) (pos + 1)) ws.size ≥ ws.size
+    simp only [Array.size_map, ← TokenArray.size_toArray, TokenArray.extract_toArray, emitSharedBlockP_eq, extract_map]
+    by_cases hend : min (max (cuts.headD ta.size) (pos + 1)) ta.size ≥ ta.size
     · simp only [if_pos hend]
     · simp only [if_neg hend]
-      exact ih (min (max (cuts.headD ws.size) (pos + 1)) ws.size) (by omega) cuts.tail _
+      exact ih (min (max (cuts.headD ta.size) (pos + 1)) ta.size) (by omega) cuts.tail _
 
 /-- The packed cut-list block fold is the boxed one over the `unpackTok` view,
     for any cut list and start position. -/
-theorem emitSharedBlocksAtP_eq (data : ByteArray) (ws : Array UInt32)
+theorem emitSharedBlocksAtP_eq (data : ByteArray) (ta : TokenArray)
     (cuts : List Nat) (pos : Nat) (bw : BitWriter) :
-    emitSharedBlocksAtP data ws cuts pos bw =
-      emitSharedBlocksAt data (ws.map unpackTok) cuts pos bw :=
-  emitSharedBlocksAtP_eq_fuel data ws (ws.size - pos + 1) pos (by omega) cuts bw
+    emitSharedBlocksAtP data ta cuts pos bw =
+      emitSharedBlocksAt data (ta.toArray.map unpackTok) cuts pos bw :=
+  emitSharedBlocksAtP_eq_fuel data ta (ta.size - pos + 1) pos (by omega) cuts bw
 
 /-- The packed observation-divergence split candidate is byte-identical to the
     boxed reference at the same (constant) cut list: `deflateRaw`'s level 6–8
     split branch and the roundtrip proofs see
     `deflateDynamicBlocksSharedAtTokens … (fun _ => cuts)` through this
     rewrite, and the `DeflateBlockSplit` theorems hold for any selector. -/
-theorem deflateDynamicBlocksSharedAtP_eq (data : ByteArray) (ws : Array UInt32)
+theorem deflateDynamicBlocksSharedAtP_eq (data : ByteArray) (ta : TokenArray)
     (cuts : List Nat) :
-    deflateDynamicBlocksSharedAtP data ws cuts =
-      deflateDynamicBlocksSharedAtTokens data (ws.map unpackTok) (fun _ => cuts) := by
+    deflateDynamicBlocksSharedAtP data ta cuts =
+      deflateDynamicBlocksSharedAtTokens data (ta.toArray.map unpackTok) (fun _ => cuts) := by
   unfold deflateDynamicBlocksSharedAtP deflateDynamicBlocksSharedAtTokens
   split
   · rfl
@@ -369,63 +398,63 @@ coincide (the alphabet-size proofs are proof-irrelevant). -/
 
 /-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
     reference packed emitter (fuel-quantified form for the induction). -/
-private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ws : Array UInt32) :
-    ∀ (fuel pos : Nat), ws.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
-      emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts pos).2 pos bw
-        = emitSharedBlocksAtP data ws cuts pos bw := by
+private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ta : TokenArray) :
+    ∀ (fuel pos : Nat), ta.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
+      emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts pos).2 pos bw
+        = emitSharedBlocksAtP data ta cuts pos bw := by
   intro fuel
   induction fuel with
   | zero => intro pos hf; omega
   | succ fuel ih =>
     intro pos hf cuts bw
-    by_cases hend : min (max (cuts.headD ws.size) (pos + 1)) ws.size ≥ ws.size
-    · have hsnd : (sharedPartitionSizedP ws cuts pos).2 =
-          [sizedTrees (tokenFreqsP (ws.extract pos
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).1
-            (tokenFreqsP (ws.extract pos
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).2] := by
+    by_cases hend : min (max (cuts.headD ta.size) (pos + 1)) ta.size ≥ ta.size
+    · have hsnd : (sharedPartitionSizedP ta cuts pos).2 =
+          [sizedTrees (tokenFreqsPTA (ta.extract pos
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).1
+            (tokenFreqsPTA (ta.extract pos
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).2] := by
         conv => lhs; unfold sharedPartitionSizedP
         simp only [if_pos hend]
       rw [hsnd]
       conv => lhs; unfold emitSharedBlocksAtSizedP
       conv => rhs; unfold emitSharedBlocksAtP
       simp only [if_pos hend, List.headD_cons, emitSharedBlockP, sizedTrees]
-    · have hsnd : (sharedPartitionSizedP ws cuts pos).2 =
-          sizedTrees (tokenFreqsP (ws.extract pos
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).1
-            (tokenFreqsP (ws.extract pos
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size))).2 ::
-          (sharedPartitionSizedP ws cuts.tail
-            (min (max (cuts.headD ws.size) (pos + 1)) ws.size)).2 := by
+    · have hsnd : (sharedPartitionSizedP ta cuts pos).2 =
+          sizedTrees (tokenFreqsPTA (ta.extract pos
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).1
+            (tokenFreqsPTA (ta.extract pos
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).2 ::
+          (sharedPartitionSizedP ta cuts.tail
+            (min (max (cuts.headD ta.size) (pos + 1)) ta.size)).2 := by
         conv => lhs; unfold sharedPartitionSizedP
         simp only [if_neg hend]
       rw [hsnd]
       conv => lhs; unfold emitSharedBlocksAtSizedP
       conv => rhs; unfold emitSharedBlocksAtP
       simp only [if_neg hend, List.headD_cons, List.tail_cons, emitSharedBlockP, sizedTrees]
-      exact ih (min (max (cuts.headD ws.size) (pos + 1)) ws.size) (by omega) cuts.tail _
+      exact ih (min (max (cuts.headD ta.size) (pos + 1)) ta.size) (by omega) cuts.tail _
 
 /-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
     reference packed emitter, for any cut list and start position. -/
-theorem emitSharedBlocksAtSizedP_eq (data : ByteArray) (ws : Array UInt32)
+theorem emitSharedBlocksAtSizedP_eq (data : ByteArray) (ta : TokenArray)
     (cuts : List Nat) (pos : Nat) (bw : BitWriter) :
-    emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts pos).2 pos bw
-      = emitSharedBlocksAtP data ws cuts pos bw :=
-  emitSharedBlocksAtSizedP_eq_fuel data ws (ws.size - pos + 1) pos (by omega) cuts bw
+    emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts pos).2 pos bw
+      = emitSharedBlocksAtP data ta cuts pos bw :=
+  emitSharedBlocksAtSizedP_eq_fuel data ta (ta.size - pos + 1) pos (by omega) cuts bw
 
 /-- The packed sized-tree split candidate's emit thunk is byte-identical to the
     reference `deflateDynamicBlocksSharedAtP`: the roundtrip and padding theorems
     transfer through this, exactly as for the un-sized packed candidate. -/
-theorem deflateDynamicBlocksSharedAtSizedP_emit (data : ByteArray) (ws : Array UInt32)
+theorem deflateDynamicBlocksSharedAtSizedP_emit (data : ByteArray) (ta : TokenArray)
     (cuts : List Nat) :
-    (deflateDynamicBlocksSharedAtSizedP data ws cuts).2 () =
-      deflateDynamicBlocksSharedAtP data ws cuts := by
+    (deflateDynamicBlocksSharedAtSizedP data ta cuts).2 () =
+      deflateDynamicBlocksSharedAtP data ta cuts := by
   unfold deflateDynamicBlocksSharedAtSizedP
   split
   · rfl
   · rename_i h
-    show (emitSharedBlocksAtSizedP data ws cuts (sharedPartitionSizedP ws cuts 0).2 0
-      BitWriter.empty).flush = deflateDynamicBlocksSharedAtP data ws cuts
+    show (emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts 0).2 0
+      BitWriter.empty).flush = deflateDynamicBlocksSharedAtP data ta cuts
     rw [emitSharedBlocksAtSizedP_eq]
     unfold deflateDynamicBlocksSharedAtP
     rw [if_neg h]

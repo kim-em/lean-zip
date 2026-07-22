@@ -159,6 +159,53 @@ where
     else (litLenFreqs.val, distFreqs.val)
   termination_by tokens.size - i
 
+/-- `TokenArray` twin of `tokenFreqsP` (stage 6/7 of the token-stream
+    unboxing): the same histogram computed by reading each packed word from the
+    4-byte-per-token `TokenArray` via `.get` instead of the 8-byte
+    `Array UInt32` slot, so the whole-stream frequency pass never materializes
+    the boxed token buffer. Equal to `tokenFreqsP` over the `.toArray` view
+    (`tokenFreqsPTA_toArray`), through which its boxed correctness
+    (`tokenFreqsP_eq`) and additivity (`tokenFreqsP_append`) transfer. -/
+def tokenFreqsPTA (tokens : TokenArray) : Array Nat × Array Nat :=
+  go tokens ⟨(Array.replicate 286 0).set! 256 1,
+      by rw [Array.size_set!, Array.size_replicate]⟩
+    ⟨Array.replicate 30 0, by rw [Array.size_replicate]⟩ 0
+where
+  go (tokens : TokenArray) (litLenFreqs : {a : Array Nat // a.size = 286})
+      (distFreqs : {a : Array Nat // a.size = 30}) (i : Nat) : Array Nat × Array Nat :=
+    if h : i < tokens.size then
+      let w := tokens.get i h
+      if w &&& ((1 : UInt32) <<< 31) = 0 then
+        go tokens (bumpLitFreqP litLenFreqs w) distFreqs (i + 1)
+      else
+        go tokens (bumpRefLitFreqP litLenFreqs w) (bumpRefDistFreqP distFreqs w) (i + 1)
+    else (litLenFreqs.val, distFreqs.val)
+  termination_by tokens.size - i
+
+/-- The `TokenArray` frequency walk equals the `Array UInt32` walk over the
+    `.toArray` view, at every seed and index: identical control flow, each
+    `.get` read bridged to the boxed slot by `TokenArray.get_toArray`. -/
+theorem tokenFreqsPTA_go_eq (ta : TokenArray) (lf : {a : Array Nat // a.size = 286})
+    (df : {a : Array Nat // a.size = 30}) (i : Nat) :
+    tokenFreqsPTA.go ta lf df i = tokenFreqsP.go ta.toArray lf df i := by
+  induction hn : ta.size - i using Nat.strongRecOn generalizing lf df i with
+  | _ n ih =>
+    unfold tokenFreqsPTA.go tokenFreqsP.go
+    by_cases hi : i < ta.size
+    · have hi' : i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
+      rw [dif_pos hi, dif_pos hi', TokenArray.get_toArray ta i hi]
+      by_cases hc : ta.toArray[i] &&& ((1 : UInt32) <<< 31) = 0
+      · rw [if_pos hc, if_pos hc]; exact ih _ (by omega) _ _ _ rfl
+      · rw [if_neg hc, if_neg hc]; exact ih _ (by omega) _ _ _ rfl
+    · have hi' : ¬ i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
+      rw [dif_neg hi, dif_neg hi']
+
+/-- `tokenFreqsPTA` is `tokenFreqsP` over the `Array UInt32` view. -/
+theorem tokenFreqsPTA_toArray (ta : TokenArray) :
+    tokenFreqsPTA ta = tokenFreqsP ta.toArray := by
+  unfold tokenFreqsPTA tokenFreqsP
+  exact tokenFreqsPTA_go_eq ta _ _ 0
+
 /-- `bumpRefLitFreqP` when the length field has no length code: no-op. -/
 private theorem bumpRefLitFreqP_none (lf : {a : Array Nat // a.size = 286}) (w : UInt32)
     (h : findLengthCode (((w >>> 16) &&& 0x7FFF).toNat) = none) :

@@ -160,7 +160,7 @@ def runMatcher (costAccept useLazy2 : Bool) (data : ByteArray)
 /-- Compressed size of a packed token stream through the *exact* dispatch
     `deflateRaw` uses at `level`: levels 4–5 emit a single `deflateRawBase`
     block; levels 6–8 arbitrate base against the observation-divergence split. -/
-def sizeAt (data : ByteArray) (level : UInt8) (ptoks : Array UInt32) : Nat :=
+def sizeAt (data : ByteArray) (level : UInt8) (ptoks : TokenArray) : Nat :=
   if level < 6 then
     (deflateRawBasePPrep data ptoks).1
   else
@@ -173,10 +173,16 @@ def sizeAt (data : ByteArray) (level : UInt8) (ptoks : Array UInt32) : Nat :=
         if basePrep.1 < obsPrep.1 then basePrep else obsPrep
     withObs.1
 
+/-- Pack an `Array UInt32` of already-packed words into a `TokenArray` (bench-only:
+    the boxed variant matchers emit `Array UInt32`, which the size path now
+    consumes as a `TokenArray`). -/
+def packedToTA (a : Array UInt32) : TokenArray :=
+  a.foldl (·.push ·) (TokenArray.emptyWithCapacity a.size)
+
 /-- Size a boxed token stream (variant matchers emit boxed tokens; `packTok`
     maps them to the packed words the size path consumes). -/
 def sizeBoxed (data : ByteArray) (level : UInt8) (toks : Array LZ77Token) : Nat :=
-  sizeAt data level (toks.map packTok)
+  sizeAt data level (packedToTA (toks.map packTok))
 
 def levels : List UInt8 := [4, 5, 6, 7, 8]
 
