@@ -84,7 +84,8 @@ theorem lz77ChainIterP_eq (data : ByteArray) (maxChain windowSize insertCap nice
   · rw [trailingPT_toArray, TokenArray.empty_toArray]
     simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ 0 TokenArray.empty #[]
+      mainLoopP_eq data windowSize 65536 maxChain insertCap niceLen _ _ 0
+        (TokenArray.emptyWithCapacity data.size) #[]
         (by simp)
 
 set_option backward.split false in
@@ -197,7 +198,7 @@ theorem lz77ChainLazyIterP_eq (data : ByteArray) (maxChain windowSize insertCap 
   · rw [trailingPT_toArray, TokenArray.empty_toArray]
     simpa only [List.map_toArray, List.map_nil] using trailingP_eq data 0 #[]
   · simpa only [List.map_toArray, List.map_nil, Array.emptyWithCapacity_eq] using
-      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 _ _ _ 0 TokenArray.empty #[] (by simp)
+      mainLoopLazyP_eq data windowSize 65536 maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3 _ _ _ 0 (TokenArray.emptyWithCapacity data.size) #[] (by simp)
 
 /-! ## View direction: the boxed view recovers the boxed matchers
 

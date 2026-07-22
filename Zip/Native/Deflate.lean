@@ -1785,7 +1785,7 @@ def lz77ChainIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 3276
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap niceLen
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0
-      TokenArray.empty
+      (TokenArray.emptyWithCapacity data.size)
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap niceLen : Nat)
       (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : TokenArray) :
@@ -1969,7 +1969,7 @@ def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 
     lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
       (.replicate 32768 data.size) 0
-      TokenArray.empty
+      (TokenArray.emptyWithCapacity data.size)
 
 /-! ## SPIKE (#2767 salvage): merged-array lazy matcher (single `Array Nat`)
 
@@ -2469,7 +2469,7 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
     let prevSize := min chainWinSize data.size
     lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
       (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0 0 0 0
-      TokenArray.empty
+      (TokenArray.emptyWithCapacity data.size)
 
 /-- Merged-array twin of `lz77ChainIterP.mainLoop` (the greedy tier, levels
     1–3): identical control flow, but the chain state is the single combined
@@ -2526,7 +2526,7 @@ def lz77ChainIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat :
     let prevSize := min chainWinSize data.size
     lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen
       (.replicate (prevSize + hashSize) data.size) 0
-      TokenArray.empty
+      (TokenArray.emptyWithCapacity data.size)
 
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=

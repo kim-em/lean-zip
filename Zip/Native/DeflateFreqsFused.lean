@@ -104,6 +104,6 @@ def lz77ChainIterPMergedF (data : ByteArray) (maxChain : Nat) (windowSize : Nat 
     let prevSize := min chainWinSize data.size
     lz77GreedyMergedLoopF data windowSize hashSize prevSize maxChain insertCap niceLen
       (.replicate (prevSize + hashSize) data.size) 0
-      TokenArray.empty initLitFreqF initDistFreqF
+      (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
 
 end Zip.Native.Deflate

@@ -109,6 +109,22 @@ namespace TokenArray
 /-- The empty token stream. -/
 def empty : TokenArray := ⟨ByteArray.empty, by simp [ByteArray.size_empty]⟩
 
+/-- An empty token stream that pre-allocates room for `n` tokens (`4 * n` bytes).
+    The matcher seeds its accumulator with this, mirroring the boxed model's
+    `Array.emptyWithCapacity data.size`: the per-token `push`es then grow the
+    backing `ByteArray` in place instead of reallocating by doubling.  Dropping
+    this pre-sizing was the regression in the first unboxing attempt
+    (`#2866`/`#2867`) — the doubling growth transient (up to ~2× the live token
+    bytes momentarily) dominated *peak* RSS, and the realloc churn cost per-token
+    CPU, so the byte-identical refactor regressed both axes.  In the model this is
+    the empty stream (`ByteArray.emptyWithCapacity` ignores the capacity in Lean
+    and only hints the runtime allocator), so it shares every bridge lemma with
+    `empty`. -/
+def emptyWithCapacity (n : Nat) : TokenArray :=
+  ⟨ByteArray.emptyWithCapacity (4 * n), by
+    show (ByteArray.emptyWithCapacity (4 * n)).size % 4 = 0
+    rfl⟩
+
 /-- Number of tokens (four bytes each). -/
 def size (ta : TokenArray) : Nat := ta.bytes.size / 4
 
@@ -146,6 +162,14 @@ def toArray (ta : TokenArray) : Array UInt32 :=
 @[simp] theorem empty_toArray : empty.toArray = #[] := by
   apply Array.eq_empty_of_size_eq_zero
   simp only [toArray, Array.size_ofFn, size, empty, ByteArray.size_empty]
+
+/-- `emptyWithCapacity` views to the empty `Array UInt32` — pre-sizing is a
+    runtime allocation hint only, so it shares `empty`'s model.  Drops in for
+    `empty_toArray` wherever the matcher seeds with a pre-sized accumulator. -/
+@[simp] theorem emptyWithCapacity_toArray (n : Nat) : (emptyWithCapacity n).toArray = #[] := by
+  apply Array.eq_empty_of_size_eq_zero
+  have hsz : (ByteArray.emptyWithCapacity (4 * n)).size = 0 := rfl
+  simp only [toArray, Array.size_ofFn, size, emptyWithCapacity, hsz, Nat.zero_div]
 
 theorem size_toArray (ta : TokenArray) : ta.size = ta.toArray.size := by
   simp only [toArray, Array.size_ofFn]

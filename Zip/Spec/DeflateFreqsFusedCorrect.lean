@@ -263,8 +263,8 @@ theorem lz77ChainIterPMergedF_eq (data : ByteArray) (maxChain windowSize insertC
       (by rw [TokenArray.empty_toArray]; exact tokenFreqsP_nil_fst)
       (by rw [TokenArray.empty_toArray]; exact tokenFreqsP_nil_snd)
   · exact lz77GreedyMergedLoopF_spec data windowSize 65536 (min chainWinSize data.size) maxChain
-      insertCap niceLen _ 0 TokenArray.empty initLitFreqF initDistFreqF
-      (by rw [TokenArray.empty_toArray]; exact tokenFreqsP_nil_fst)
-      (by rw [TokenArray.empty_toArray]; exact tokenFreqsP_nil_snd)
+      insertCap niceLen _ 0 (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
+      (by rw [TokenArray.emptyWithCapacity_toArray]; exact tokenFreqsP_nil_fst)
+      (by rw [TokenArray.emptyWithCapacity_toArray]; exact tokenFreqsP_nil_snd)
 
 end Zip.Native.Deflate
