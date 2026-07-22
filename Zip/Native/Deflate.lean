@@ -1,6 +1,7 @@
 import Zip.Native.BitWriter
 import Zip.Native.Inflate
 import Zip.Native.Wide
+import Zip.Native.TokenArray
 import Std.Tactic.BVDecide
 
 /-!
@@ -1760,23 +1761,35 @@ def trailingP (data : ByteArray) (pos : Nat) (acc : Array UInt32) : Array UInt32
   else acc
 termination_by data.size - pos
 
+/-- `TokenArray` twin of `trailingP` (stage 2/7 of the token-stream unboxing):
+    pushes `packTok (.literal _)` for each remaining byte into a `TokenArray`
+    accumulator (4 B/token) instead of an `Array UInt32` (boxed 8 B/token). The
+    boxed `trailingP` stays the lazy tier's trailing loop until stage 3; this twin
+    serves the greedy matchers. Equal to `trailingP` under `.toArray`
+    (`trailingPT_toArray` in `Zip/Spec/LZ77PackedCorrect.lean`). -/
+def trailingPT (data : ByteArray) (pos : Nat) (acc : TokenArray) : TokenArray :=
+  if h : pos < data.size then
+    trailingPT data (pos + 1) (acc.push (packTok (.literal data[pos])))
+  else acc
+termination_by data.size - pos
+
 /-- Packed-token twin of `lz77ChainIter` (greedy hash-chain matcher):
     identical control flow and chain state, `Array UInt32` accumulator.
     Equal to `(lz77ChainIter ..).map packTok` (`lz77ChainIterP_eq`). -/
 def lz77ChainIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (niceLen : Nat := 258) :
-    Array UInt32 :=
+    TokenArray :=
   if data.size < 3 then
-    trailingP data 0 #[]
+    trailingPT data 0 TokenArray.empty
   else
     let hashSize := 65536
     mainLoop data windowSize hashSize maxChain insertCap niceLen
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0
-      (Array.emptyWithCapacity data.size)
+      TokenArray.empty
 where
   mainLoop (data : ByteArray) (windowSize hashSize maxChain insertCap niceLen : Nat)
-      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : Array UInt32) :
-      Array UInt32 :=
+      (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : TokenArray) :
+      TokenArray :=
     if hlt : pos + 2 < data.size then
       let h := lz77Greedy.hash3 data pos hashSize hlt
       let head := headProbeGuarded hashTable h
@@ -1801,7 +1814,7 @@ where
         mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + 1)
           (acc.push (packTok (.literal (data[pos]'(by omega)))))
     else
-      trailingP data pos acc
+      trailingPT data pos acc
   termination_by data.size - pos
   decreasing_by all_goals omega
 
@@ -2471,7 +2484,7 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
     `Zip/Spec/LZ77MergedCorrect.lean`). -/
 def lz77GreedyMergedLoop (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap niceLen : Nat)
-    (c : Array Nat) (pos : Nat) (acc : Array UInt32) : Array UInt32 :=
+    (c : Array Nat) (pos : Nat) (acc : TokenArray) : TokenArray :=
   if hlt : pos + 2 < data.size then
     let h := lz77Greedy.hash3 data pos hashSize hlt
     let head := headProbeGuarded c (prevSize + h)
@@ -2495,7 +2508,7 @@ def lz77GreedyMergedLoop (data : ByteArray)
       lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + 1)
         (acc.push (packTok (.literal (data[pos]'(by omega)))))
   else
-    trailingP data pos acc
+    trailingPT data pos acc
 termination_by data.size - pos
 decreasing_by all_goals omega
 
@@ -2504,15 +2517,15 @@ decreasing_by all_goals omega
     to `lz77ChainIterP` (`lz77ChainIterPMerged_eq`). -/
 def lz77ChainIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (niceLen : Nat := 258) :
-    Array UInt32 :=
+    TokenArray :=
   if data.size < 3 then
-    trailingP data 0 #[]
+    trailingPT data 0 TokenArray.empty
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
     lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen
       (.replicate (prevSize + hashSize) data.size) 0
-      (Array.emptyWithCapacity data.size)
+      TokenArray.empty
 
 /-- Emit LZ77 tokens as fixed Huffman codes into a BitWriter. -/
 def emitTokens (bw : BitWriter) (tokens : Array LZ77Token) (i : Nat) : BitWriter :=
