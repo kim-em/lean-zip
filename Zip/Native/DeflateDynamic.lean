@@ -1576,6 +1576,133 @@ def chooseSplitsHeuristicP (toks : TokenArray) (totalBytes : Nat)
     0 0 0 0 0 0 0 0 0 0 0
     0 totalBytes #[]).toList
 
+/-- `Array UInt32` reference walker for `chooseSplitsHeuristicP.go`: the exact
+    pre-`TokenArray` body, reading each packed word from an `Array UInt32` slot
+    (`toks[i]`) instead of the 4-byte `TokenArray` container (`toks.get i h`).
+    Kept purely as a proof reference — the split heuristic is control flow (it
+    picks block cut points), so `inflate_deflateRaw` (which proves any *valid*
+    output decodes, not that the output is *unchanged*) gives no cover here; the
+    refinement `chooseSplitsHeuristicP.go_toArray` pins the packed walker's cut
+    list to this reference's, so the boundaries the packed dispatch feeds the
+    emitter are byte-for-byte the ones the `Array UInt32` implementation chose. -/
+def chooseSplitsHeuristicPArray.go (toks : Array UInt32)
+    (minBlockBytes softMaxBlockBytes checkTokens : Nat) (i : Nat)
+    (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : Nat)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : Nat)
+    (blockBytes remaining : Nat) (cuts : Array Nat) : Array Nat :=
+  if h : i < toks.size then
+    let t := toks[i]
+    let c := splitTokenClassP t
+    let tb := splitTokenBytesP t
+    let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
+      match c with
+      | 0 => (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
+      | 1 => (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
+      | 2 => (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
+      | 3 => (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
+      | 4 => (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
+      | 5 => (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
+      | 6 => (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
+      | 7 => (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
+      | 8 => (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
+      | _ => (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+    let newTot := newTot + 1
+    let blockBytes := blockBytes + tb
+    let remaining := remaining - tb
+    if blockBytes ≥ minBlockBytes && remaining ≥ minBlockBytes then
+      let cut :=
+        blockBytes ≥ softMaxBlockBytes ||
+        (newTot ≥ checkTokens && oldTot > 0 &&
+          splitEndBlockCheck #[o0, o1, o2, o3, o4, o5, o6, o7, o8, o9] oldTot
+            #[n0, n1, n2, n3, n4, n5, n6, n7, n8, n9] newTot blockBytes)
+      if cut then
+        chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+          0 0 0 0 0 0 0 0 0 0 0
+          0 0 0 0 0 0 0 0 0 0 0
+          0 remaining (cuts.push (i + 1))
+      else if newTot ≥ checkTokens then
+        chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+          (o0 + n0) (o1 + n1) (o2 + n2) (o3 + n3) (o4 + n4) (o5 + n5) (o6 + n6) (o7 + n7)
+          (o8 + n8) (o9 + n9) (oldTot + newTot)
+          0 0 0 0 0 0 0 0 0 0 0
+          blockBytes remaining cuts
+      else
+        chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+          o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+          n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot
+          blockBytes remaining cuts
+    else
+      chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+        o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+        n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot
+        blockBytes remaining cuts
+  else cuts
+termination_by toks.size - i
+decreasing_by all_goals omega
+
+/-- Entry point for the `Array UInt32` reference walker (pre-`TokenArray` body). -/
+def chooseSplitsHeuristicPArray (toks : Array UInt32) (totalBytes : Nat)
+    (minBlockBytes : Nat := splitMinBlockBytes)
+    (softMaxBlockBytes : Nat := splitSoftMaxBlockBytes)
+    (checkTokens : Nat := splitCheckTokens) : List Nat :=
+  (chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens 0
+    0 0 0 0 0 0 0 0 0 0 0
+    0 0 0 0 0 0 0 0 0 0 0
+    0 totalBytes #[]).toList
+
+/-- **Split-walker refinement (byte-identity of the cut points).** The packed
+    `TokenArray` walk equals the `Array UInt32` reference walk over the `.toArray`
+    view, at every index and every scalar accumulator state threaded through the
+    recursion: identical control flow, each `toks.get i h` read bridged to the
+    boxed slot by `TokenArray.get_toArray` and each bound by `size_toArray`. The
+    whole per-token scalar/branch logic (`splitTokenClassP`/`splitTokenBytesP`,
+    the ten-counter window merge, the cut test) is then literally the same term
+    on both sides, so a divergence would break this equation. -/
+theorem chooseSplitsHeuristicP.go_toArray (toks : TokenArray)
+    (minBlockBytes softMaxBlockBytes checkTokens : Nat) :
+    ∀ (fuel i : Nat), toks.size - i < fuel →
+      ∀ (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : Nat)
+        (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : Nat)
+        (blockBytes remaining : Nat) (cuts : Array Nat),
+        chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens i
+            o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+            n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes remaining cuts
+          = chooseSplitsHeuristicPArray.go toks.toArray minBlockBytes softMaxBlockBytes checkTokens i
+            o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+            n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes remaining cuts := by
+  intro fuel
+  induction fuel with
+  | zero => intro i hf; omega
+  | succ fuel ih =>
+    intro i hf o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+      n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes remaining cuts
+    unfold chooseSplitsHeuristicP.go chooseSplitsHeuristicPArray.go
+    by_cases hi : i < toks.size
+    · have hi' : i < toks.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
+      -- Every recursive call in the body steps `i → i + 1`; as functions of the
+      -- remaining scalar state the two walkers agree there by the fuel IH, so a
+      -- single `funext` + `rw` collapses both bodies to the identical term.
+      have hstep : chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+          = chooseSplitsHeuristicPArray.go toks.toArray minBlockBytes softMaxBlockBytes checkTokens (i + 1) := by
+        funext p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT qb qr qc
+        exact ih (i + 1) (by omega) p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT
+          q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT qb qr qc
+      rw [dif_pos hi, dif_pos hi', TokenArray.get_toArray toks i hi, hstep]
+    · have hi' : ¬ i < toks.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
+      rw [dif_neg hi, dif_neg hi']
+
+/-- **Entry-point cut-list equality.** The packed split heuristic returns exactly
+    the cut list the `Array UInt32` reference produces over the boxed view — the
+    control-flow decision (which token boundaries become block cuts) is proven
+    unchanged by the `TokenArray` retype, not merely corpus-tested. -/
+theorem chooseSplitsHeuristicP_toArray (toks : TokenArray) (totalBytes : Nat)
+    (minBlockBytes softMaxBlockBytes checkTokens : Nat) :
+    chooseSplitsHeuristicP toks totalBytes minBlockBytes softMaxBlockBytes checkTokens
+      = chooseSplitsHeuristicPArray toks.toArray totalBytes minBlockBytes softMaxBlockBytes checkTokens := by
+  unfold chooseSplitsHeuristicP chooseSplitsHeuristicPArray
+  rw [chooseSplitsHeuristicP.go_toArray toks minBlockBytes softMaxBlockBytes checkTokens
+    (toks.size + 1) 0 (by omega)]
+
 /-- Packed twin of `emitDynBlock`: one dynamic Huffman block from a packed
     token group onto a running writer, with `emitTokensWithCodesP` in place of
     `emitTokensWithCodes`. Equal to `emitDynBlock` over the boxed view
@@ -1680,6 +1807,66 @@ decreasing_by
   rename_i h
   simp only [Nat.not_le] at h
   omega
+
+/-- `Array UInt32` reference walker for `sharedPartitionSizedP`: the exact
+    pre-`TokenArray` body, taking each block's frequencies from
+    `tokenFreqsP (toks.extract pos j)` over an `Array UInt32` slice instead of the
+    packed `tokenFreqsPTA (toks.extract pos j)`. Kept purely as a proof reference:
+    component 1 is the exact unflushed bit size that arbitrates the shared-window
+    split candidate at levels 5–10, so `sharedPartitionSizedP_toArray` pins that
+    size (and the per-block trees) to the `Array UInt32` implementation's. -/
+def sharedPartitionSizedPArray (toks : Array UInt32) (cuts : List Nat) (pos : Nat) :
+    Nat × List SizedTrees :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let f := tokenFreqsP (toks.extract pos j)
+  let t := sizedTrees f.1 f.2
+  let blockBits := 3 + (writeDynamicHeader BitWriter.empty t.val.1 t.val.2).bitLength
+    + symbolBitCount f.1 f.2 t.val.1.toArray t.val.2.toArray
+  if j ≥ toks.size then (blockBits, [t])
+  else
+    let rest := sharedPartitionSizedPArray toks cuts.tail j
+    (blockBits + rest.1, t :: rest.2)
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
+/-- Fuel form of `sharedPartitionSizedP_toArray`. -/
+private theorem sharedPartitionSizedP_toArray_fuel (toks : TokenArray) :
+    ∀ (fuel pos : Nat), toks.size - pos < fuel → ∀ (cuts : List Nat),
+      sharedPartitionSizedP toks cuts pos = sharedPartitionSizedPArray toks.toArray cuts pos := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos hf; omega
+  | succ fuel ih =>
+    intro pos hf cuts
+    unfold sharedPartitionSizedP sharedPartitionSizedPArray
+    simp only [tokenFreqsPTA_toArray, TokenArray.extract_toArray, TokenArray.size_toArray]
+    by_cases hend : min (max (cuts.headD toks.toArray.size) (pos + 1)) toks.toArray.size
+        ≥ toks.toArray.size
+    · rw [if_pos hend, if_pos hend]
+    · rw [if_neg hend, if_neg hend,
+        ih (min (max (cuts.headD toks.toArray.size) (pos + 1)) toks.toArray.size) (by
+          simp only [TokenArray.size_toArray] at hf ⊢; omega) cuts.tail]
+
+/-- **Sizing-walker refinement (byte-identity of the split size).** The packed
+    `sharedPartitionSizedP` equals the `Array UInt32` reference over the `.toArray`
+    view — component 1 (the exact bit size that selects the winning split
+    candidate at levels 5–10) *and* component 2 (the per-block sized trees) — so
+    the size decisions are proven identical to the pre-`TokenArray` implementation,
+    not merely corpus-tested. Each block's `tokenFreqsPTA (toks.extract …)` read is
+    bridged to `tokenFreqsP (toks.toArray.extract …)` by `tokenFreqsPTA_toArray`
+    and `TokenArray.extract_toArray`; the recursion is otherwise identical. -/
+theorem sharedPartitionSizedP_toArray (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
+    sharedPartitionSizedP toks cuts pos = sharedPartitionSizedPArray toks.toArray cuts pos :=
+  sharedPartitionSizedP_toArray_fuel toks (toks.size - pos + 1) pos (by omega) cuts
+
+/-- The split-size scalar (`.1`) the levels-5–10 arbitration compares is exactly
+    the `Array UInt32` reference's. -/
+theorem sharedPartitionSizedP_fst_toArray (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
+    (sharedPartitionSizedP toks cuts pos).1 = (sharedPartitionSizedPArray toks.toArray cuts pos).1 := by
+  rw [sharedPartitionSizedP_toArray]
 
 /-- Fused twin of `sharedPartitionSizedP` (#2772): one pass over the clamped
     partition yields the same `(bits, per-block trees)` **and** the whole-stream
@@ -1885,6 +2072,40 @@ def deflateRawBasePPrep (data : ByteArray) (ptokens : TokenArray) : Nat × (Unit
 /-- The prep's emit thunk is exactly `deflateRawBaseP` (same shared plan). -/
 theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : TokenArray) :
     (deflateRawBasePPrep data ptokens).2 () = deflateRawBaseP data ptokens := rfl
+
+/-- `Array UInt32` reference for the *size* (`.1`) of `deflateRawBasePPrep`: the
+    exact stored / fixed / dynamic winner size the base candidate compares against
+    the split candidate at levels 5–10, computed from `tokenFreqsP ptokens` over an
+    `Array UInt32` slot instead of the packed `tokenFreqsPTA ptokens`. Kept as a
+    proof reference so `deflateRawBasePPrep_fst_toArray` pins that winner size to
+    the pre-`TokenArray` implementation's. (Only the size is reconstructed here:
+    the emit thunk `.2` consumes the packed `ptokens` directly and stays on the
+    `TokenArray` fast path, its byte-identity carried by `deflateRawBasePPrep_emit`
+    plus the packed-emitter equalities.) -/
+def deflateRawBasePPrepSizeArray (data : ByteArray) (ptokens : Array UInt32) : Nat :=
+  let f := tokenFreqsP ptokens
+  let lens := dynamicCodeLengths f.1 f.2
+  let plan := dynHeaderCodes lens.1 lens.2
+  have hcl : plan.clCodes.size ≥ 19 :=
+    Nat.le_of_eq (dynHeaderCodes_clCodes_size lens.1 lens.2).symm
+  let fixedBytes := fixedBlockBytes f.1 f.2
+  let dynBytes := dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
+  let storedBytes := storedBlockBytes data
+  if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then storedBytes
+  else if fixedBytes < dynBytes then fixedBytes else dynBytes
+
+/-- **Base-prep size refinement (byte-identity of the base-candidate size).** The
+    scalar `.1` that arbitrates the base candidate at levels 5–10 equals the
+    `Array UInt32` reference's over the `.toArray` view: the whole-stream
+    `tokenFreqsPTA ptokens` read is bridged to `tokenFreqsP ptokens.toArray` by
+    `tokenFreqsPTA_toArray`, and every downstream sizing function is already the
+    pure `Array`/`Nat` implementation, so the winner size is proven identical to
+    the pre-`TokenArray` code — not merely corpus-tested. (Composed with
+    `deflateRawBasePPrepF_tokenFreqsP`, the frequency-taking prep's size is pinned
+    too, since at `tokenFreqsPTA ptokens` it is definitionally `deflateRawBasePPrep`.) -/
+theorem deflateRawBasePPrep_fst_toArray (data : ByteArray) (ptokens : TokenArray) :
+    (deflateRawBasePPrep data ptokens).1 = deflateRawBasePPrepSizeArray data ptokens.toArray := by
+  simp only [deflateRawBasePPrep, deflateRawBasePPrepSizeArray, tokenFreqsPTA_toArray]
 
 /-- `deflateRawBasePPrep` with the whole-stream frequencies supplied as a
     parameter instead of recomputed via `tokenFreqsP ptokens` (#2772). When the
