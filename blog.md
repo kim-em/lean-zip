@@ -47,11 +47,11 @@ For completeness, here's the Pareto frontier graph showing a number of other DEF
 
 ![Pareto frontier: lean-zip against zlib, miniz_oxide, libdeflate, Go, JS, Zig, and OCaml](bench/graphs/silesia_compress_pareto.svg)
 
-`lean-zip` is certainly not the best here: `libdeflate` unsuprisingly blows it out of the water (unsuprisingly because this is a very carefully tuned implementation using SIMD, that we can't touch in Lean). But ... we're competitive with or simply better than every other library out there. (We completely dominate the OCaml and Javascript implementations, lose at lower levels but win at high levels against Go, Rust, Zig, and the reference `zlib` imlementation in C, and are dominated by `libdeflate`).
+`lean-zip` is certainly not the best here: `libdeflate` unsurprisingly blows it out of the water (unsurprisingly because this is a very carefully tuned implementation using SIMD, that we can't touch in Lean). But ... we're competitive with or simply better than every other library out there. (We completely dominate the OCaml and Javascript implementations, lose at lower levels but win at high levels against Go, Rust, Zig, and the reference `zlib` implementation in C, and are dominated by `libdeflate`).
 
 Obviously I'm not really claiming that "Lean is faster than Rust". It's much easier to sit down and produce a performant implementation in Rust than it is in Lean!
 This experiment merely shows that:
 * It is possible, with lots of effort tuning, to get basic algorithms written in Lean competitive with implementations in "fast" languages.
-* That effort is happily and suprisingly delegatable to AIs, when you can write theorems characterising the algorithm, allow aggressive optimization without human review.
+* That effort is happily and surprisingly delegatable to AIs, when you can write theorems characterising the algorithm, allow aggressive optimization without human review.
 
 Still, food for thought.
