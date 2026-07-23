@@ -19,9 +19,17 @@ Outputs (all under bench/graphs/):
                                             sibling pareto_history_player.html
                                             template; regenerable, untracked.
 
+`--only KEYS` restricts the fixed reference curves to a subset (native, the
+animated subject, is always kept) and `--stem-suffix` writes it to a distinct
+file: `--only miniz_oxide --stem-suffix _vs_rust` produces the Lean-vs-Rust cut
+(`<corpus>_compress_pareto_history_vs_rust.svg`) embedded in blog.md. bench/run.sh
+regenerates both the full-field animation and that cut on every dashboard refresh,
+and CI's animation-sync check diffs both.
+
 Run inside the project shell (matplotlib comes from shell.nix, same as
 plot.py):
-    bench/pareto_history.py [--corpus silesia] [--video] [--html]
+    bench/pareto_history.py [--corpus silesia] [--only KEYS] [--stem-suffix S]
+                            [--video] [--html]
 
 Frame hygiene — two filters run over the raw history (reported to stderr):
 - spike: drop a frame whose ratios revert to an already-seen state while
@@ -32,6 +40,9 @@ Frame hygiene — two filters run over the raw history (reported to stderr):
   throughput moved < LOGSPEED_EPS in log10 (~8%) vs the last kept frame —
   within median-of-5 snapshot jitter, typically decode-only work. The first
   and last frames and any level-set change are always kept.
+- deny: drop any commit listed in DENY_COMMITS — a hand-curated escape hatch
+  for a snapshot wobble that lands just over the noise threshold and reads as
+  the frontier stepping backwards (see the constant for the current entries).
 
 Aggregation is identical to plot.py's pareto_scatter (geomean ratio and
 geomean compress MB/s per level over the corpus files), and the connectors
@@ -61,6 +72,20 @@ RATIO_EPS = 5e-4
 LOGSPEED_EPS = 0.035
 SPIKE_JUMP = 4e-3
 SPIKE_MATCH = 1e-3
+
+# Hand-curated frame exclusions (matched on the commit's short SHA prefix).
+# The spike/noise filters are heuristics; a decode-only refresh whose compress
+# throughput wobbles within snapshot jitter can still land just over the noise
+# threshold and read as the native frontier stepping *backwards*, which it never
+# actually did. List such commits here with the reason — they drop from every
+# animation (full-field and the Lean-vs-Rust cut).
+DENY_COMMITS = {
+    # decode-only change; compress geomean dipped 30.6→29.2 MB/s (all levels
+    # ~2-3%, a median-of-5 snapshot wobble) then recovered next frame. Its
+    # _dspeed is 0.0352, a hair over LOGSPEED_EPS (0.035), so drop_noise keeps
+    # it — but a decoder edit cannot move compress speed, so it is pure jitter.
+    "9e62f214",  # perf(decode): subtables for 12-15-bit codes (#2819)
+}
 
 # animation timeline
 FRAME_SECONDS = 0.4     # per dashboard refresh
@@ -154,13 +179,17 @@ def drop_noise(frames):
     return out
 
 
-def extract(corpus, include_worktree=False):
+def extract(corpus, include_worktree=False, only=None):
     """-> (references, frames, meta): fixed reference curves from the current
     latest.json (+ frozen zopfli ceiling), one filtered frame per committed
     dashboard refresh. When include_worktree is set, an uncommitted refresh that
     differs from HEAD is appended as a final 'worktree' frame — that path is for
     local --preview only; the committed SVG is built from committed frames so
-    CI's clean checkout can reproduce it (see latest_json_dirty)."""
+    CI's clean checkout can reproduce it (see latest_json_dirty).
+
+    `only`, if given, is a set of reference compressor keys to keep (native, the
+    animated subject, is always kept regardless) — e.g. `{"miniz_oxide"}` for the
+    Lean-vs-Rust cut used in the blog. `None` keeps every reference curve."""
     now = json.load(open(REPO / "bench/results/latest.json"))
     results_now = now["results"]
     ceiling_path = REPO / "bench/results/zopfli-ceiling.json"
@@ -173,6 +202,8 @@ def extract(corpus, include_worktree=False):
     for key, label, colour, marker in plot.COMPRESSORS:
         if key == "native":
             continue
+        if only is not None and key not in only:
+            continue
         pts = plot._level_points(results_now, corpus, key, "compress_mbps")
         if pts:
             references.append(dict(key=key, label=label, colour=colour,
@@ -184,6 +215,9 @@ def extract(corpus, include_worktree=False):
               "--", "bench/results/latest.json")
     for line in log.strip().splitlines():
         sha, cdate, subject = line.split("\x1f")
+        if any(sha.startswith(deny) for deny in DENY_COMMITS):
+            print(f"deny: drop {sha[:8]} ({subject[:60]})", file=sys.stderr)
+            continue
         try:
             d = json.loads(git("show", f"{sha}:bench/results/latest.json"))
         except Exception:
@@ -240,7 +274,7 @@ def provenance_of(meta):
 # self-playing SMIL SVG (no JavaScript; animates in a GitHub README <img>)
 
 SVG_W, SVG_H = 940, 660
-SVG_ML, SVG_MR, SVG_MT, SVG_MB = 62, 14, 64, 62
+SVG_ML, SVG_MR, SVG_MT, SVG_MB = 72, 18, 70, 72
 
 
 def build_svg(references, frames, meta, outfile):
@@ -327,35 +361,35 @@ def build_svg(references, frames, meta, outfile):
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {SVG_W} {SVG_H}" '
                f'font-family="Helvetica, Arial, sans-serif">')
     out.append(f'<rect width="{SVG_W}" height="{SVG_H}" fill="#ffffff"/>')
-    out.append(f'<text x="{SVG_W/2:.0f}" y="24" text-anchor="middle" font-size="15" '
+    out.append(f'<text x="{SVG_W/2:.0f}" y="28" text-anchor="middle" font-size="19" '
                f'font-weight="bold" fill="#222222">{escape(title_of(meta))}</text>')
 
     mono = 'font-family="Menlo, Consolas, monospace"'
-    grid = ['<g stroke="#d9d9d9" stroke-width="0.7">']
-    labels = [f'<g font-size="11" fill="#555555" {mono}>']
+    grid = ['<g stroke="#d9d9d9" stroke-width="0.9">']
+    labels = [f'<g font-size="13.5" fill="#555555" {mono}>']
     for v in (0.5, 1, 2, 5, 10, 20, 50, 100, 200):
         y = sy(v)
         grid.append(f'<line x1="{SVG_ML}" x2="{SVG_W-SVG_MR}" y1="{y:.1f}" y2="{y:.1f}"/>')
-        labels.append(f'<text x="{SVG_ML-8}" y="{y+3.5:.1f}" text-anchor="end">'
+        labels.append(f'<text x="{SVG_ML-9}" y="{y+4.5:.1f}" text-anchor="end">'
                       f'{v if v >= 1 else "0.5"}</text>')
     r = 0.30
     while r <= XLIM[1] + 1e-9:
         x = sx(r)
         grid.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{SVG_MT}" y2="{SVG_H-SVG_MB}"/>')
-        labels.append(f'<text x="{x:.1f}" y="{SVG_H-SVG_MB+18}" text-anchor="middle">{r:.2f}</text>')
+        labels.append(f'<text x="{x:.1f}" y="{SVG_H-SVG_MB+22}" text-anchor="middle">{r:.2f}</text>')
         r += 0.02
     grid.append("</g>")
     labels.append("</g>")
     out += grid + labels
     out.append(f'<rect x="{SVG_ML}" y="{SVG_MT}" width="{SVG_W-SVG_ML-SVG_MR}" '
                f'height="{SVG_H-SVG_MT-SVG_MB}" fill="none" stroke="#cccccc"/>')
-    out.append(f'<text x="{(SVG_ML+SVG_W-SVG_MR)/2:.0f}" y="{SVG_H-22}" text-anchor="middle" '
-               f'font-size="12.5" fill="#222222">compression ratio   '
+    out.append(f'<text x="{(SVG_ML+SVG_W-SVG_MR)/2:.0f}" y="{SVG_H-24}" text-anchor="middle" '
+               f'font-size="15.5" fill="#222222">compression ratio   '
                f'(compressed / original  —  ← smaller is better)</text>')
-    out.append(f'<text transform="translate(16 {(SVG_MT+SVG_H-SVG_MB)/2:.0f}) rotate(-90)" '
-               f'text-anchor="middle" font-size="12.5" fill="#222222">'
+    out.append(f'<text transform="translate(20 {(SVG_MT+SVG_H-SVG_MB)/2:.0f}) rotate(-90)" '
+               f'text-anchor="middle" font-size="15.5" fill="#222222">'
                f'compression speed   (MB/s, log)</text>')
-    out.append(f'<text x="{SVG_ML+10}" y="{SVG_MT+20}" font-size="13" fill="#2a8a3a" '
+    out.append(f'<text x="{SVG_ML+12}" y="{SVG_MT+24}" font-size="16" fill="#2a8a3a" '
                f'font-weight="bold">↖ fast &amp; small = best</text>')
 
     # fixed reference curves
@@ -363,14 +397,14 @@ def build_svg(references, frames, meta, outfile):
         pts = ref["points"]
         for a, b in zip(pts, pts[1:]):
             out.append(f'<path d="{mix_d(a[1], a[2], b[1], b[2])}" fill="none" '
-                       f'stroke="{ref["colour"]}" stroke-width="1.3" opacity="0.9"/>')
+                       f'stroke="{ref["colour"]}" stroke-width="1.9" opacity="0.9"/>')
         for _lvl, rr, vv in pts:
             x, y = sx(rr), sy(vv)
-            d = marker_d(ref["marker"], x, y, 4.4)
-            shape = (f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.4"' if d is None
+            d = marker_d(ref["marker"], x, y, 6.2)
+            shape = (f'<circle cx="{x:.1f}" cy="{y:.1f}" r="6.2"' if d is None
                      else f'<path d="{d}"')
             out.append(f'{shape} fill="none" stroke="{ref["colour"]}" '
-                       f'stroke-width="1.4" opacity="0.95"/>')
+                       f'stroke-width="1.9" opacity="0.95"/>')
 
     # trails: full per-level path, revealed by animated stroke-dashoffset.
     # The path visits only the frames where the level is present, so a level
@@ -394,7 +428,7 @@ def build_svg(references, frames, meta, outfile):
                 k += 1
             reveal.append(seg[k] if samples[0][0] <= i else 0.0)
         out.append(f'<path d="{d}" fill="none" stroke="{NATIVE_COLOUR}" '
-                   f'stroke-width="0.9" opacity="0.15" '
+                   f'stroke-width="1.3" opacity="0.15" '
                    f'stroke-dasharray="{total:.1f} {total:.1f}" '
                    f'stroke-dashoffset="{total:.1f}">')
         out.append(anim("stroke-dashoffset", [f"{total - rv:.1f}" for rv in reveal]))
@@ -406,7 +440,7 @@ def build_svg(references, frames, meta, outfile):
         ds = [mix_d(ha[i][0], ha[i][1], hb[i][0], hb[i][1]) for i in range(N)]
         op = [f"{1 if alive(i) else 0}" for i in range(N)]
         out.append(f'<path d="{ds[0]}" fill="none" stroke="{NATIVE_COLOUR}" '
-                   f'stroke-width="2" opacity="{op[0]}">')
+                   f'stroke-width="3.2" opacity="{op[0]}">')
         out.append(anim("d", ds))
         out.append(anim("opacity", op))
         out.append("</path>")
@@ -435,7 +469,7 @@ def build_svg(references, frames, meta, outfile):
         cxs = [f"{sx(r):.1f}" for r, _ in h]
         cys = [f"{sy(v):.1f}" for _, v in h]
         op = [f"{1 if pos[lvl][i] else 0}" for i in range(N)]
-        out.append(f'<circle cx="{cxs[0]}" cy="{cys[0]}" r="4.8" '
+        out.append(f'<circle cx="{cxs[0]}" cy="{cys[0]}" r="6.6" '
                    f'fill="{NATIVE_COLOUR}" opacity="{op[0]}">')
         out.append(anim("cx", cxs))
         out.append(anim("cy", cys))
@@ -447,10 +481,10 @@ def build_svg(references, frames, meta, outfile):
     # present (which changes when a new deepest level ships)
     def tag(lvl, visible):
         h = held(lvl)
-        xs = [f"{sx(r)+6:.1f}" for r, _ in h]
-        ys = [f"{sy(v)-6:.1f}" for _, v in h]
+        xs = [f"{sx(r)+8:.1f}" for r, _ in h]
+        ys = [f"{sy(v)-8:.1f}" for _, v in h]
         op = [f"{1 if visible(i) else 0}" for i in range(N)]
-        out.append(f'<text x="{xs[0]}" y="{ys[0]}" font-size="11" font-weight="bold" '
+        out.append(f'<text x="{xs[0]}" y="{ys[0]}" font-size="14.5" font-weight="bold" '
                    f'fill="{NATIVE_COLOUR}" {mono} opacity="{op[0]}">L{lvl}')
         out.append(anim("x", xs))
         out.append(anim("y", ys))
@@ -465,7 +499,7 @@ def build_svg(references, frames, meta, outfile):
 
     # commit ticker (discrete visibility per data frame), left-anchored so the
     # varying line width doesn't wobble
-    out.append(f'<g font-size="11" fill="#333333" {mono}>')
+    out.append(f'<g font-size="13.5" fill="#333333" {mono}>')
     for i, f in enumerate(frames):
         subj = f["subject"]
         if len(subj) > 72:
@@ -475,7 +509,7 @@ def build_svg(references, frames, meta, outfile):
         s0 = starts[i] / T
         s1 = starts[i + 1] / T if i + 1 < N else None
         if N == 1:                      # single frame: static ticker, no animation
-            out.append(f'<text x="{SVG_ML}" y="46">{txt}</text>')
+            out.append(f'<text x="{SVG_ML}" y="52">{txt}</text>')
             continue
         if i == 0:
             vals, keys = "1;0", f"0;{s1:.5f}"
@@ -483,7 +517,7 @@ def build_svg(references, frames, meta, outfile):
             vals, keys = "0;1", f"0;{s0:.5f}"
         else:
             vals, keys = "0;1;0", f"0;{s0:.5f};{s1:.5f}"
-        out.append(f'<text x="{SVG_ML}" y="46" opacity="0">{txt}'
+        out.append(f'<text x="{SVG_ML}" y="52" opacity="0">{txt}'
                    f'<animate attributeName="opacity" values="{vals}" keyTimes="{keys}" '
                    f'calcMode="discrete" dur="{T}s" repeatCount="indefinite"/></text>')
     out.append("</g>")
@@ -492,24 +526,28 @@ def build_svg(references, frames, meta, outfile):
     entries = [("lean-zip (native)", NATIVE_COLOUR, "o", True)] + \
               [(r["label"], r["colour"], r["marker"], False) for r in references]
     rows = (len(entries) + 1) // 2
-    lx, ly, rowh, colw = SVG_W - SVG_MR - 330, SVG_H - SVG_MB - 88, 16, 165
-    out.append(f'<rect x="{lx-10}" y="{ly-14}" width="330" height="{rowh*rows+10}" '
+    boxw, rowh, colw = 392, 21, 192
+    # anchor the box just inside the bottom-right corner and grow it UPWARD, so a
+    # taller legend (more rows / bigger type) can never spill past the plot floor
+    lx = SVG_W - SVG_MR - boxw
+    ly = SVG_H - SVG_MB - rowh * rows
+    out.append(f'<rect x="{lx-10}" y="{ly-16}" width="{boxw}" height="{rowh*rows+12}" '
                f'fill="#ffffff" opacity="0.85" stroke="#cccccc"/>')
-    out.append('<g font-size="10.5" fill="#333333">')
+    out.append('<g font-size="13" fill="#333333">')
     for j, (label, colour, marker, filled) in enumerate(entries):
         x = lx + (j // rows) * colw
         y = ly + (j % rows) * rowh
-        d = marker_d(marker, x, y - 3.5, 4.2)
-        shape = (f'<circle cx="{x}" cy="{y-3.5}" r="4.2"' if d is None
+        d = marker_d(marker, x, y - 4.5, 5.6)
+        shape = (f'<circle cx="{x}" cy="{y-4.5}" r="5.6"' if d is None
                  else f'<path d="{d}"')
         out.append(f'{shape} fill="{colour if filled else "none"}" '
-                   f'stroke="{colour}" stroke-width="1.3"/>')
-        out.append(f'<text x="{x+10}" y="{y}" '
+                   f'stroke="{colour}" stroke-width="1.6"/>')
+        out.append(f'<text x="{x+13}" y="{y}" '
                    f'font-weight="{"bold" if filled else "normal"}">{escape(label)}</text>')
     out.append("</g>")
 
-    out.append(f'<text x="{SVG_W/2:.0f}" y="{SVG_H-6}" text-anchor="middle" '
-               f'font-size="7.5" fill="#777777">{escape(provenance_of(meta))}</text>')
+    out.append(f'<text x="{SVG_W/2:.0f}" y="{SVG_H-7}" text-anchor="middle" '
+               f'font-size="9.5" fill="#777777">{escape(provenance_of(meta))}</text>')
     out.append("</svg>")
 
     outfile.write_text("\n".join(out))
@@ -662,6 +700,15 @@ def build_html(references, frames, meta, outfile):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--corpus", default="silesia")
+    ap.add_argument("--only",
+                    help="comma-separated reference compressor keys to keep "
+                         "(native, the animated subject, is always kept); e.g. "
+                         "--only miniz_oxide for the Lean-vs-Rust cut. Combine "
+                         "with --stem-suffix to write a distinct file.")
+    ap.add_argument("--stem-suffix", default="",
+                    help="suffix appended to the output filename stem, e.g. "
+                         "_vs_rust — keeps a filtered cut from overwriting the "
+                         "full-field animation.")
     ap.add_argument("--video", action="store_true",
                     help="also render mp4 + GIF (matplotlib frames + ffmpeg)")
     ap.add_argument("--html", action="store_true",
@@ -674,7 +721,16 @@ def main():
 
     graphs = REPO / "bench/graphs"
     graphs.mkdir(parents=True, exist_ok=True)
-    stem = f"{args.corpus}_compress_pareto_history"
+    stem = f"{args.corpus}_compress_pareto_history{args.stem_suffix}"
+
+    only = None
+    if args.only:
+        keys = {k for k in dict((c[0], None) for c in plot.COMPRESSORS)}
+        only = {k.strip() for k in args.only.split(",") if k.strip()}
+        unknown = only - keys
+        if unknown:
+            sys.exit(f"--only: unknown compressor key(s) {sorted(unknown)}; "
+                     f"known keys are {sorted(keys)}")
 
     # --preview renders the working-tree state (uncommitted refresh frame and all)
     # to untracked <stem>_preview.* for local eyeballing; the default path renders
@@ -695,7 +751,8 @@ def main():
                 "a local, uncommitted preview instead.)")
 
     suffix = "_preview" if args.preview else ""
-    references, frames, meta = extract(args.corpus, include_worktree=args.preview)
+    references, frames, meta = extract(args.corpus, include_worktree=args.preview,
+                                       only=only)
     build_svg(references, frames, meta, graphs / f"{stem}{suffix}.svg")
     if args.video:
         build_video(references, frames, meta,

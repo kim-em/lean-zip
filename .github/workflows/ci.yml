@@ -111,13 +111,19 @@ jobs:
       - name: Install matplotlib
         run: pip install matplotlib
 
-      - name: Regenerate the animation from committed history
-        run: python3 bench/pareto_history.py
-
-      - name: Fail if the committed animation is stale
+      - name: Regenerate the animations from committed history
         run: |
-          if ! git diff --exit-code bench/graphs/silesia_compress_pareto_history.svg; then
-            echo "::error::bench/graphs/silesia_compress_pareto_history.svg is out of sync with bench/results/latest.json." \
-                 "Run 'python3 bench/pareto_history.py' (or bench/run.sh) and commit the result."
-            exit 1
-          fi
+          python3 bench/pareto_history.py
+          # The Lean-vs-Rust cut (blog.md) is regenerated from the same history.
+          python3 bench/pareto_history.py --only miniz_oxide --stem-suffix _vs_rust
+
+      - name: Fail if a committed animation is stale
+        run: |
+          for svg in bench/graphs/silesia_compress_pareto_history.svg \
+                     bench/graphs/silesia_compress_pareto_history_vs_rust.svg; do
+            if ! git diff --exit-code "$svg"; then
+              echo "::error::$svg is out of sync with bench/results/latest.json." \
+                   "Run 'bench/run.sh' (or the two 'python3 bench/pareto_history.py' commands) and commit the result."
+              exit 1
+            fi
+          done

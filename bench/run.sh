@@ -74,7 +74,8 @@ if [ "${1:-}" = "--native-only" ]; then
     && $PIN lake -d bench env bench/.lake/build/bin/bench-report --native-only $TMP ${2:-}"
   in_project_shell "python3 bench/merge_native.py $OUT $TMP $OUT \
     && python bench/plot.py $OUT bench/graphs \
-    && python bench/pareto_history.py"
+    && python bench/pareto_history.py \
+    && python bench/pareto_history.py --only miniz_oxide --stem-suffix _vs_rust"
   rm -f "$TMP"
   refresh_whole_tar
   echo "Native-only dashboard refresh done:"
@@ -132,9 +133,11 @@ refresh_whole_tar
 #    sibling decode_density.json and emits the decode-density chart too;
 #    pareto_history.py replays the git history of latest.json into the
 #    animated Pareto (the just-refreshed uncommitted data becomes its final
-#    frame — see bench/pareto_history.py).
+#    frame — see bench/pareto_history.py). It runs twice: the full-field
+#    animation, then the Lean-vs-Rust cut (--only miniz_oxide) used in blog.md.
 in_project_shell "python bench/plot.py $OUT bench/graphs \
-  && python bench/pareto_history.py"
+  && python bench/pareto_history.py \
+  && python bench/pareto_history.py --only miniz_oxide --stem-suffix _vs_rust"
 
 echo "Track D dashboard regenerated:"
 echo "  data   → $OUT  (+ decode_density.json, whole_tar_l6.json)"
