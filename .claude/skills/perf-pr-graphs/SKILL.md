@@ -300,6 +300,24 @@ artifacts move into `$W`.
      sides in the same worktree and carries a same-binary noise floor to expose
      exactly this artifact.
 
+   **Cross-worktree build caveat (this bites — read it).** A binary built in a
+   *separate* worktree (the `$W/before` merge-base build above) is **not
+   code-layout-comparable** to the AFTER binary built in your main worktree. Lean
+   `.o` files are deterministic, but the two worktrees embed different absolute
+   paths and can link objects into a different layout, which shifts i-cache
+   alignment of hot loops and produces a **uniform ~5–15% speed offset across ALL
+   levels** — a pure artifact, not the PR. The tell: the offset appears at levels
+   your PR does not touch (e.g. L1–8 for an L10-only change) and is roughly
+   constant, largest on the fast/bandwidth-bound levels. It survives interleaving
+   and shows ~1.00× same-binary drift, so it looks *real* — do not trust it. When
+   a stale baseline forces a merge-base rebuild, **build BOTH commits in the SAME
+   worktree** to isolate the source change: `git checkout <parent>` in the main
+   worktree, `lake build bench-report`, copy the binary aside; `git checkout` back
+   to the PR branch, rebuild, copy aside; then compare the two saved binaries.
+   Only a same-worktree pair is honest about whether L1–N moved. (If the two
+   binaries differ by a uniform offset at untouched levels, it is the worktree,
+   not your code — the untouched levels must overlay to within ~1%.)
+
    **Cross-session caveat.** BEFORE (recorded earlier) and AFTER (measured now)
    are different sessions, so a small single-digit-% speed delta can be
    cross-session / machine-load noise rather than the PR. Before reading a fine
