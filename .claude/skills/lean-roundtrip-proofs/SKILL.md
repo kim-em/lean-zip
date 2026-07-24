@@ -156,9 +156,9 @@ The top-level roundtrip composes per-level proofs: unfold the encoder, `split` o
 level/strategy, `exact` to each per-level theorem (passing size bounds via `by omega`).
 
 ```lean
-theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
+theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
     (hsize : data.size < maxSize) :
-    inflate (deflateRaw data level) = .ok data := by
+    inflateReference (deflateRaw data level) = .ok data := by
   unfold deflateRaw
   split
   · exact inflate_deflateStoredPure data (by omega)
@@ -168,6 +168,9 @@ theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
       · exact inflate_deflateLazy data hsize
       · exact inflate_deflateDynamic data (by omega)
 ```
+
+Transfer this reference-decoder theorem to the production decoder with
+`Inflate.inflate_ok_iff_reference`.
 
 ### Per-Level Roundtrip Structure
 
