@@ -37,7 +37,7 @@ What comes out of this process is astonishing.
 
 These graphs show the "Pareto frontier", describing the compression ratio vs throughput tradeoff for the `lean-zip` and `miniz_oxide` implementations. Like all zip implementations, both libraries have a tunable knob (the "level") that gives better compression in exchange for lower throughput. The way these graphs are set up, further left is better compression, further up is better throughput. The green line shows what you get as you sweep through the levels using `miniz_oxide`, compressing the `silesia corpus`. The animated red line shows what you get for `lean-zip`, over the course of the autonomous optimization process (using a combination of Claude and Codex agents).
 
-(Note these graphs are measuring the geometric mean of the compression ratios across the constituent files in `silesia.tar`, so it's a slightly different measurement than the our first one.)
+(Note these graphs are measuring the geometric mean of the compression ratios across the constituent files in `silesia.tar`, so it's a slightly different measurement than our first measurement.)
 
 We're not nearly as fast as `miniz_oxide`'s L1 (the least compression, fastest throughput setting). For `miniz_oxide`'s L2-L5, at the corresponding compression ratio we're a bit slower (worst is L4, 28% slower). But then for L6-L9, `miniz_oxide` is dominated: `lean-zip` is capable of compressing faster and better. The headline numbers in this post are taken from L6, the typical default for zip algorithms. At `miniz_oxide`'s L9 we're a full 58% faster.
 
@@ -49,7 +49,7 @@ For completeness, here's the Pareto frontier graph showing a number of other DEF
 
 ![Pareto frontier: lean-zip against zlib, miniz_oxide, libdeflate, Go, JS, Zig, and OCaml](bench/graphs/silesia_compress_pareto.svg)
 
-`lean-zip` is certainly not the best here: `libdeflate` unsurprisingly blows it out of the water (unsurprisingly because this is a very carefully tuned implementation using architecture-specifical SIMD, that we can't touch in Lean). But ... we're competitive with or simply better than every other library out there. (We completely dominate the OCaml and Javascript implementations, lose at lower levels but win at high levels against Go, Rust, Zig, and the reference `zlib` implementation in C, and are dominated by `libdeflate`).
+`lean-zip` is certainly not the best here: `libdeflate` unsurprisingly blows it out of the water (unsurprisingly because this is a very carefully tuned implementation using architecture-specific SIMD, that we can't touch in Lean). But ... we're competitive with or simply better than every other library out there. (We completely dominate the OCaml and JavaScript implementations, lose at lower levels but win at high levels against Go, Rust, Zig, and the reference `zlib` implementation in C, and are dominated by `libdeflate`).
 
 There are also some caveats that are worth thinking about:
 * The Lean implementation has higher memory consumption that the Rust implementation.
