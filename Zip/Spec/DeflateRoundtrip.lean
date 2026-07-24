@@ -602,13 +602,13 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
 
 /-- The encoder always produces exactly one valid raw-DEFLATE stream for its
     input, as judged by the independent formal bitstream specification. -/
-theorem deflateRaw_isValidStreamFor (data : ByteArray) (level : UInt8) :
+theorem isValidStreamFor_deflateRaw (data : ByteArray) (level : UInt8) :
     Deflate.Spec.IsValidStreamFor (deflateRaw data level) data :=
   deflateRaw_goR_pad data level
 
 /-- The encoder always produces a valid raw-DEFLATE stream. -/
-theorem deflateRaw_isValidStream (data : ByteArray) (level : UInt8) :
+theorem isValidStream_deflateRaw (data : ByteArray) (level : UInt8) :
     Deflate.Spec.IsValidStream (deflateRaw data level) :=
-  ⟨data, deflateRaw_isValidStreamFor data level⟩
+  ⟨data, isValidStreamFor_deflateRaw data level⟩
 
 end Zip.Native.Deflate

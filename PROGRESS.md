@@ -121,7 +121,7 @@ for the core DEFLATE roundtrip.
 - `inflate_deflateLazy` — Levels 2–4 (lazy LZ77)
 - `inflate_deflateDynamic` — Level 5+ (dynamic Huffman)
 
-**Capstone theorem** (DeflateRoundtrip.lean):
+**Capstone theorem** (DeflateRoundtripProduction.lean):
 ```lean
 theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
     (hsize : data.size < 1024 * 1024 * 1024) :

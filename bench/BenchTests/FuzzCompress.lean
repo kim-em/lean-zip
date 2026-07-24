@@ -10,14 +10,13 @@ across the whole level ladder × a diverse input-shape generator?
 ### What this is *not* for
 
 Native encode → native decode being the identity is already a **theorem**:
-`Deflate.inflate_deflateRaw` (`Zip/Spec/DeflateRoundtrip.lean`) proves
+`Deflate.inflate_deflateRaw` (`Zip/Spec/DeflateRoundtripProduction.lean`) proves
 `inflate (deflateRaw data level) = .ok data`, sorry-free, for *every*
 input and *every* level (its proof branches through level-0 stored, the
-L1/respread band, the #2638 L9-fast parse, and the level-10 crown), and it
-transfers to the production `inflate` via the `inflate ↔ inflateReference`
-equivalence. Totality likewise makes "native encode/decode never panics" a
-proof obligation, not a test one. So this driver does **not** exist to
-re-check the self-roundtrip — over the Lean model that is redundant.
+L1/respread band, the #2638 L9-fast parse, and the level-10 crown). Totality
+likewise makes "native encode/decode never panics" a proof obligation, not a
+test one. So this driver does **not** exist to re-check the self-roundtrip —
+over the Lean model that is redundant.
 
 ### What this *is* for
 

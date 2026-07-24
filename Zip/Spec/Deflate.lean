@@ -458,12 +458,28 @@ termination_by bits.length
 def DecodesTo (compressed output : ByteArray) : Prop :=
   decode (bytesToBits compressed) = some output.data.toList
 
+/-- Unfolding characterization of `DecodesTo`. -/
+theorem decodesTo_iff (compressed output : ByteArray) :
+    DecodesTo compressed output ↔
+      decode (bytesToBits compressed) = some output.data.toList :=
+  Iff.rfl
+
 /-- `compressed` is exactly one valid raw-DEFLATE stream for `output`, apart
-    from the fewer-than-eight unused padding bits allowed in its final byte. -/
+    from the fewer-than-eight unused padding bits allowed in its final byte.
+    The padding bits need not be zero. The `DeflateSuffix` module proves that
+    exact validity implies ordinary decoder acceptance. -/
 def IsValidStreamFor (compressed output : ByteArray) : Prop :=
   ∃ remaining,
     decode.goR (bytesToBits compressed) [] = some (output.data.toList, remaining) ∧
     remaining.length < 8
+
+/-- Unfolding characterization of `IsValidStreamFor`. -/
+theorem isValidStreamFor_iff (compressed output : ByteArray) :
+    IsValidStreamFor compressed output ↔
+      ∃ remaining,
+        decode.goR (bytesToBits compressed) [] = some (output.data.toList, remaining) ∧
+        remaining.length < 8 :=
+  Iff.rfl
 
 /-- `compressed` is exactly one valid raw-DEFLATE stream for some output. -/
 def IsValidStream (compressed : ByteArray) : Prop :=
