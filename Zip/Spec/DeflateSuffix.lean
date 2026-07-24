@@ -711,6 +711,13 @@ theorem decode_goR_fst (bits : List Bool) (acc : List UInt8)
                 · simp only [hblen, false_and] at hgoR
       | n + 3, hgoR => contradiction
 
+/-- Exact stream validity implies acceptance by the formal DEFLATE decoder. -/
+theorem IsValidStreamFor.decodesTo {compressed output : ByteArray}
+    (h : IsValidStreamFor compressed output) : DecodesTo compressed output := by
+  obtain ⟨remaining, hdecode, _⟩ := h
+  unfold DecodesTo decode
+  exact decode_goR_fst _ _ _ _ hdecode
+
 /-- If `decode.go` succeeds, `decode.goR` also succeeds with some remaining bits. -/
 theorem decode_goR_exists (bits : List Bool) (acc : List UInt8)
     (result : List UInt8) (h : decode.go bits acc = some result) :

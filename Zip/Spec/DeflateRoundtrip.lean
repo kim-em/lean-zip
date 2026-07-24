@@ -124,14 +124,20 @@ theorem inflate_deflateRawBase (data : ByteArray) (level : UInt8)
       (cEnc data level) (fun hz => cEmpty data level hz) (cRes data level) _ hsize
 
 set_option maxRecDepth 8000 in
-/-- Unified DEFLATE roundtrip: inflate ∘ deflateRaw = identity.
+/-- Unified DEFLATE roundtrip against the **reference** decoder:
+    `inflateReference ∘ deflateRaw = identity`.
     This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
     `maxOutputSize` large enough to hold the input. The incompressible pre-scan
     and the level-0 path both dispatch to `deflateStoredPure` directly; the
     cost-model stored fallback is covered by `deflateRawBase`; the level-5–8
     size-arbitrated split (`emitSmallerBy`, #2753) and level-9/10 optimal
-    candidates each emit one of concretely-roundtripping blocks. -/
-theorem inflate_deflateRaw (data : ByteArray) (level : UInt8)
+    candidates each emit one of concretely-roundtripping blocks.
+
+    The whole inductive proof is built on the reference decoder; the capstone
+    stated against the decoder we actually ship, `Inflate.inflate`, is
+    `inflate_deflateRaw` (`Zip/Spec/DeflateRoundtripProduction.lean`), a direct
+    corollary via the accept-set equality `inflate_ok_iff_reference`. -/
+theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
     Zip.Native.Inflate.inflateReference (deflateRaw data level) maxOutputSize = .ok data := by
   unfold deflateRaw
@@ -593,5 +599,16 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
         · -- levels 1–3: fused greedy base (`deflateRawBaseF_eq`)
           rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
           exact deflateRawBase_goR_pad data level
+
+/-- The encoder always produces exactly one valid raw-DEFLATE stream for its
+    input, as judged by the independent formal bitstream specification. -/
+theorem deflateRaw_isValidStreamFor (data : ByteArray) (level : UInt8) :
+    Deflate.Spec.IsValidStreamFor (deflateRaw data level) data :=
+  deflateRaw_goR_pad data level
+
+/-- The encoder always produces a valid raw-DEFLATE stream. -/
+theorem deflateRaw_isValidStream (data : ByteArray) (level : UInt8) :
+    Deflate.Spec.IsValidStream (deflateRaw data level) :=
+  ⟨data, deflateRaw_isValidStreamFor data level⟩
 
 end Zip.Native.Deflate

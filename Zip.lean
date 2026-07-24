@@ -62,6 +62,7 @@ import Zip.Spec.DeflateDynamicHeader
 import Zip.Spec.DeflateDynamicFreqs
 import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.DeflateRoundtrip
+import Zip.Spec.DeflateRoundtripProduction
 import Zip.Spec.LZ77PackedCorrect
 import Zip.Spec.BitReaderInvariant
 import Zip.Spec.InflateLoopBounds

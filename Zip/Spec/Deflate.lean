@@ -447,6 +447,28 @@ def decode.goR (bits : List Bool) (acc : List UInt8) :
   | _ => none
 termination_by bits.length
 
+/-! ## Public stream-validity predicates -/
+
+/-- The formal DEFLATE specification decodes `compressed` to `output`.
+
+    This is the acceptance relation used to state decoder correctness. Like a
+    normal raw-DEFLATE decoder, `decode` stops at the final block and permits
+    unused trailing bits or bytes. Use `IsValidStreamFor` when `compressed`
+    must contain exactly one stream, up to padding in its final byte. -/
+def DecodesTo (compressed output : ByteArray) : Prop :=
+  decode (bytesToBits compressed) = some output.data.toList
+
+/-- `compressed` is exactly one valid raw-DEFLATE stream for `output`, apart
+    from the fewer-than-eight unused padding bits allowed in its final byte. -/
+def IsValidStreamFor (compressed output : ByteArray) : Prop :=
+  ∃ remaining,
+    decode.goR (bytesToBits compressed) [] = some (output.data.toList, remaining) ∧
+    remaining.length < 8
+
+/-- `compressed` is exactly one valid raw-DEFLATE stream for some output. -/
+def IsValidStream (compressed : ByteArray) : Prop :=
+  ∃ output, IsValidStreamFor compressed output
+
 /-- `decode.go` always extends the accumulator: if it succeeds, the
     result is an extension of the initial accumulator. -/
 theorem decode_go_acc_prefix

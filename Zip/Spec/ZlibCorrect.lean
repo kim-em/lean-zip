@@ -149,7 +149,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
     ZlibDecode.decompressSingle (ZlibEncode.compress data level) maxOutputSize = .ok data := by
   -- DEFLATE roundtrip: inflate ∘ deflateRaw = id
   have hinfl : Inflate.inflateReference (Deflate.deflateRaw data level) maxOutputSize = .ok data :=
-    Deflate.inflate_deflateRaw data level _ hsize
+    Deflate.inflateReference_deflateRaw data level _ hsize
   -- Spec decode on deflated
   have hspec_go : Deflate.Spec.decode.go
       (Deflate.Spec.bytesToBits (Deflate.deflateRaw data level)) [] =
