@@ -1,6 +1,8 @@
 import Zip.Spec.EmitPackedCorrect
 import Zip.Spec.BitWriterCorrect
 import Zip.Spec.DeflateDynamicEmit
+import Zip.Spec.DeflateDynamicHeader
+import Zip.Spec.DeflateDynamicFreqs
 
 /-!
 # Correctness of flat-state packed token emission
@@ -624,5 +626,88 @@ theorem emitTokensWithCodesTAPTFlat_spec (bw : BitWriter) (tokens : TokenArray)
   dsimp only [emitTokensWithCodesTAPTFlat]
   exact emitTokensWithCodesTAPTFlatLoop_spec bw bw tokens litCodes distCodes
     hlitT hdistT i rfl hwf hwf hlit_le hdist_le
+
+/-- Appending the same bounded Huffman field and flushing erases the internal
+    byte-drain boundary difference between the flat and reference loops. -/
+private theorem emitTokensWithCodesTAPTFlat_eob_flush_eq (bw : BitWriter)
+    (tokens : TokenArray) (litCodes distCodes : Array (UInt16 × UInt8))
+    (hlitT : (packCodeTab litCodes).size ≥ 286)
+    (hdistT : (packCodeTab distCodes).size ≥ 30) (code : UInt16) (len : UInt8)
+    (hwf : bw.wf)
+    (hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15)
+    (hdist_le : ∀ j, j < distCodes.size → distCodes[j]!.2.toNat ≤ 15)
+    (hlen : len.toNat ≤ 15) :
+    ((emitTokensWithCodesTAPTFlat bw tokens
+        (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT 0).writeHuffCode
+      code len).flush =
+    ((emitTokensWithCodesTAPT bw tokens
+        (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT 0).writeHuffCode
+      code len).flush := by
+  let fw := emitTokensWithCodesTAPTFlat bw tokens
+    (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT 0
+  let rw := emitTokensWithCodesTAPT bw tokens
+    (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT 0
+  obtain ⟨hbits, hfw, hrw⟩ := emitTokensWithCodesTAPTFlat_spec bw tokens
+    litCodes distCodes hlitT hdistT 0 hwf hlit_le hdist_le
+  apply BitWriter.flush_eq_of_toBits
+  · exact BitWriter.writeHuffCode_wf fw code len hfw hlen
+  · exact BitWriter.writeHuffCode_wf rw code len hrw hlen
+  · rw [BitWriter.writeHuffCode_toBits fw code len hfw hlen,
+      BitWriter.writeHuffCode_toBits rw code len hrw hlen, hbits]
+
+/-- The proof-gated flat single-block production core is byte-identical to the
+    reference packed core when supplied the canonical header plan.  Unlike the
+    former broad `implemented_by`, this theorem records both the exact routed
+    callsite and the code-length invariant that makes its 64-bit packing safe. -/
+theorem deflateDynamicBlockCorePWithFlat_dynHeaderCodes (data : ByteArray)
+    (tokens : TokenArray) (litLens distLens : List Nat)
+    (hcl : (dynHeaderCodes litLens distLens).clCodes.size ≥ 19)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30)
+    (hlit_bound : ∀ x ∈ litLens, x ≤ 15)
+    (hdist_bound : ∀ x ∈ distLens, x ≤ 15) (cap : Nat) :
+    deflateDynamicBlockCorePWithFlat data tokens litLens distLens
+        (dynHeaderCodes litLens distLens) hcl hlit hdist hlit_bound hdist_bound cap =
+      deflateDynamicBlockCoreP data tokens litLens distLens hlit hdist := by
+  let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
+  let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
+  have hlit_size : litCodes.size ≥ 286 := by
+    simp only [litCodes, canonicalCodes_size, Array.size_map, List.size_toArray]
+    omega
+  have hdist_size : distCodes.size ≥ 30 := by
+    simp only [distCodes, canonicalCodes_size, Array.size_map, List.size_toArray]
+    omega
+  have h256 : 256 < litCodes.size := by omega
+  have hlitT_size : (packCodeTab litCodes).size ≥ 286 := by
+    rw [packCodeTab_size]
+    exact hlit_size
+  have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
+    rw [packCodeTab_size]
+    exact hdist_size
+  have hlit_arr_le := Deflate.toUInt8Array_le litLens hlit_bound
+  have hdist_arr_le := Deflate.toUInt8Array_le distLens hdist_bound
+  have hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15 := by
+    intro j hj
+    exact canonicalCodes_snd_le _ 15 hlit_arr_le j hj
+  have hdist_le : ∀ j, j < distCodes.size → distCodes[j]!.2.toNat ≤ 15 := by
+    intro j hj
+    exact canonicalCodes_snd_le _ 15 hdist_arr_le j hj
+  have heob_len : (litCodes[256]'h256).2.toNat ≤ 15 := by
+    have h := hlit_le 256 h256
+    rwa [getElem!_pos litCodes 256 h256] at h
+  have hwf1 := BitWriter.writeBits_wf BitWriter.empty 1 1 BitWriter.empty_wf (by omega)
+  have hwf2 := BitWriter.writeBits_wf (BitWriter.empty.writeBits 1 1) 2 2 hwf1 (by omega)
+  have hwf_header := writeDynamicHeader_wf
+    ((BitWriter.empty.writeBits 1 1).writeBits 2 2) litLens distLens hwf2
+      hlit_bound hdist_bound
+  unfold deflateDynamicBlockCorePWithFlat deflateDynamicBlockCoreP
+  simp only [BitWriter.emptyWithCapacity_eq, writeDynamicHeaderWith_dynHeaderCodes]
+  by_cases hempty : data.size == 0
+  · simp only [hempty, ↓reduceIte]
+  · simp only [hempty, ↓reduceIte]
+    have hflat := emitTokensWithCodesTAPTFlat_eob_flush_eq
+      (writeDynamicHeader ((BitWriter.empty.writeBits 1 1).writeBits 2 2) litLens distLens)
+      tokens litCodes distCodes hlitT_size hdistT_size
+      (litCodes[256]'h256).1 (litCodes[256]'h256).2 hwf_header hlit_le hdist_le heob_len
+    exact hflat.symm.trans hflat
 
 end Zip.Native.Deflate

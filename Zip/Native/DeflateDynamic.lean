@@ -288,7 +288,8 @@ def emitTokensWithCodesTAPTFlatLoop (data : ByteArray) (acc : UInt64) (bc : UInt
     ⟨data, acc, bc.toUInt8⟩
 termination_by tokens.size - i
 
-/-- Compiled flat-state implementation of `emitTokensWithCodesTAPT`. -/
+/-- Flat-state packed-table emitter used by the proof-gated single-block
+    production core. -/
 def emitTokensWithCodesTAPTFlat (bw : BitWriter) (tokens : TokenArray)
     (litT distT : Array UInt32)
     (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
@@ -304,7 +305,6 @@ def emitTokensWithCodesTAPTFlat (bw : BitWriter) (tokens : TokenArray)
     per-block ≤316-entry `packCodeTab` outputs, not the token stream).  Equal to
     `emitTokensWithCodesPT` over the `.toArray` view
     (`emitTokensWithCodesTAPT_toArray`). -/
-@[implemented_by emitTokensWithCodesTAPTFlat]
 def emitTokensWithCodesTAPT (bw : BitWriter) (tokens : TokenArray)
     (litT distT : Array UInt32)
     (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
@@ -322,6 +322,19 @@ def emitTokensWithCodesTAPT (bw : BitWriter) (tokens : TokenArray)
         hlit hdist (i + 1)
   else bw
 termination_by tokens.size - i
+
+/-- Proof boundary for the flat single-block route.  Its reference body is the
+    existing packed emitter and its compiled body is the flat emitter.  Unlike
+    the former broad replacement, this wrapper is selected only by
+    `deflateDynamicBlockCorePWithFlat`, whose erased length bounds and
+    flush-extensional correctness theorem justify the replacement.  The shared
+    multi-block emitter continues to call `emitTokensWithCodesTAPT`. -/
+@[implemented_by emitTokensWithCodesTAPTFlat]
+def emitTokensWithCodesTAPTFlatRouted (bw : BitWriter) (tokens : TokenArray)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (i : Nat) : BitWriter :=
+  emitTokensWithCodesTAPT bw tokens litT distT hlit hdist i
 
 /-- Write the dynamic Huffman tree header via BitWriter.
     This is the native equivalent of spec `encodeDynamicTrees`, writing
@@ -615,6 +628,49 @@ def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : TokenArray)
       rw [packCodeTab_size]; exact hdist_size
     let bw := emitTokensWithCodesTAPT bw tokens (packCodeTab litCodes) (packCodeTab distCodes)
       hlitT_size hdistT_size 0
+    let (code, len) := litCodes[256]'h256
+    let bw := bw.writeHuffCode code len
+    bw.flush
+
+/-- Flat-state single-block twin of `deflateDynamicBlockCorePWith`.  This is
+    deliberately a separate production entry point rather than an
+    `implemented_by` replacement for the general token emitter: only callers
+    whose dynamic-tree lengths are known to be at most 15 may select it.  The
+    proof arguments are erased; operationally the sole change is the narrowly
+    routed flat token loop in the nonempty dynamic-block arm.  Inlining this
+    small block shell leaves the shared recursive flat loop as a distinct native
+    helper instead of letting LTO clone it into one monolithic core. -/
+@[inline] def deflateDynamicBlockCorePWithFlat (data : ByteArray) (tokens : TokenArray)
+    (litLens distLens : List Nat) (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30)
+    (_hlit_bound : ∀ x ∈ litLens, x ≤ 15) (_hdist_bound : ∀ x ∈ distLens, x ≤ 15)
+    (cap : Nat := 0) : ByteArray :=
+  let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
+  let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
+  let bw := BitWriter.emptyWithCapacity cap
+  let bw := bw.writeBits 1 1  -- BFINAL
+  let bw := bw.writeBits 2 2  -- BTYPE = 10
+  let bw := writeDynamicHeaderWith bw litLens distLens p hcl
+  have hlit_size : litCodes.size ≥ 286 := by
+    show (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size ≥ 286
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have hdist_size : distCodes.size ≥ 30 := by
+    show (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size ≥ 30
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have h256 : 256 < litCodes.size := by
+    show 256 < (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  if data.size == 0 then
+    let (code, len) := litCodes[256]'h256
+    let bw := bw.writeHuffCode code len
+    bw.flush
+  else
+    have hlitT_size : (packCodeTab litCodes).size ≥ 286 := by
+      rw [packCodeTab_size]; exact hlit_size
+    have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
+      rw [packCodeTab_size]; exact hdist_size
+    let bw := emitTokensWithCodesTAPTFlatRouted bw tokens
+      (packCodeTab litCodes) (packCodeTab distCodes) hlitT_size hdistT_size 0
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
@@ -2068,9 +2124,10 @@ def deflateRawBaseTokens (data : ByteArray) (tokens : Array LZ77Token) : ByteArr
     (conformance-tested in `ZipTest/PackedTokens.lean`).
 
     The dynamic-tree header plan (`dynHeaderCodes`) is built **once** and reused
-    for both sizing (`dynBlockBytesWith`) and emit (`deflateDynamicBlockCorePWith`)
+    for both sizing (`dynBlockBytesWith`) and emit (`deflateDynamicBlockCorePWithFlat`)
     rather than rebuilt in each — the #2627 dedup; equal to the un-deduped form by
-    `dynBlockBytesWith_dynHeaderCodes` / `deflateDynamicBlockCorePWith_dynHeaderCodes`
+    `dynBlockBytesWith_dynHeaderCodes` /
+    `deflateDynamicBlockCorePWithFlat_dynHeaderCodes`
     (used in `deflateRawBase_def`). -/
 def deflateRawBaseP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
   let f := tokenFreqsPTA ptokens
@@ -2083,8 +2140,9 @@ def deflateRawBaseP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
   let storedBytes := storedBlockBytes data
   if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
   else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
-  else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes
+  else deflateDynamicBlockCorePWithFlat data ptokens lens.1 lens.2 plan hcl
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    (dynamicCodeLengths_bounded f.1 f.2).1 (dynamicCodeLengths_bounded f.1 f.2).2 dynBytes
 
 /-- `deflateRawBaseP` with the whole-stream frequencies supplied as a parameter
     instead of recomputed via `tokenFreqsP ptokens` — the emit twin of
@@ -2102,8 +2160,9 @@ def deflateRawBasePF (data : ByteArray) (ptokens : TokenArray)
   let storedBytes := storedBlockBytes data
   if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
   else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
-  else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes
+  else deflateDynamicBlockCorePWithFlat data ptokens lens.1 lens.2 plan hcl
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    (dynamicCodeLengths_bounded f.1 f.2).1 (dynamicCodeLengths_bounded f.1 f.2).2 dynBytes
 
 /-- `deflateRawBasePF` at the whole-stream frequencies is `deflateRawBaseP`. -/
 theorem deflateRawBasePF_tokenFreqsP (data : ByteArray) (ptokens : TokenArray) :
@@ -2133,8 +2192,9 @@ def deflateRawBasePPrep (data : ByteArray) (ptokens : TokenArray) : Nat × (Unit
    fun _ =>
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
     else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
-    else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes)
+    else deflateDynamicBlockCorePWithFlat data ptokens lens.1 lens.2 plan hcl
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+      (dynamicCodeLengths_bounded f.1 f.2).1 (dynamicCodeLengths_bounded f.1 f.2).2 dynBytes)
 
 /-- The prep's emit thunk is exactly `deflateRawBaseP` (same shared plan). -/
 theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : TokenArray) :
@@ -2197,8 +2257,9 @@ def deflateRawBasePPrepF (data : ByteArray) (ptokens : TokenArray)
    fun _ =>
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
     else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
-    else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes)
+    else deflateDynamicBlockCorePWithFlat data ptokens lens.1 lens.2 plan hcl
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+      (dynamicCodeLengths_bounded f.1 f.2).1 (dynamicCodeLengths_bounded f.1 f.2).2 dynBytes)
 
 /-- `deflateRawBasePPrepF` at the whole-stream frequencies is `deflateRawBasePPrep`. -/
 theorem deflateRawBasePPrepF_tokenFreqsP (data : ByteArray) (ptokens : TokenArray) :

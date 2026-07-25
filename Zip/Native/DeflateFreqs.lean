@@ -342,4 +342,39 @@ theorem dynamicCodeLengths_length (litFreqs distFreqs : Array Nat) :
       exact Huffman.Spec.computeCodeLengthsN_size _ 30 15
     · rw [Array.length_toList]; exact Huffman.Spec.computeCodeLengthsN_size _ 30 15
 
+/-- Both dynamic Huffman alphabets produced by `dynamicCodeLengths` respect the
+    RFC 1951 maximum code length.  The distance-tree nonempty fixup changes one
+    zero length to one, so it preserves the same bound. -/
+theorem dynamicCodeLengths_bounded (litFreqs distFreqs : Array Nat) :
+    (∀ x ∈ (dynamicCodeLengths litFreqs distFreqs).1, x ≤ 15) ∧
+    (∀ x ∈ (dynamicCodeLengths litFreqs distFreqs).2, x ≤ 15) := by
+  let litPairs := freqsToPairs litFreqs
+  let distPairs := freqsToPairs distFreqs
+  let litLens := (Huffman.Spec.computeCodeLengthsN litPairs 286 15).toList
+  let distLens₀ := (Huffman.Spec.computeCodeLengthsN distPairs 30 15).toList
+  have hlit_bridge : litLens = Huffman.Spec.computeCodeLengthsListN litPairs 286 15 :=
+    Huffman.Spec.computeCodeLengthsN_toList litPairs 286 15
+  have hdist_bridge : distLens₀ = Huffman.Spec.computeCodeLengthsListN distPairs 30 15 :=
+    Huffman.Spec.computeCodeLengthsN_toList distPairs 30 15
+  have hlit_bound : ∀ x ∈ litLens, x ≤ 15 := by
+    rw [hlit_bridge]
+    exact Huffman.Spec.computeCodeLengthsListN_bounded litPairs 286 15 (by omega)
+  have hdist_bound : ∀ x ∈ distLens₀, x ≤ 15 := by
+    rw [hdist_bridge]
+    exact Huffman.Spec.computeCodeLengthsListN_bounded distPairs 30 15 (by omega)
+  refine ⟨hlit_bound, ?_⟩
+  intro x hx
+  change x ∈ (if distLens₀.all (· == 0) then distLens₀.set 0 1 else distLens₀) at hx
+  split at hx
+  · rw [List.mem_iff_getElem] at hx
+    obtain ⟨i, hi, hxi⟩ := hx
+    rw [List.length_set] at hi
+    by_cases h0 : i = 0
+    · subst h0
+      simp only [List.getElem_set_self] at hxi
+      omega
+    · simp only [List.getElem_set, show ¬(0 = i) from Ne.symm h0, ↓reduceIte] at hxi
+      exact hxi ▸ hdist_bound _ (List.getElem_mem ..)
+  · exact hdist_bound x hx
+
 end Zip.Native.Deflate

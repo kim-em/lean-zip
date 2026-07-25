@@ -1,6 +1,7 @@
 import Zip.Native.BitWriter
 import Zip.Spec.Deflate
 import Zip.Spec.Huffman
+import Zip.Spec.BitstreamWriteCorrect
 
 /-!
 # BitWriter ↔ spec bitstream correspondence
@@ -620,5 +621,27 @@ theorem flush_toBits (bw : BitWriter) (hwf : bw.wf) :
       hAtoB]
     congr 1
     rw [hr_bc8, Nat.mod_eq_of_lt (show 8 - bw.bitCount.toNat % 8 < 8 from by omega)]
+
+/-- Flushing is extensional in the logical bit sequence for well-formed
+    writers.  This is the observational bridge for implementations that drain
+    complete pending bytes at different intermediate boundaries. -/
+theorem flush_eq_of_toBits (a b : BitWriter) (ha : a.wf) (hb : b.wf)
+    (hbits : a.toBits = b.toBits) : a.flush = b.flush := by
+  apply Deflate.Correctness.bytesToBits_injective
+  rw [flush_toBits a ha, flush_toBits b hb, hbits]
+  congr 2
+  have hlen_a : a.toBits.length = a.data.size * 8 + a.bitCount.toNat := by
+    change (Deflate.Spec.bytesToBits a.data ++
+      (List.range a.bitCount.toNat).map (fun i => a.bitBuf.toNat.testBit i)).length = _
+    simp only [List.length_append, Deflate.Spec.bytesToBits_length, List.length_map,
+      List.length_range]
+  have hlen_b : b.toBits.length = b.data.size * 8 + b.bitCount.toNat := by
+    change (Deflate.Spec.bytesToBits b.data ++
+      (List.range b.bitCount.toNat).map (fun i => b.bitBuf.toNat.testBit i)).length = _
+    simp only [List.length_append, Deflate.Spec.bytesToBits_length, List.length_map,
+      List.length_range]
+  have hlen := congrArg List.length hbits
+  rw [hlen_a, hlen_b] at hlen
+  omega
 
 end Zip.Native.BitWriter
