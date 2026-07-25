@@ -196,8 +196,9 @@ private def checkSplitP (label : String) (data : ByteArray) : IO Unit := do
              boxed reference ({splitB.size} bytes) at cuts {cuts}")
 
 /-- A 4 MiB fixture that defeats the incompressible pre-scan, then repeats one
-    random 32 KiB window. It exercises all packed counter classes, exact-window
-    matches, cadence merges, and forced split cuts while keeping CI bounded. -/
+    random 32 KiB window. It exercises mixed packed-counter traffic,
+    exact-window matches, and nonempty split arbitration while keeping CI
+    bounded. -/
 private def largeL5ExerciseData : ByteArray :=
   let seed := mkPrngData chainWinSize 0xC0FFEE
   ByteArray.mk (Array.ofFn (n := l5LargeInputMinSize) (fun i =>
@@ -222,6 +223,13 @@ private def emitL5Reference (data : ByteArray) (ptokens : TokenArray)
     their established separately-array/scalar compiled references. -/
 private def checkLargeL5CompiledPath : IO Unit := do
   let data := largeL5ExerciseData
+  let belowThreshold := data.extract 0 (l5LargeInputMinSize - 1)
+  if useL5LargeInputPolicy belowThreshold 5 then
+    throw (IO.userError "large-L5 policy engaged below its size threshold")
+  unless lazyChainDepthFor belowThreshold 5 == chainDepth 5 &&
+      lazyDepthFor belowThreshold 5 == lazyDepth 5 &&
+      splitCheckTokensFor belowThreshold 5 == splitCheckTokens do
+    throw (IO.userError "below-threshold L5 policy did not retain its fallback parameters")
   unless useL5LargeInputPolicy data 5 do
     throw (IO.userError "large-L5 policy did not engage")
   if incompressiblePrescan data then

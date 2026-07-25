@@ -1483,10 +1483,13 @@ def splitCheckTokens : Nat := 512
 
 /-- Per-level observation-window cadence for the shared-block split heuristic.
     Large-stream L5 uses a coarser window: at its shallow chain, checking every
-    2016 tokens preserves enough block adaptation to remain smaller than
-    miniz_oxide L5 on Silesia while removing much of the entropy-check and
-    tree-preparation overhead. Small L5 streams and L6–L8 retain the established
-    512-token cadence, so their bytes are unchanged. -/
+    2016 tokens preserves enough block adaptation that its 12-file geometric-mean
+    ratio remains slightly smaller than the established miniz_oxide L5 Silesia
+    reference (0.327237 vs 0.327302), while removing much of the entropy-check
+    and tree-preparation overhead. Corpus-total bytes instead favor miniz_oxide by
+    0.17%, led by `mozilla`; this is an intentional fixed-L5 ratio/speed trade.
+    Small L5 streams and L6–L8 retain the established 512-token cadence, so their
+    bytes are unchanged. -/
 def splitCheckTokensFor (data : ByteArray) (level : UInt8) : Nat :=
   if useL5LargeInputPolicy data level then 2016 else splitCheckTokens
 
