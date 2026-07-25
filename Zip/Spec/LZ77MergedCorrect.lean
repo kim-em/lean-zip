@@ -228,8 +228,8 @@ private theorem hash3U_toNat (data : ByteArray) (p hashSize : Nat) (pU hashSizeU
   subst hpUe
   unfold hash3U lz77Greedy.hash3
   have tail : ∀ w : UInt32,
-      (((w * 2654435761) >>> 16).toUSize % hashSizeU).toNat
-        = ((w * 2654435761) >>> 16).toNat % hashSize := by
+      (((w * 0x1E35A7BD) >>> 16).toUSize % hashSizeU).toNat
+        = ((w * 0x1E35A7BD) >>> 16).toNat % hashSize := by
     intro w; rw [USize.toNat_mod, UInt32.toNat_toUSize, hhsU]
   by_cases h4 : p + 4 ≤ data.size
   · rw [dif_pos h4, dif_pos h4, dif_pos (toUSize_toNat_of_lt hsz)]

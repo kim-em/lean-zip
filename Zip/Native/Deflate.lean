@@ -517,7 +517,7 @@ where
         let b := (data[pos + 1]'(by omega)).toUInt32
         let c := (data[pos + 2]'(by omega)).toUInt32
         a ||| (b <<< 8) ||| (c <<< 16)
-    (((word * 2654435761) >>> 16).toNat % hashSize)
+    (((word * 0x1E35A7BD) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     -- P1a: when the buffer is `USize`-addressable (always true at runtime; the
@@ -731,7 +731,7 @@ where
         let b := (data[pos + 1]'(by omega)).toUInt32
         let c := (data[pos + 2]'(by omega)).toUInt32
         a ||| (b <<< 8) ||| (c <<< 16)
-    (((word * 2654435761) >>> 16).toNat % hashSize)
+    (((word * 0x1E35A7BD) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
@@ -2192,7 +2192,7 @@ decreasing_by all_goals omega
       let b := (data[p + 1]'(by omega)).toUInt32
       let c := (data[p + 2]'(by omega)).toUInt32
       a ||| (b <<< 8) ||| (c <<< 16)
-  ((word * 2654435761) >>> 16).toUSize % hashSizeU
+  ((word * 0x1E35A7BD) >>> 16).toUSize % hashSizeU
 
 /-- The `USize` bucket index is in range: `hash3U` ends in `% hashSizeU`, whose
     `toNat` is the `Nat` mod by `hashSize`. Discharges the write bounds inside
@@ -2850,7 +2850,7 @@ where
         let b := (data[pos + 1]'(by omega)).toUInt32
         let c := (data[pos + 2]'(by omega)).toUInt32
         a ||| (b <<< 8) ||| (c <<< 16)
-    (((word * 2654435761) >>> 16).toNat % hashSize)
+    (((word * 0x1E35A7BD) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
