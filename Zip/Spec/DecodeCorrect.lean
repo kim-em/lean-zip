@@ -730,7 +730,7 @@ theorem decodeHuffman_correct
       -- h has: if output.size ≥ maxOutputSize then error else ...
       split at h
       · exact nomatch h
-      · simp only [pure, Except.pure] at h
+      · -- the `pure`/`Except.pure` unfolding here no longer fires, and is redundant
         -- bitPos guards
         split at h
         · exact nomatch h

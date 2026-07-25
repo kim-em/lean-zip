@@ -1938,7 +1938,8 @@ private theorem emitSharedBlocksAtSized_eq_fuel (data : ByteArray) (toks : Array
       rw [hsnd]
       conv => lhs; unfold emitSharedBlocksAtSized
       conv => rhs; unfold emitSharedBlocksAt
-      simp only [if_pos hend, List.headD_cons, emitSharedBlock, sizedTrees]
+      simp only [if_pos hend, emitSharedBlock, sizedTrees]
+      rfl
     · have hsnd : (sharedPartitionSized toks cuts pos).2 =
           sizedTrees
             (tokenFreqs (toks.extract pos

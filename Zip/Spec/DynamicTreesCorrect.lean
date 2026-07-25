@@ -211,7 +211,7 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
         · -- sym == 16
           split at h
           · exact nomatch h
-          · dsimp only [pure, Except.pure] at h
+          · -- the `pure`/`Except.pure` unfolding here no longer fires, and is redundant
             split at h
             · -- idx - 1 < codeLengths.size
               cases hrb : br₁.readBits 2 with
@@ -235,7 +235,7 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
               simp only [hrb] at h
               split at h
               · exact nomatch h
-              · dsimp only [pure, Except.pure] at h
+              · -- the `pure`/`Except.pure` unfolding here no longer fires, and is redundant
                 have ⟨hwf', hpos', hsz⟩ := hrec _ br₂ _ (by omega)
                   (readBits_wf br₁ 3 rep br₂ hwf₁ hrb)
                   (readBits_pos_inv br₁ 3 rep br₂ hwf₁ hpos₁ hrb) h
@@ -249,7 +249,7 @@ protected theorem decodeCLSymbols_inv (clTree : Zip.Native.HuffTree)
                 simp only [hrb] at h
                 split at h
                 · exact nomatch h
-                · dsimp only [pure, Except.pure] at h
+                · -- the `pure`/`Except.pure` unfolding here no longer fires, and is redundant
                   have ⟨hwf', hpos', hsz⟩ := hrec _ br₂ _ (by omega)
                     (readBits_wf br₁ 7 rep br₂ hwf₁ hrb)
                     (readBits_pos_inv br₁ 7 rep br₂ hwf₁ hpos₁ hrb) h
@@ -428,7 +428,6 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
           split at h
           · exact nomatch h
           · rename_i hidx_ne
-            dsimp only [pure, Except.pure] at h
             split at h
             · -- idx - 1 < codeLengths.size
               rename_i h_cl
@@ -482,7 +481,6 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
               split at h
               · exact nomatch h
               · rename_i hbound
-                dsimp only [pure, Except.pure] at h
                 have hwf₂ := readBits_wf br₁ 3 rep br₂ hwf₁ hrd
                 have ⟨rest₂, hspec_rd, hrest₂⟩ :=
                   readBits_toBits br₁ 3 rep br₂ hwf₁ (by omega) hrd
@@ -518,7 +516,6 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                 split at h
                 · exact nomatch h
                 · rename_i hbound
-                  dsimp only [pure, Except.pure] at h
                   have hwf₂ := readBits_wf br₁ 7 rep br₂ hwf₁ hrd
                   have ⟨rest₂, hspec_rd, hrest₂⟩ :=
                     readBits_toBits br₁ 7 rep br₂ hwf₁ (by omega) hrd
