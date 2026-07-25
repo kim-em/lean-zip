@@ -2277,14 +2277,38 @@ def deflateRawBaseFLevel1Impl (data : ByteArray) (level : UInt8) : ByteArray :=
       lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
   deflateRawBasePF data ptokens (litF.val, distF.val)
 
-/-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**:
-    the fused matcher (`lz77ChainIterPMergedF`) produces the packed tokens and
-    their `tokenFreqsP` histograms together, and the base sizing/emit consumes
-    those frequencies directly (`deflateRawBasePF`) instead of re-walking the
-    token array with a second `tokenFreqsP`. Byte-identical to `deflateRawBase`
-    on the greedy tier (`deflateRawBaseF_eq`). -/
+/-- Proven L1 path whose fused matcher keeps its 316 histogram
+    counters in an unboxed `ByteArray` and materializes `Array Nat` only once
+    at the matcher boundary.  The addressability split is the proof-friendly
+    guard under which its `UInt64` counters cannot wrap; the unreachable model
+    fallback retains the established implementation. -/
+def deflateRawBaseFU64Level1 (data : ByteArray) : ByteArray :=
+  if data.size.toUSize.toNat = data.size then
+    let (ptokens, litF, distF) := lz77ChainIterPMergedFU64Level1 data
+    deflateRawBasePF data ptokens (litF, distF)
+  else
+    deflateRawBaseFLevel1Impl data 1
+
+/-- The guarded wide-counter L1 implementation is byte-identical to the
+    established boxed-histogram fused implementation. -/
+theorem deflateRawBaseFU64Level1_eq (data : ByteArray) :
+    deflateRawBaseFU64Level1 data = deflateRawBaseFLevel1Impl data 1 := by
+  unfold deflateRawBaseFU64Level1
+  by_cases haddr : data.size.toUSize.toNat = data.size
+  · rw [if_pos haddr, lz77ChainIterPMergedFU64Level1_eq data haddr]
+    unfold deflateRawBaseFLevel1Impl
+    simp
+    rw [lz77ChainIterPMergedF_eq]
+  · rw [if_neg haddr]
+
+/-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**.
+    Level 1 uses the guarded wide-counter matcher; levels 2–3 use the established
+    boxed fused matcher.  Both produce the packed tokens and `tokenFreqsP`
+    histograms together, so base sizing/emission avoids a second token walk.
+    Byte-identical to `deflateRawBase` on the greedy tier (`deflateRawBaseF_eq`). -/
 def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
-  deflateRawBaseFLevel1Impl data level
+  if level == 1 then deflateRawBaseFU64Level1 data
+  else deflateRawBaseFLevel1Impl data level
 
 /-- On the greedy tier (`level ≤ 3`, i.e. `¬ 4 ≤ level`) the fused base candidate
     is byte-identical to `deflateRawBase`: the fused matcher returns exactly the
@@ -2292,6 +2316,15 @@ def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
     those frequencies `deflateRawBasePF` is `deflateRawBaseP`. -/
 theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ level)) :
     deflateRawBaseF data level = deflateRawBase data level := by
+  have hwide :
+      (if level == 1 then deflateRawBaseFU64Level1 data
+       else deflateRawBaseFLevel1Impl data level) =
+        deflateRawBaseFLevel1Impl data level := by
+    by_cases h1 : level = 1
+    · subst level
+      simp
+      exact deflateRawBaseFU64Level1_eq data
+    · simp [h1]
   have hlz : lzMatchP data level =
       lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level) := by
     unfold lzMatchP; rw [if_neg h]
@@ -2303,7 +2336,9 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ lev
     · subst level
       simp [chainDepth, insertCap, niceLen]
     · simp [h1]
-  unfold deflateRawBaseF deflateRawBaseFLevel1Impl deflateRawBase
+  unfold deflateRawBaseF
+  rw [hwide]
+  unfold deflateRawBaseFLevel1Impl deflateRawBase
   rw [hpolicy]
   rw [hlz, lz77ChainIterPMergedF_eq]
   simp only [← tokenFreqsPTA_toArray]
