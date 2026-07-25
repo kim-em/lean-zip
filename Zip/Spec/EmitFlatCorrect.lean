@@ -540,6 +540,127 @@ private theorem flat_writer_reconstruct (bw : BitWriter) :
     rw [UInt32.toNat_toUInt8, UInt8.toNat_toUInt32]
     exact Nat.mod_eq_of_lt bitCount.toNat_lt
 
+/-- Proof model of the scalar write transition used by the production loop.
+    It differs from `writeBits64` only by spelling the known-small byte drops
+    as direct shifts. -/
+private def flatWriteBits64Fast (bw : BitWriter) (n : UInt32) (val : UInt64) : BitWriter :=
+  let bc := bw.bitCount.toUInt32
+  if bc + n ≥ 64 then
+    let k0 := bc >>> 3
+    let data0 := BitWriter.flushBytesWideU bw.data bw.bitBuf k0
+    let acc0 := bw.bitBuf >>> (k0.toUInt64 <<< 3)
+    let bc0 := bc &&& 7
+    let acc' := acc0 ||| (val <<< bc0.toUInt64)
+    let total := bc0 + n
+    if total ≥ 32 then
+      let k := total >>> 3
+      ⟨BitWriter.flushBytesWideU data0 acc' k,
+        acc' >>> (k.toUInt64 <<< 3), (total &&& 7).toUInt8⟩
+    else
+      ⟨data0, acc', total.toUInt8⟩
+  else
+    let acc' := bw.bitBuf ||| (val <<< bc.toUInt64)
+    let total := bc + n
+    if total ≥ 32 then
+      let k := total >>> 3
+      ⟨BitWriter.flushBytesWideU bw.data acc' k,
+        acc' >>> (k.toUInt64 <<< 3), (total &&& 7).toUInt8⟩
+    else
+      ⟨bw.data, acc', total.toUInt8⟩
+
+/-- Under the emitter's width invariant, the hand-expanded scalar transition
+    is structurally the proven `writeBits64` primitive. -/
+private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt64)
+    (hwf : bw.wf) (hn : n.toNat ≤ 48) :
+    flatWriteBits64Fast bw n val = bw.writeBits64 n val := by
+  have hbc : bw.bitCount.toNat < 32 := hwf.1
+  have hbc32 : bw.bitCount.toUInt32.toNat = bw.bitCount.toNat :=
+    UInt8.toNat_toUInt32 _
+  unfold flatWriteBits64Fast BitWriter.writeBits64
+  by_cases hpre : bw.bitCount.toUInt32 + n ≥ (64 : UInt32)
+  · rw [if_pos hpre, if_pos hpre]
+    unfold BitWriter.drainPendingBytes BitWriter.writeBits64Small
+    dsimp only
+    have hk0 : bw.bitCount.toUInt32 >>> 3 < (8 : UInt32) := by
+      apply UInt32.lt_iff_toNat_lt.mpr
+      rw [UInt32.toNat_shiftRight, hbc32]
+      have h3 : (3 : UInt32).toNat = 3 := rfl
+      rw [h3, Nat.mod_eq_of_lt (by omega : (3 : Nat) < 32),
+        Nat.shiftRight_eq_div_pow]
+      simp only [Nat.reducePow, UInt32.reduceToNat]
+      omega
+    rw [show BitWriter.dropBytesU bw.bitBuf (bw.bitCount.toUInt32 >>> 3) =
+        bw.bitBuf >>> ((bw.bitCount.toUInt32 >>> 3).toUInt64 <<< 3) by
+      simp only [BitWriter.dropBytesU, if_pos hk0]]
+    let bc0 := bw.bitCount.toUInt32 &&& 7
+    have hbc0 : bc0.toNat ≤ 7 := by
+      dsimp only [bc0]
+      rw [UInt32.toNat_and]
+      exact Nat.le_trans Nat.and_le_right (by decide)
+    have hbc0cast32 : bc0.toUInt8.toUInt32 = bc0 := by
+      apply UInt32.toNat_inj.mp
+      rw [UInt8.toNat_toUInt32, UInt32.toNat_toUInt8, Nat.mod_eq_of_lt]
+      omega
+    have hbc0cast64 : bc0.toUInt8.toUInt64 = bc0.toUInt64 := by
+      apply UInt64.toNat_inj.mp
+      rw [UInt8.toNat_toUInt64, UInt32.toNat_toUInt64,
+        UInt32.toNat_toUInt8, Nat.mod_eq_of_lt]
+      omega
+    rw [hbc0cast32, hbc0cast64]
+    have htotal : (bc0 + n).toNat = bc0.toNat + n.toNat := by
+      rw [UInt32.toNat_add, Nat.mod_eq_of_lt]
+      omega
+    by_cases hflush : bc0 + n ≥ (32 : UInt32)
+    · rw [if_pos hflush, if_pos hflush]
+      have hk : (bc0 + n) >>> 3 < (8 : UInt32) := by
+        apply UInt32.lt_iff_toNat_lt.mpr
+        rw [UInt32.toNat_shiftRight, htotal]
+        have h3 : (3 : UInt32).toNat = 3 := rfl
+        rw [h3, Nat.mod_eq_of_lt (by omega : (3 : Nat) < 32),
+          Nat.shiftRight_eq_div_pow]
+        simp only [Nat.reducePow, UInt32.reduceToNat]
+        omega
+      rw [show BitWriter.dropBytesU
+          ((bw.bitBuf >>> ((bw.bitCount.toUInt32 >>> 3).toUInt64 <<< 3)) |||
+            (val <<< bc0.toUInt64)) ((bc0 + n) >>> 3) =
+          ((bw.bitBuf >>> ((bw.bitCount.toUInt32 >>> 3).toUInt64 <<< 3)) |||
+            (val <<< bc0.toUInt64)) >>> (((bc0 + n) >>> 3).toUInt64 <<< 3) by
+        simp only [BitWriter.dropBytesU, if_pos hk]]
+    · rw [if_neg hflush, if_neg hflush]
+  · rw [if_neg hpre, if_neg hpre]
+    unfold BitWriter.writeBits64Small
+    dsimp only
+    have hbc64 : bw.bitCount.toUInt32.toUInt64 = bw.bitCount.toUInt64 := by
+      apply UInt64.toNat_inj.mp
+      rw [UInt32.toNat_toUInt64, UInt8.toNat_toUInt32, UInt8.toNat_toUInt64]
+    rw [hbc64]
+    have htotal : (bw.bitCount.toUInt32 + n).toNat =
+        bw.bitCount.toNat + n.toNat := by
+      rw [UInt32.toNat_add, hbc32, Nat.mod_eq_of_lt]
+      omega
+    by_cases hflush : bw.bitCount.toUInt32 + n ≥ (32 : UInt32)
+    · rw [if_pos hflush, if_pos hflush]
+      have hk : (bw.bitCount.toUInt32 + n) >>> 3 < (8 : UInt32) := by
+        apply UInt32.lt_iff_toNat_lt.mpr
+        rw [UInt32.toNat_shiftRight, htotal]
+        have h3 : (3 : UInt32).toNat = 3 := rfl
+        rw [h3, Nat.mod_eq_of_lt (by omega : (3 : Nat) < 32),
+          Nat.shiftRight_eq_div_pow]
+        simp only [Nat.reducePow, UInt32.reduceToNat]
+        have hlt : (bw.bitCount.toUInt32 + n).toNat < (64 : UInt32).toNat := by
+          apply Nat.lt_of_not_ge
+          intro hge
+          exact hpre (UInt32.le_iff_toNat_le.mpr hge)
+        simp only [UInt32.reduceToNat] at hlt
+        omega
+      rw [show BitWriter.dropBytesU
+          (bw.bitBuf ||| (val <<< bw.bitCount.toUInt64))
+            ((bw.bitCount.toUInt32 + n) >>> 3) =
+          (bw.bitBuf ||| (val <<< bw.bitCount.toUInt64)) >>>
+            (((bw.bitCount.toUInt32 + n) >>> 3).toUInt64 <<< 3) by
+        simp only [BitWriter.dropBytesU, if_pos hk]]
+    · rw [if_neg hflush, if_neg hflush]
+
 /-- The complete flat token loop is observationally equal to the existing
     `TokenArray` packed-table loop when its tables are packed canonical entries
     of at most 15 bits.  The induction relation deliberately allows the two
@@ -699,7 +820,8 @@ theorem deflateDynamicBlockCorePWithFlat_dynHeaderCodes (data : ByteArray)
   have hwf_header := writeDynamicHeader_wf
     ((BitWriter.empty.writeBits 1 1).writeBits 2 2) litLens distLens hwf2
       hlit_bound hdist_bound
-  unfold deflateDynamicBlockCorePWithFlat deflateDynamicBlockCoreP
+  unfold deflateDynamicBlockCorePWithFlat deflateDynamicBlockCorePWithFlatBody
+    deflateDynamicBlockCoreP
   simp only [BitWriter.emptyWithCapacity_eq, writeDynamicHeaderWith_dynHeaderCodes]
   by_cases hempty : data.size == 0
   · simp only [hempty, ↓reduceIte]
