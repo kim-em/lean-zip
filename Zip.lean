@@ -52,6 +52,7 @@ import Zip.Spec.LZ77OptimalCorrect
 import Zip.Spec.DeflateFixedTables
 import Zip.Spec.EmitTokensCorrect
 import Zip.Spec.EmitPackedCorrect
+import Zip.Spec.EmitFlatCorrect
 import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.InflateBufCorrect
 import Zip.Spec.InflateTreeFreeCorrect

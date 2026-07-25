@@ -3,7 +3,7 @@
 // Reads a raw payload file, compresses+decompresses it with the pure-Go
 // standard-library `compress/flate`, and prints one JSON object:
 //
-//	{"out_size":N,"compress_mbps":X,"decompress_mbps":Y}
+//	{"out_size":N,"compress_mbps":X,"decompress_mbps":Y,"timing_aggregation":"median","timing_reps":5}
 //
 // Timing mirrors ZipBenchReport.lean exactly: median-of-5 reps, each rep timing
 // `itersFor(size)` iterations, throughput measured against the *uncompressed*
@@ -23,6 +23,11 @@ import (
 )
 
 var sink int // accumulates work so the compiler can't elide the timed calls
+
+const (
+	timingAggregation = "median"
+	timingReps        = 5
+)
 
 func itersFor(size int) int {
 	switch {
@@ -67,11 +72,11 @@ func median(xs []int64) int64 {
 	return xs[len(xs)/2]
 }
 
-// medianNsPerOp times `iters` calls to `op`, repeated 5×, returning the median
-// per-op nanoseconds.
+// medianNsPerOp times `iters` calls to `op`, repeated timingReps times, returning
+// the median per-op nanoseconds.
 func medianNsPerOp(iters int, op func() int) int64 {
-	reps := make([]int64, 0, 5)
-	for r := 0; r < 5; r++ {
+	reps := make([]int64, 0, timingReps)
+	for r := 0; r < timingReps; r++ {
 		t0 := time.Now()
 		for i := 0; i < iters; i++ {
 			sink += op()
@@ -96,7 +101,8 @@ func round2(f float64) float64 {
 // runDecode times decode-only throughput on a provided raw-DEFLATE stream
 // (produced by a fixed external encoder, e.g. libdeflate), so every language's
 // decoder is measured on byte-identical input. Throughput is against the
-// *decoded* (uncompressed) byte count. Prints {"decompress_mbps":Y,"decoded_size":N}.
+// *decoded* (uncompressed) byte count. Output carries the same flat timing
+// provenance as normal mode.
 func runDecode(path string) {
 	comp, err := os.ReadFile(path)
 	if err != nil {
@@ -110,8 +116,10 @@ func runDecode(path string) {
 		fmt.Fprintln(os.Stderr, "unreachable")
 	}
 	j, _ := json.Marshal(map[string]any{
-		"decompress_mbps": round2(mbps(size, dNs)),
-		"decoded_size":    size,
+		"decompress_mbps":    round2(mbps(size, dNs)),
+		"decoded_size":       size,
+		"timing_aggregation": timingAggregation,
+		"timing_reps":        timingReps,
 	})
 	fmt.Println(string(j))
 }
@@ -147,9 +155,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "unreachable")
 	}
 	out, _ := json.Marshal(map[string]any{
-		"out_size":        len(comp),
-		"compress_mbps":   round2(mbps(size, cNs)),
-		"decompress_mbps": round2(mbps(size, dNs)),
+		"out_size":           len(comp),
+		"compress_mbps":      round2(mbps(size, cNs)),
+		"decompress_mbps":    round2(mbps(size, dNs)),
+		"timing_aggregation": timingAggregation,
+		"timing_reps":        timingReps,
 	})
 	fmt.Println(string(out))
 }

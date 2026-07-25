@@ -4,6 +4,7 @@ import BenchTests.Zopfli
 import BenchTests.FuzzInflate
 import BenchTests.FuzzCompress
 import BenchTests.FuzzHandleRead
+import BenchTests.ReportTiming
 
 /-! Dev-only conformance + fuzz test driver for the Track D comparators.
 
@@ -23,4 +24,5 @@ def main : IO Unit := do
   ZipTest.FuzzInflate.tests
   ZipTest.FuzzCompress.tests
   ZipTest.FuzzHandleRead.tests
+  ZipTest.ReportTiming.tests
   IO.println "\nAll bench tests passed!"

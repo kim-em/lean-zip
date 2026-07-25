@@ -2,12 +2,13 @@ import Zip
 import Bench.MinizOxide
 import Bench.Libdeflate
 import Bench.Zopfli
+import Bench.ReportTiming
 /-! # Track D benchmark report (JSON emitter)
 
 Runs the full compress/decompress matrix — native lean-zip vs each reference
 implementation — over the **real compression corpora** (Canterbury, Silesia, …)
 across every DEFLATE level, measuring **compression ratio** (deterministic) and
-**throughput** (median-of-N MB/s), and emits a JSON document consumed by
+**throughput** (median-of-5 MB/s), and emits a JSON document consumed by
 `bench/plot.py` to render the SVG dashboard.
 
 Synthetic data is gone: the pseudo-prose pattern was pathologically
@@ -154,17 +155,17 @@ def nativeLevels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     (10–12) are exactly the ones the comparison Pareto needs from it — so it is
     swept to 12 here while the FFI references cap at 9 and native caps at 10. -/
 def libdeflateLevels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-def reps : Nat := 5
 
 /-- Run one compressor over a list of `(pattern, bytes)` workloads × levels,
     timing compress (and optionally decompress on a canonical raw-deflate
     stream). The size of each row is the workload's byte length. -/
 def runWorkloads
+    (timing : Bench.TimingPolicy)
     (name : String)
     (workloads : List (String × ByteArray))
     (compress : ByteArray → Nat → IO ByteArray)
     (decompress? : Option (ByteArray → Nat → IO ByteArray))
-    (theLevels : List Nat := levels) (theReps : Nat := reps) : IO (List Row) := do
+    (theLevels : List Nat := levels) : IO (List Row) := do
   let mut rows : List Row := []
   for (pat, data) in workloads do
     let size := data.size
@@ -172,7 +173,7 @@ def runWorkloads
       let compressed ← compress data level
       let outSize := compressed.size
       let ratio := outSize.toFloat / (max size 1).toFloat
-      let cNs ← measureNs size theReps (compress data level >>= sink)
+      let cNs ← measureNs size timing.repetitions (compress data level >>= sink)
       -- Decompress timing uses a canonical zlib-FFI raw-deflate stream so all
       -- decoders are measured on identical, format-correct input. That reference
       -- is built by the zlib FFI, whose `deflateInit2` accepts only levels 0–9,
@@ -192,7 +193,7 @@ def runWorkloads
             -- (`inflateSized … (exact := true)`), matching the production
             -- ZIP/gzip path where the uncompressed size comes from the archive
             -- metadata. The FFI reference decoders ignore it.
-            let dNs ← measureNs size theReps (dec ref size >>= sink)
+            let dNs ← measureNs size timing.repetitions (dec ref size >>= sink)
             pure (mbps size dNs)
       rows := { compressor := name, pattern := pat, size := size, level := level,
                 outSize := outSize, ratio := ratio,
@@ -256,6 +257,7 @@ def dumpPayloads (dir : String) : IO Unit := do
 
 def runReport (outPath : String) (nativeOnly : Bool := false)
     (levelOverride : Option (List Nat) := none) : IO Unit := do
+  let timing := Bench.dashboardTiming
   IO.eprintln s!"Running Track D benchmark matrix ({if nativeOnly then "native ONLY" else "native vs references"}\
 {match levelOverride with | some ls => s!", levels {ls}" | none => ""}) on real corpora…"
 
@@ -267,38 +269,37 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     IO.eprintln "  no corpora found — run bench/fetch_corpora.sh"
   let mut rows : List Row := []
   for (corpus, files) in corpora do
-    -- Every corpus is timed at all 9 levels (so the speed-vs-ratio scatter shows
-    -- the full level sweep). Large corpora (Silesia, ~200 MB) use a single timing
-    -- pass — variance is low on big files — to keep the run tractable; small
-    -- corpora (Canterbury) keep the median-of-`reps` matrix.
+    -- Every corpus uses the same median-of-5 timing policy at every level. A
+    -- previous Silesia-only one-shot shortcut made routine snapshots noisy while
+    -- their metadata still claimed median-of-5; keeping one shared policy makes
+    -- that mismatch structurally impossible.
     --
     -- zopfli is intentionally not benchmarked here: it is compress-only and
     -- ~100× slower than zlib (default iteration count), so even at one
     -- level/rep it dominated the wall-clock of the whole matrix. Its FFI binding
     -- (`zopfliCompress`) is kept for ad-hoc ratio-ceiling checks.
-    let big := corpus == "silesia"
     -- Native sweeps 1–10 (incl. the level-10 crown, #2638); the FFI references
     -- (zlib/miniz) cap at 9. An explicit `levelOverride` (a native-only regen at
     -- a chosen level list) applies to whichever codecs run.
     let nlvls := levelOverride.getD nativeLevels
     let lvls := levelOverride.getD levels
-    let rps  := if big then 1 else reps
-    IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, native levels {nlvls}, reps {rps})…"
-    let cn ← runWorkloads "native"      files nativeCompress     (some nativeDecompress)     (theLevels := nlvls) (theReps := rps)
+    IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, native levels {nlvls}, {timing.aggregation}-of-{timing.repetitions})…"
+    let cn ← runWorkloads timing "native"      files nativeCompress     (some nativeDecompress)     (theLevels := nlvls)
     -- `--native-only`: skip the reference compressors. Their ratios are
-    -- deterministic and their MB/s drift <~3% run-to-run (measured), so a Lean-only
-    -- change reuses the prior dashboard's reference rows (spliced in post-hoc by
-    -- bench/run.sh) instead of paying to re-measure them.
+    -- deterministic, so a Lean-only change may reuse the prior dashboard's
+    -- reference rows (spliced in post-hoc by bench/run.sh) instead of paying to
+    -- re-measure them. Their MB/s remains tied to its original session;
+    -- mixed-session speed gaps are not matched comparisons.
     if nativeOnly then
       rows := rows ++ cn
     else
-      let cz ← runWorkloads "zlib"        files zlibCompress       (some fun d _ => RawDeflate.decompress d) (theLevels := lvls) (theReps := rps)
-      let cm ← runWorkloads "miniz_oxide" files minizCompress      (some fun d _ => MinizOxide.decompress d) (theLevels := lvls) (theReps := rps)
+      let cz ← runWorkloads timing "zlib"        files zlibCompress       (some fun d _ => RawDeflate.decompress d) (theLevels := lvls)
+      let cm ← runWorkloads timing "miniz_oxide" files minizCompress      (some fun d _ => MinizOxide.decompress d) (theLevels := lvls)
       -- libdeflate sweeps 1–12 (its full range); the others cap at 9. A level
       -- override (the native-only dashboard regen) is for the Lean codec, so
       -- libdeflate keeps its own full list unless that override is in effect.
       let llvls := match levelOverride with | some ls => ls | none => libdeflateLevels
-      let cl ← runWorkloads "libdeflate"  files libdeflateCompress (some fun d _ => Libdeflate.decompress d) (theLevels := llvls) (theReps := rps)
+      let cl ← runWorkloads timing "libdeflate"  files libdeflateCompress (some fun d _ => Libdeflate.decompress d) (theLevels := llvls)
       rows := rows ++ cn ++ cz ++ cm ++ cl
 
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
@@ -314,7 +315,9 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     s!"    \"machine\": \"{machine}\",\n" ++
     s!"    \"git_commit\": \"{commit}\",\n" ++
     s!"    \"toolchain\": \"{toolchain}\",\n" ++
-    s!"    \"note\": \"compress_mbps/decompress_mbps are a median-of-{reps} snapshot on the machine above; ratio is deterministic\"\n" ++
+    s!"    \"timing_aggregation\": \"{timing.aggregation}\",\n" ++
+    s!"    \"timing_reps\": {timing.repetitions},\n" ++
+    s!"    \"note\": \"compress_mbps/decompress_mbps are a {timing.aggregation}-of-{timing.repetitions} snapshot for every corpus on the machine above; ratio is deterministic\"\n" ++
     "  },\n" ++
     "  \"results\": [\n" ++ body ++ "\n  ]\n}\n"
 
@@ -331,6 +334,7 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     (see `bench/plot.py`) without ever recomputing it. Do not regenerate unless
     the corpora themselves change — see `bench/README.md`. -/
 def runZopfliCeiling (outPath : String) : IO Unit := do
+  let timing := Bench.singleRepArtifactTiming
   IO.eprintln "Running ONE-TIME zopfli ratio ceiling over all corpora (slow — frozen artifact)…"
   let corpora ← loadCorpora
   if corpora.isEmpty then
@@ -340,7 +344,7 @@ def runZopfliCeiling (outPath : String) : IO Unit := do
     IO.eprintln s!"  zopfli {corpus} ({files.length} files)…"
     -- ratio only (zopfli is level-less; level 6 is nominal, single rep — the
     -- compress_mbps column is an artifact, not a benchmark).
-    let cz ← runWorkloads "zopfli" files zopfliCompress none (theLevels := [6]) (theReps := 1)
+    let cz ← runWorkloads timing "zopfli" files zopfliCompress none (theLevels := [6])
     rows := rows ++ cz
   let date ← shell "date" ["-u", "+%Y-%m-%dT%H:%M:%SZ"]
   let machine ← shell "uname" ["-mns"]
@@ -354,6 +358,8 @@ def runZopfliCeiling (outPath : String) : IO Unit := do
     s!"    \"machine\": \"{machine}\",\n" ++
     s!"    \"git_commit\": \"{commit}\",\n" ++
     s!"    \"toolchain\": \"{toolchain}\",\n" ++
+    s!"    \"timing_aggregation\": \"{timing.aggregation}\",\n" ++
+    s!"    \"timing_reps\": {timing.repetitions},\n" ++
     "    \"frozen\": true,\n" ++
     "    \"note\": \"FROZEN zopfli ratio ceiling — do NOT regenerate. zopfli is " ++
     "compress-only, level-less and ~100x slower than zlib; level=6 is nominal and " ++
@@ -465,6 +471,7 @@ def decodeDensityEncodings (data : ByteArray) : List (String × Nat × IO ByteAr
   pure (data.extract 0 data.size).size
 
 def runDecodeDensity (outPath streamsDir : String) : IO Unit := do
+  let timing := Bench.dashboardTiming
   IO.eprintln "Running decode-density (fixed libdeflate input; native/zlib/miniz/libdeflate + memcpy) over silesia…"
   let corpora ← loadCorpora
   let mut rows : List Row := []
@@ -513,11 +520,11 @@ def runDecodeDensity (outPath streamsDir : String) : IO Unit := do
           let mkRow (name : String) (d : Option Float) : Row :=
             { compressor := name, pattern := pat, size := size, level := level,
               outSize := outSize, ratio := ratio, compressMBps := none, decompressMBps := d }
-          let dn ← measureNs size reps (nativeDecompress stream size >>= sink)
-          let dz ← measureNs size reps (RawDeflate.decompress stream >>= sink)
-          let dm ← measureNs size reps (MinizOxide.decompress stream >>= sink)
-          let dl ← measureNs size reps (Libdeflate.decompress stream >>= sink)
-          let dc ← measureNs size reps (memcpyBytes data)
+          let dn ← measureNs size timing.repetitions (nativeDecompress stream size >>= sink)
+          let dz ← measureNs size timing.repetitions (RawDeflate.decompress stream >>= sink)
+          let dm ← measureNs size timing.repetitions (MinizOxide.decompress stream >>= sink)
+          let dl ← measureNs size timing.repetitions (Libdeflate.decompress stream >>= sink)
+          let dc ← measureNs size timing.repetitions (memcpyBytes data)
           rows := rows ++
             [ mkRow "native" (mbps size dn), mkRow "zlib" (mbps size dz),
               mkRow "miniz_oxide" (mbps size dm), mkRow "libdeflate" (mbps size dl),
@@ -536,6 +543,8 @@ def runDecodeDensity (outPath streamsDir : String) : IO Unit := do
     s!"    \"machine\": \"{machine}\",\n" ++
     s!"    \"git_commit\": \"{commit}\",\n" ++
     s!"    \"toolchain\": \"{toolchain}\",\n" ++
+    s!"    \"timing_aggregation\": \"{timing.aggregation}\",\n" ++
+    s!"    \"timing_reps\": {timing.repetitions},\n" ++
     "    \"experiment\": \"decode-density: fixed encoder (libdeflate levels + zopfli, level 0 = zopfli), ratio = encoder compression ratio, " ++
     "decompress_mbps = each decoder on identical streams; compressor field holds the decoder name\"\n" ++
     "  },\n" ++

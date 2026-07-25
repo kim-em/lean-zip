@@ -3,7 +3,8 @@
  *
  * The fastloop pre-extends the output buffer to its final size once, then
  * writes each literal / match at a cursor with no per-symbol capacity check.
- * Two primitives back that design:
+ * Three entry points back that design (the two copy entry points share one
+ * implementation):
  *
  *   lean_zip_byte_array_presize(n)
  *     Allocate a zero-filled ByteArray of size `n`. Lean reference body:
@@ -20,6 +21,10 @@
  *     `copy_within` / `extend_within` (which APPEND to the tail), this writes
  *     into already-allocated space ahead of the cursor, so it never grows `a`
  *     and never reallocates.
+ *
+ *   lean_zip_byte_array_copy_within_at_u(a, destOff, distance, len)
+ *     The same operation with unboxed `USize` offsets, used by the native-width
+ *     fastloop so it does not box and immediately unbox three `Nat` arguments.
  *
  * These are project-local FFI primitives (extern-with-reference-body pattern,
  * like `ByteArray.copyWithin` / `extendWithin`); the owner has approved such
@@ -55,12 +60,8 @@ LEAN_EXPORT lean_object *lean_zip_byte_array_presize(b_lean_obj_arg o_n) {
  *   distance >= 1,  distance <= destOff,  destOff + len <= a.size.
  * The reference body clamps a degenerate window to a no-op; this C mirrors that.
  */
-LEAN_EXPORT lean_object *lean_zip_byte_array_copy_within_at(
-        lean_object *a, b_lean_obj_arg o_dest_off, b_lean_obj_arg o_distance,
-        b_lean_obj_arg o_len) {
-    size_t dest_off = lean_usize_of_nat(o_dest_off);
-    size_t distance = lean_usize_of_nat(o_distance);
-    size_t len      = lean_usize_of_nat(o_len);
+static lean_object *lean_zip_byte_array_copy_within_at_impl(
+        lean_object *a, size_t dest_off, size_t distance, size_t len) {
     size_t sz       = lean_sarray_size(a);
 
     /* Degenerate guards mirroring the reference body's totality clamps. */
@@ -102,4 +103,24 @@ LEAN_EXPORT lean_object *lean_zip_byte_array_copy_within_at(
         filled += chunk;
     }
     return a;
+}
+
+LEAN_EXPORT lean_object *lean_zip_byte_array_copy_within_at(
+        lean_object *a, b_lean_obj_arg o_dest_off, b_lean_obj_arg o_distance,
+        b_lean_obj_arg o_len) {
+    return lean_zip_byte_array_copy_within_at_impl(
+        a, lean_usize_of_nat(o_dest_off), lean_usize_of_nat(o_distance),
+        lean_usize_of_nat(o_len));
+}
+
+/*
+ * lean_zip_byte_array_copy_within_at_u : ByteArray → USize → USize → USize → ByteArray
+ *   (a owned; the offsets are unboxed machine words)
+ *
+ * The same totality guards and caller-guaranteed decode bounds documented for
+ * lean_zip_byte_array_copy_within_at apply here.
+ */
+LEAN_EXPORT lean_object *lean_zip_byte_array_copy_within_at_u(
+        lean_object *a, size_t dest_off, size_t distance, size_t len) {
+    return lean_zip_byte_array_copy_within_at_impl(a, dest_off, distance, len);
 }

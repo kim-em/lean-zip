@@ -1,6 +1,15 @@
 ---
 name: perf-pr-graphs
-description: Produce before/after native speed-vs-ratio comparison graphs (against the other-language curves), post them to the PR, and show them to Kim BEFORE merging. PROACTIVELY REQUIRED for any lean-zip performance PR (perf:/runtime/throughput change to compress or decode): the moment such a PR goes green, invoke this YOURSELF without being asked — generating and posting the graphs is part of finishing the PR, never a step that waits for Kim to request it. Do not report the PR as done, and do not merely offer to "produce them if she wants", until the graphs are generated and posted; only the merge itself waits for her go-ahead. Most interesting for compression changes.
+description: >-
+  Produce before/after native speed-vs-ratio comparison graphs (against the
+  other-language curves), post them to the PR, and show them to Kim BEFORE
+  merging. PROACTIVELY REQUIRED for any lean-zip performance PR
+  (perf:/runtime/throughput change to compress or decode): the moment such a PR
+  goes green, invoke this YOURSELF without being asked — generating and posting
+  the graphs is part of finishing the PR, never a step that waits for Kim to
+  request it. Do not report the PR as done, and do not merely offer to "produce
+  them if she wants", until the graphs are generated and posted; only the merge
+  itself waits for her go-ahead. Most interesting for compression changes.
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
@@ -83,6 +92,12 @@ stays current.
 - A PR touching both: produce both sets.
 
 ## Whole-tar L6 (compress PRs — check this too)
+
+`whole_tar_l6.json` is deliberately outside the routine median-of-5 / frozen
+single-rep timing schema enforced by `bench/benchmark_json.py`. Its timing
+series use `meta.reps` (normally 9), while peak RSS is one fresh measurement per
+implementation. Do not add `timing_aggregation` / `timing_reps` to it or pass it
+through either timing-protocol loader; read its experiment-specific fields.
 
 The per-file Pareto above tracks WARM per-file throughput, so it amortizes
 native's page-fault / CAF-build tax and measures small files where the
@@ -240,20 +255,41 @@ artifacts move into `$W`.
    native levels — **always include level 10, the crown** (L9/L10 are usually the
    point).
 
-4. **BEFORE is the base branch's committed `bench/results/latest.json` — do NOT
-   rebuild it.** Master already carries up-to-date native numbers:
-   `bench/results/latest.json` is the committed dashboard snapshot (native
-   `ratio` / `compress_mbps` / `decompress_mbps`, median-of-5 on Canterbury, same
-   machine), and it is the canonical BEFORE. There is **no merge-base worktree
-   build** — that whole step was wasted work, because the data it would reproduce
-   is already recorded in the tree.
+4. **BEFORE is normally the base branch's committed
+   `bench/results/latest.json`, but only after both guards below pass.** Master
+   carries the canonical native `ratio` / `compress_mbps` / `decompress_mbps`
+   snapshot, median-of-5 on every corpus and on the recorded machine. Do not
+   rebuild a valid, fresh snapshot.
 
    Because **this PR refreshes `latest.json` in place** (step 8), capture the
    BEFORE copy *before* you overwrite it — snapshot the base-branch version to a
    scratch path and pass that to the plotter as BEFORE:
    ```
    git show origin/master:bench/results/latest.json > $W/perf_before.json
+   PYTHONPATH=bench python3 -c \
+     "from benchmark_json import load_routine; load_routine('$W/perf_before.json')"
    ```
+
+   **Protocol guard (the second command above): it must pass.** A missing or
+   non-median-of-5 timing field means this is a legacy snapshot. Never relabel a
+   legacy routine `latest.json`: its Silesia rows may be genuine one-shot
+   measurements, so adding fields recreates the exact false-provenance bug this
+   guard prevents. For that exceptional transition, make a throwaway merge-base
+   worktree, backport only the current median-of-5 report-harness policy (no
+   production `Zip/Native` / `ZipCommon` changes), measure the full needed base
+   matrix, and validate the emitted JSON with the command above. Verify the
+   worktree's production paths still match the merge-base before trusting it.
+   Once the median-of-5 schema is on master, ordinary snapshots take the fast
+   path.
+
+   A metadata-only schema backfill is permissible for a separately scoped
+   historical artifact only when the producer at its recorded revision proves
+   the exact aggregation and repetition count for **every** row (including any
+   externally merged rows), no measurement value changes, and the artifact
+   records that proof in `meta.timing_provenance`. The 2026-07-25 backfills of
+   `decode_density.json` and the frozen `zopfli-ceiling.json` meet that narrow
+   rule. This exception never applies to an unverified routine baseline and is
+   not a way around the guard above.
 
    **The invariant that makes this valid: `latest.json` must always reflect the
    current native path on master — and the way it stays current is that every
@@ -275,8 +311,7 @@ artifacts move into `$W`.
    stale=$(git log --oneline ${rec}..${base} -- Zip/Native ZipCommon 2>/dev/null)
    [ -n "$stale" ] && echo "STALE latest.json (recorded at ${rec}); native commits since:" && echo "$stale"
    ```
-   - **Empty → snapshot `git show origin/master:bench/results/latest.json >
-     $W/perf_before.json` and use that as BEFORE.** Its native rows already
+   - **Empty and protocol-valid → use `$W/perf_before.json` as BEFORE.** Its native rows already
      reflect the merge-base; nothing to rebuild. (Snapshot it rather than reading
      the working-tree file directly, since step 8 overwrites the working tree.)
    - **Non-empty → `latest.json` is stale** (older history that predates this
@@ -304,8 +339,9 @@ artifacts move into `$W`.
    are different sessions, so a small single-digit-% speed delta can be
    cross-session / machine-load noise rather than the PR. Before reading a fine
    speed verdict, make the AFTER run on a quiet machine (no competing `lake`
-   builds — check `uptime` / `ps` first), and weight Canterbury's median-of-5
-   over Silesia's single pass.
+   builds — check `uptime` / `ps` first). Both corpora are median-of-5; weight
+   Silesia more heavily because it is the representative large-file workload,
+   while still treating a small cross-session delta as unresolved.
 
 5. **Sanity-check before plotting.** Three independent checks — they catch
    different failures, so read all of them:
@@ -384,12 +420,11 @@ artifacts move into `$W`.
    Silesia** — a real split, not noise). **A Silesia win outweighs a Canterbury
    loss.** Do NOT read Canterbury alone and call it the verdict.
 
-   The catch: Canterbury is median-of-5 (low per-run noise) but unrepresentative;
-   Silesia is single-pass (`reps=1`), so a *single* Silesia run carries ±30%+
-   run-to-run noise and a lone graph cannot resolve a single-digit-% delta on it.
-   When the Silesia delta is small or borderline — exactly when the merge decision
-   hinges on it — do the self-controlled sandwich measurement below instead of
-   trusting one pass or a cross-session graph.
+   Both corpora use the same median-of-5 policy, which removes the former
+   Silesia one-shot failure mode. A median does not eliminate cross-session host
+   drift, however, so when the Silesia delta is small or borderline — exactly
+   when the merge decision hinges on it — do the self-controlled sandwich
+   measurement below instead of trusting a cross-session graph.
 
 8. **Refresh the dashboard inside this PR and commit it.** This is compulsory and
    part of *this* PR — Kim does not want a follow-up "bench: dashboard refresh"
@@ -480,10 +515,10 @@ artifacts move into `$W`.
 The routine graph (steps 1–9) compares a fresh AFTER against the base-branch
 `latest.json` BEFORE — a *cross-session* comparison whose noise floor is a few
 percent, which is fine for visible wins but **cannot** settle a single-digit-%
-delta (and single-pass Silesia adds ±30% on top). **Do not post a single-pass
-overlay as evidence for a sub-few-percent change** — its per-level scatter reads
-as regressions and wins that are pure noise (in #2735 the overlay showed the
-AFTER curve dipping below baseline at several levels; the real effect was
+delta even with median-of-5. **Do not post a lone cross-session overlay as
+evidence for a sub-few-percent change** — its per-level scatter can still read as
+regressions and wins that are host drift (in #2735 the overlay showed the AFTER
+curve dipping below baseline at several levels; the real effect was
 neutral-to-+1.6%). When the merge decision hinges on a small delta, run the
 measurement below and present *it*, not the overlay.
 
@@ -512,7 +547,8 @@ rep, run BEFORE → AFTER → BEFORE back-to-back (`M1, X, M2`), pinned to one c
 - The sandwich puts AFTER in the middle *every* rep, so it carries a fixed
   position bias — read it off the control levels (their nonzero mean *is* that
   bias) and subtract it to isolate the per-level code effect.
-- ≥4–5 reps; aggregate per `(file, level)` over log-ratios, geomean + 95% CI.
+- Use 5 sandwich rounds; aggregate per `(file, level)` over log-ratios, geomean
+  + 95% CI.
   CI excluding 0 and clearing the floor → real; inside the floor band → neutral.
   This is what turned #2735's overlay chaos into a firm "L2 +1.6%, L6 (target)
   0.0%, no level regresses" on both corpora.
@@ -546,9 +582,9 @@ bit #2735:
   by output filename, not by the stamp.) For a **Silesia-only** matrix, point the
   run at a corpora dir that contains only the `silesia` symlink (or `mv
   bench/corpora/canterbury` aside and restore it via a `trap` on EXIT). L9's
-  optimal-parse *compress* on 203 MB is minutes/run — measure it with fewer reps,
-  or skip it if 1–8 settles the sign (decode delta was uniform across levels in
-  #2650).
+  optimal-parse *compress* on 203 MB is minutes/run; keep at least five rounds
+  for any point used as evidence, or skip L9 if levels 1–8 already settle the
+  sign (decode delta was uniform across levels in #2650).
 
 ## Notes
 

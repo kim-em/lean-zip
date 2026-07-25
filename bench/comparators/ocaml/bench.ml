@@ -10,7 +10,8 @@
    Honours the shared comparator contract:
 
      bench <payload.bin> <level>  ->  stdout JSON
-     {"out_size":N,"compress_mbps":X,"decompress_mbps":Y}
+     {"out_size":N,"compress_mbps":X,"decompress_mbps":Y,
+      "timing_aggregation":"median","timing_reps":5}
 
    Timing mirrors ZipBenchReport.lean / the Go and JS comparators: median-of-5
    reps, itersFor(size) iters per rep, throughput measured against the
@@ -20,6 +21,8 @@ type bigstring =
   (char, Bigarray.int8_unsigned_elt, Bigarray.c_layout) Bigarray.Array1.t
 
 let sink = ref 0 (* accumulate work so it isn't optimized away *)
+let timing_aggregation = "median"
+let timing_reps = 5
 
 let iters_for size =
   if size <= 16384 then 50
@@ -139,10 +142,11 @@ let median (xs : float array) : float =
   Array.sort compare xs;
   xs.(Array.length xs / 2)
 
-(* Time [iters] calls to [op], repeated 5x, returning median per-op ns. *)
+(* Time [iters] calls to [op], repeated [timing_reps] times, returning median
+   per-op ns. *)
 let median_ns_per_op iters (op : unit -> int) : float =
-  let reps = Array.make 5 0.0 in
-  for r = 0 to 4 do
+  let reps = Array.make timing_reps 0.0 in
+  for r = 0 to timing_reps - 1 do
     let t0 = now_ns () in
     for _ = 1 to iters do
       sink := !sink + op ()
@@ -167,8 +171,9 @@ let run_decode path =
   let iters = iters_for size in
   let d_ns = median_ns_per_op iters (fun () -> String.length (inflate comp)) in
   if !sink = 0 then prerr_endline "unreachable";
-  Printf.printf "{\"decompress_mbps\": %.2f, \"decoded_size\": %d}\n"
-    (round2 (mbps size d_ns)) size
+  Printf.printf
+    "{\"decompress_mbps\": %.2f, \"decoded_size\": %d, \"timing_aggregation\": %S, \"timing_reps\": %d}\n"
+    (round2 (mbps size d_ns)) size timing_aggregation timing_reps
 
 let () =
   if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "decode" then begin
@@ -202,7 +207,9 @@ let () =
 
   if !sink = 0 then prerr_endline "unreachable";
   Printf.printf
-    "{\"out_size\": %d, \"compress_mbps\": %.2f, \"decompress_mbps\": %.2f}\n"
+    "{\"out_size\": %d, \"compress_mbps\": %.2f, \"decompress_mbps\": %.2f, \"timing_aggregation\": %S, \"timing_reps\": %d}\n"
     (String.length comp)
     (round2 (mbps size c_ns))
     (round2 (mbps size d_ns))
+    timing_aggregation
+    timing_reps

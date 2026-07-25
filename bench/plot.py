@@ -23,6 +23,8 @@ import matplotlib
 matplotlib.use("svg")
 import matplotlib.pyplot as plt
 
+from benchmark_json import load_frozen_zopfli, load_routine
+
 # Fixed plot order so colours/markers are stable across regenerations.
 # C / SIMD references and the pure-Lean subject, plus language-native peers
 # (Go / JS / Zig / OCaml) — the honest comparison group for a pure-Lean codec.
@@ -108,9 +110,10 @@ def series_style(key, colour):
 
 
 def _provenance(meta):
+    timing = f"{meta.get('timing_aggregation', '?')}-of-{meta.get('timing_reps', '?')}"
     return (f"{meta.get('date','?')}  ·  {meta.get('machine','?')}  ·  "
             f"commit {meta.get('git_commit','?')}  ·  {meta.get('toolchain','?')}  ·  "
-            "throughput = median snapshot; ratio is deterministic")
+            f"throughput = {timing}; ratio is deterministic")
 
 
 def _level_points(results, corpus, key, speed_metric, ratio_mode="geomean"):
@@ -215,7 +218,7 @@ def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outf
         # Coincidence keys on the ratio being identical (dx < 1e-6: ratios are
         # deterministic, so identical-output twins share a ratio exactly, while
         # distinct-on-plot levels differ by ≥~3e-4 at the report's 4-dp rounding),
-        # with a loose speed window (dy < 5e-2) to absorb single-rep timing noise.
+        # with a loose speed window (dy < 5e-2) to absorb residual snapshot noise.
         # On a healthy sweep no two levels share a ratio, so this stays inert.
         if key == "native" and len(pts) > 1:
             def _stacked_levels(idx):
@@ -535,7 +538,7 @@ def main():
     graphs_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("bench/graphs")
     graphs_dir.mkdir(parents=True, exist_ok=True)
 
-    doc = load(results_path)
+    doc = load_routine(results_path)
     results, meta = doc["results"], doc.get("meta", {})
 
     # Overlay the FROZEN zopfli ratio ceiling, generated once via
@@ -545,7 +548,7 @@ def main():
     # single-rep speed is indicative only).
     ceiling_path = results_path.parent / "zopfli-ceiling.json"
     if ceiling_path.exists():
-        ceiling = load(ceiling_path)["results"]
+        ceiling = load_frozen_zopfli(ceiling_path)["results"]
         results = [r for r in results if r["compressor"] != "zopfli"] + ceiling
 
     corpora = corpora_in(results)
@@ -577,7 +580,7 @@ def main():
     # scatter (the trend) and a ranking lollipop (the precise ordering).
     dd_path = results_path.parent / "decode_density.json"
     if dd_path.exists():
-        dd = load(dd_path)
+        dd = load_routine(dd_path)
         dd_results, dd_meta = dd["results"], dd.get("meta", {})
         for corpus in corpora_in(dd_results):
             decode_density_plot(dd_results, dd_meta, corpus,

@@ -34,6 +34,11 @@ its freshness guard so the snapshot is not stale relative to the merge-base.
 """
 import json, math, sys
 from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO / "bench"))
+from benchmark_json import load_frozen_zopfli, load_routine
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -45,24 +50,26 @@ zopfli_path = sys.argv[6] if len(sys.argv) > 6 else "bench/results/zopfli-ceilin
 assert metric in ("compress_mbps", "decompress_mbps"), f"bad metric {metric}"
 outdir.mkdir(parents=True, exist_ok=True)
 
-BEFORE_DOC = json.load(open(before_path))
-AFTER_DOC  = json.load(open(after_path))
+BEFORE_DOC = load_routine(before_path)
+AFTER_DOC  = load_routine(after_path)
 BEFORE = BEFORE_DOC["results"]
 AFTER  = AFTER_DOC["results"]
-LATEST_DOC = json.load(open(latest_path))
+LATEST_DOC = load_routine(latest_path)
 LATEST = LATEST_DOC["results"]
 LMETA  = LATEST_DOC.get("meta", {})
 
 # Frozen zopfli point (compress-only, level-less). Deterministic ratio;
 # same-machine single-rep compress_mbps. Absent → the star is silently skipped.
 try:
-    ZOPFLI = json.load(open(zopfli_path)).get("results", [])
-except (FileNotFoundError, ValueError):
+    ZOPFLI = load_frozen_zopfli(zopfli_path).get("results", [])
+except FileNotFoundError:
     ZOPFLI = []
 
 def _meta1(doc):
     m = doc.get("meta", {})
-    return f"machine={m.get('machine','?')} commit={m.get('git_commit','?')}"
+    timing = f"{m.get('timing_aggregation', '?')}-of-{m.get('timing_reps', '?')}"
+    return (f"machine={m.get('machine','?')} commit={m.get('git_commit','?')} "
+            f"timing={timing}")
 
 # Provenance: what is actually being compared. The user must confirm BEFORE's
 # commit is bench/results/latest.json's; confirm it is not stale — see SKILL.md step 4.
@@ -191,7 +198,9 @@ for corpus in corpora(AFTER):
     ax.set_ylabel(f"{label_speed}  (MB/s, log)")
     ax.set_title(f"DEFLATE {label_speed} vs ratio — {corpus}\n"
                  f"native before/after; other languages reused "
-                 f"({LMETA.get('machine','?')}; geomean over {len(files(AFTER, corpus))} files)")
+                 f"({LMETA.get('machine','?')}; "
+                 f"{LMETA.get('timing_aggregation','?')}-of-{LMETA.get('timing_reps','?')}; "
+                 f"geomean over {len(files(AFTER, corpus))} files)")
     ax.grid(True, which="both", ls=":", alpha=0.4)
     ax.legend(fontsize=8, ncol=2, loc="best")
     fig.tight_layout()

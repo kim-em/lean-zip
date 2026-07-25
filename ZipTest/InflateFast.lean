@@ -48,6 +48,12 @@ def ZipTest.InflateFast.checkCopyWithinAt (a : ByteArray) (destOff distance len 
     throw (IO.userError
       s!"copyWithinAt mismatch at destOff {destOff}, distance {distance}, len {len}: \
          got {got.toList}, want {want.toList}")
+  if destOff < USize.size ∧ distance < USize.size ∧ len < USize.size then
+    let gotU := a.copyWithinAtU destOff.toUSize distance.toUSize len.toUSize
+    unless gotU == want do
+      throw (IO.userError
+        s!"copyWithinAtU mismatch at destOff {destOff}, distance {distance}, len {len}: \
+           got {gotU.toList}, want {want.toList}")
   unless snapshot == a do
     throw (IO.userError s!"copyWithinAt mutated a shared array at destOff {destOff}")
 
@@ -59,9 +65,18 @@ def ZipTest.InflateFast.checkCopyWithinAtShort (a : ByteArray) (destOff distance
     IO Unit := do
   have hdest' : destOff.toUSize.toNat = destOff :=
     Zip.Native.InflateBuf.toUSize_toNat_of_lt hdest
+  have hdistance' : distance.toUSize.toNat = distance :=
+    Zip.Native.InflateBuf.toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hwindow hdest)
+  have hlen' : len.toUSize.toNat = len :=
+    Zip.Native.InflateBuf.toUSize_toNat_of_lt
+      (Nat.lt_of_le_of_lt hlen (Nat.lt_of_lt_of_le (by decide : 8 < 2 ^ 32) USize.le_size))
   let snapshot := a.extract 0 a.size
-  let got := a.copyWithinAtShort destOff.toUSize distance len hdistance hlenpos hlen
-    (by rwa [hdest']) (by rwa [hdest'])
+  let got := a.copyWithinAtShort destOff.toUSize distance.toUSize len.toUSize
+    (USize.le_iff_toNat_le.mpr (by simpa [hdistance'] using hdistance))
+    (USize.lt_iff_toNat_lt.mpr (by simpa [hlen'] using hlenpos))
+    (USize.le_iff_toNat_le.mpr (by simpa [hlen'] using hlen))
+    (USize.le_iff_toNat_le.mpr (by simpa [hdistance', hdest'] using hwindow))
+    (by rwa [hdest'])
   let want := ZipTest.InflateFast.refCopyWithinAt a destOff distance len
   unless got == want do
     throw (IO.userError

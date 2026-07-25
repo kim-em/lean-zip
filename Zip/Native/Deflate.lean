@@ -299,6 +299,42 @@ def distCodeWordTab : Array UInt32 :=
 @[simp] theorem distCodeWordTab_size : distCodeWordTab.size = 32769 := by
   simp only [distCodeWordTab, Array.size_map, Array.size_range]
 
+private theorem packCodeBytesList_size (xs : List UInt32) (acc : ByteArray) :
+    (xs.foldl (fun b w => b.pushUInt32LE w) acc).size = acc.size + 4 * xs.length := by
+  induction xs generalizing acc with
+  | nil => simp
+  | cons x xs ih =>
+    simp only [List.foldl_cons, List.length_cons]
+    rw [ih, ByteArray.size_pushUInt32LE]
+    omega
+
+private theorem packCodeBytes_size (xs : Array UInt32) :
+    (xs.foldl (fun b w => b.pushUInt32LE w) ByteArray.empty).size = 4 * xs.size := by
+  rw [← Array.foldl_toList, packCodeBytesList_size]
+  simp
+
+/-- Runtime distance-code table packed into four bytes per entry instead of the
+    generic array's eight-byte tagged slots.  This coexists with the persistent
+    proof-facing `distCodeWordTab`; native `distCodeWord` lookups route to this
+    byte table through `distCodeWordBytesImpl`. -/
+def distCodeWordBytes : ByteArray :=
+  let tab := (Array.range 32769).map (fun dist => packCode (findDistCode dist))
+  tab.foldl (fun b w => b.pushUInt32LE w) ByteArray.empty
+
+@[simp] theorem distCodeWordBytes_size : distCodeWordBytes.size = 4 * 32769 := by
+  rw [distCodeWordBytes, packCodeBytes_size, Array.size_map, Array.size_range]
+
+@[inline] def distCodeWordBytesImpl (dist : Nat) : UInt32 :=
+  if h : dist < 32769 then
+    have hoff : (4 * dist).toUSize.toNat = 4 * dist := by
+      simp only [Nat.toUSize]
+      apply Nat.mod_eq_of_lt
+      exact Nat.lt_of_lt_of_le (by omega) USize.le_size
+    distCodeWordBytes.ugetUInt32LE (4 * dist).toUSize (by
+      rw [hoff, distCodeWordBytes_size]
+      omega)
+  else packCode (findDistCode dist)
+
 /-- Table-backed packed length code: one `Array UInt32` read for lengths
     0–258, the packed linear search beyond. -/
 @[inline] def lenCodeWord (length : Nat) : UInt32 :=
@@ -307,7 +343,7 @@ def distCodeWordTab : Array UInt32 :=
 
 /-- Table-backed packed distance code: one `Array UInt32` read for distances
     0–32768, the packed linear search beyond. -/
-@[inline] def distCodeWord (dist : Nat) : UInt32 :=
+@[implemented_by distCodeWordBytesImpl, inline] def distCodeWord (dist : Nat) : UInt32 :=
   if h : dist < 32769 then distCodeWordTab[dist]'(distCodeWordTab_size ▸ h)
   else packCode (findDistCode dist)
 
@@ -491,7 +527,7 @@ where
         let b := (data[pos + 1]'(by omega)).toUInt32
         let c := (data[pos + 2]'(by omega)).toUInt32
         a ||| (b <<< 8) ||| (c <<< 16)
-    (((word * 2654435761) >>> 16).toNat % hashSize)
+    (((word * 0x1E35A7BD) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     -- P1a: when the buffer is `USize`-addressable (always true at runtime; the
@@ -653,6 +689,17 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-- Reusable addressability-guard-free entry to the word-at-a-time match
+    counter.  Callers which already carry `USize` positions and the single
+    `data.size < USize.size` witness can enter `lz77Greedy.goUW` directly,
+    avoiding `countMatch`'s per-call round-trip guard and its `Nat`/`USize`
+    conversions. -/
+@[inline] def countMatchUCore (data : ByteArray) (p1 p2 maxLen : USize)
+    (hsz : data.size < USize.size)
+    (h1 : p1.toNat + maxLen.toNat ≤ data.size)
+    (h2 : p2.toNat + maxLen.toNat ≤ data.size) : USize :=
+  lz77Greedy.goUW data p1 p2 0 maxLen hsz h1 h2 (by simp)
+
 /-- Iterative (tail-recursive, Array-accumulating) version of `lz77Greedy`.
     Same output, but does not overflow the stack on large inputs because
     `mainLoop` and `trailing` accumulate into an `Array` parameter instead
@@ -694,7 +741,7 @@ where
         let b := (data[pos + 1]'(by omega)).toUInt32
         let c := (data[pos + 2]'(by omega)).toUInt32
         a ||| (b <<< 8) ||| (c <<< 16)
-    (((word * 2654435761) >>> 16).toNat % hashSize)
+    (((word * 0x1E35A7BD) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
@@ -1193,8 +1240,9 @@ def chainWalkPackedU (data : ByteArray) (prev : Array Nat)
         (prev[cand &&& 0x7FFF]'(by have h1 := winMask_lt cand; have h2 := Nat.and_le_left (n := cand) (m := 0x7FFF); simp only [chainWinSize] at h1 hps; omega))
         (fuelU - 1) bestLenU bestPosU
     else
-      let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
-      let mlU : USize := ml.toUSize
+      let mlU := countMatchUCore data candU posU maxLenU hsz
+        (by rw [hcandU, hmaxU]; exact hcand)
+        (by rw [hposU, hmaxU]; exact hpm)
       let blU : USize := if mlU > bestLenU then mlU else bestLenU
       let bpU : USize := if mlU > bestLenU then candU else bestPosU
       if blU ≥ cutoffU then bpU.toNat * 512 + blU.toNat
@@ -1215,6 +1263,100 @@ decreasing_by
     have heq : (fuelU - 1).toNat = fuelU.toNat - 1 := by
       rw [USize.toNat_sub_of_le _ _ hle, USize.toNat_one]
     omega
+
+/-- Packed chain walk with all scalar hot-loop state
+    in `USize`, including the candidate and packed result.  The `prev` ring is
+    still an `Array Nat`, so each link is converted once when loaded; all
+    candidate/window tests, match bookkeeping, and result packing stay in native
+    word arithmetic. -/
+def chainWalkPackedUU (data : ByteArray) (prev : Array Nat)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsz : data.size < USize.size)
+    (windowSizeU posU maxLenU cutoffU candU fuelU bestLenU bestPosU : USize)
+    (hpm : posU.toNat + maxLenU.toNat ≤ data.size) : USize :=
+  if fuelU = 0 then bestPosU * 512 + bestLenU
+  else if hc : candU < posU ∧ posU - candU ≤ windowSizeU then
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have hcpos : candU.toNat < posU.toNat := USize.lt_iff_toNat_lt.mp hc.1
+    have hcand : candU.toNat + maxLenU.toNat ≤ data.size := by omega
+    let skip : Bool := if hbl : bestLenU < maxLenU then
+        have hbln : bestLenU.toNat < maxLenU.toNat := USize.lt_iff_toNat_lt.mp hbl
+        have hb1 : (candU + bestLenU).toNat < data.size := by
+          have e : (candU + bestLenU).toNat = candU.toNat + bestLenU.toNat := by
+            rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
+          omega
+        have hb2 : (posU + bestLenU).toNat < data.size := by
+          have e : (posU + bestLenU).toNat = posU.toNat + bestLenU.toNat := by
+            rw [USize.toNat_add]; apply Nat.mod_eq_of_lt; omega
+          omega
+        data.uget (candU + bestLenU) hb1 != data.uget (posU + bestLenU) hb2
+      else false
+    -- The final candidate still contributes, but its successor can never be
+    -- visited; avoid the otherwise-dead `prev` lookup and round-trip check.
+    if fuelU = 1 then
+      if skip then bestPosU * 512 + bestLenU
+      else
+        let mlU := countMatchUCore data candU posU maxLenU hsz hcand hpm
+        let blU := if mlU > bestLenU then mlU else bestLenU
+        let bpU := if mlU > bestLenU then candU else bestPosU
+        bpU * 512 + blU
+    else
+      have hidx : candU.toNat &&& 0x7FFF < prev.size := by
+        have h1 := winMask_lt candU.toNat
+        have h2 := Nat.and_le_left (n := candU.toNat) (m := 0x7FFF)
+        simp only [chainWinSize] at h1 hps
+        omega
+      let nextU := (prev[candU.toNat &&& 0x7FFF]'hidx).toUSize
+      if skip then
+        if bestLenU ≥ cutoffU then bestPosU * 512 + bestLenU
+        else if hn : nextU.toNat = (prev[candU.toNat &&& 0x7FFF]'hidx) then
+          chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU nextU
+            (fuelU - 1) bestLenU bestPosU hpm
+        else bestPosU * 512 + bestLenU
+      else
+        let mlU := countMatchUCore data candU posU maxLenU hsz hcand hpm
+        let blU := if mlU > bestLenU then mlU else bestLenU
+        let bpU := if mlU > bestLenU then candU else bestPosU
+        if blU ≥ cutoffU then bpU * 512 + blU
+        else if hn : nextU.toNat = (prev[candU.toNat &&& 0x7FFF]'hidx) then
+          chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU nextU
+            (fuelU - 1) blU bpU hpm
+        else bpU * 512 + blU
+  else bestPosU * 512 + bestLenU
+termination_by fuelU.toNat
+decreasing_by
+  all_goals
+    have hfz : ¬ fuelU = 0 := by assumption
+    have hpos : 0 < fuelU.toNat := by
+      rcases Nat.eq_zero_or_pos fuelU.toNat with h | h
+      · exact absurd (USize.toNat_inj.mp (by rw [h, USize.toNat_zero])) hfz
+      · exact h
+    have hle : (1 : USize) ≤ fuelU := by rw [USize.le_iff_toNat_le, USize.toNat_one]; omega
+    rw [USize.toNat_sub_of_le _ _ hle, USize.toNat_one]
+    omega
+
+/-- Runtime conditions under which the fully-`USize` walk can return its packed
+    word directly.  The final bound reserves nine low bits for the match length. -/
+abbrev chainWalkPackedUUSafe (data : ByteArray) (prev : Array Nat)
+    (windowSize maxLen cand fuel : Nat) : Prop :=
+  min chainWinSize data.size ≤ prev.size ∧ data.size.toUSize.toNat = data.size ∧
+    windowSize.toUSize.toNat = windowSize ∧ cand.toUSize.toNat = cand ∧
+    fuel.toUSize.toNat = fuel ∧ maxLen ≤ 511 ∧
+    data.size.toUSize < ((~~~(0 : USize)) >>> 9)
+
+/-- Proof-checked entry to the fully-`USize` walk.  Callers test
+    `chainWalkPackedUUSafe` and, on this branch, keep the packed result in
+    `USize` through its low-bit/high-bit decode. -/
+@[inline] def chainWalkPackedUUChecked (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel : Nat) (hg : chainWalkPackedUUSafe data prev windowSize maxLen cand fuel) : USize :=
+  have hsz : data.size < USize.size := by
+    rw [← hg.2.1]
+    exact USize.toNat_lt_two_pow_numBits _
+  chainWalkPackedUU data prev hg.1 hsz windowSize.toUSize pos.toUSize maxLen.toUSize
+    (min niceLen maxLen).toUSize cand.toUSize fuel.toUSize 0 0 (by
+      rw [toUSize_toNat_of_lt (show pos < USize.size by omega),
+        toUSize_toNat_of_lt (show maxLen < USize.size by omega)]
+      exact hpm)
 
 /-- One runtime addressability + accumulator-faithfulness check guards the whole
     `chainWalkPackedU` inner loop: the single `Nat`-round-trip test
@@ -2070,7 +2212,7 @@ decreasing_by all_goals omega
       let b := (data[p + 1]'(by omega)).toUInt32
       let c := (data[p + 2]'(by omega)).toUInt32
       a ||| (b <<< 8) ||| (c <<< 16)
-  ((word * 2654435761) >>> 16).toUSize % hashSizeU
+  ((word * 0x1E35A7BD) >>> 16).toUSize % hashSizeU
 
 /-- The `USize` bucket index is in range: `hash3U` ends in `% hashSizeU`, whose
     `toNat` is the `Nat` mod by `hashSize`. Discharges the write bounds inside
@@ -2502,21 +2644,25 @@ def lz77GreedyMergedLoop (data : ByteArray)
     let c := guardedSet c (pos &&& 0x7FFF) head
     let maxLen := min 258 (data.size - pos)
     have hmaxLenP : pos + maxLen ≤ data.size := by omega
-    let r := chainWalkGuardedPackedU data c windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
-    let matchLen := r % 512
-    let matchPos := r / 512
-    if hge : matchLen ≥ 3 then
-      if hle : pos + matchLen ≤ data.size then
-        have : data.size - (pos + matchLen) < data.size - pos := by omega
-        let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
-        lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + matchLen)
-          (acc.push (packTok (.reference matchLen (pos - matchPos))))
+    let next (matchLen matchPos : Nat) : TokenArray :=
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
+          lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + matchLen)
+            (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + 1)
+            (acc.push (packTok (.literal (data[pos]'(by omega)))))
       else
         lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + 1)
           (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    if hg : chainWalkPackedUUSafe data c windowSize maxLen head maxChain then
+      let r := chainWalkPackedUUChecked data c windowSize pos maxLen niceLen hmaxLenP head maxChain hg
+      next (r &&& 0x1FF).toNat (r >>> 9).toNat
     else
-      lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen c (pos + 1)
-        (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      let r := chainWalkGuardedPackedU data c windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
+      next (r % 512) (r / 512)
   else
     trailingPT data pos acc
 termination_by data.size - pos
@@ -2724,7 +2870,7 @@ where
         let b := (data[pos + 1]'(by omega)).toUInt32
         let c := (data[pos + 2]'(by omega)).toUInt32
         a ||| (b <<< 8) ||| (c <<< 16)
-    (((word * 2654435761) >>> 16).toNat % hashSize)
+    (((word * 0x1E35A7BD) >>> 16).toNat % hashSize)
   countMatch (data : ByteArray) (p1 p2 maxLen : Nat)
       (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size) : Nat :=
     go data p1 p2 0 maxLen h1 h2
@@ -2987,5 +3133,85 @@ def deflateLazy (data : ByteArray) : ByteArray :=
     Equivalent to `deflateLazy` but does not overflow the stack on large inputs. -/
 def deflateLazyIter (data : ByteArray) : ByteArray :=
   deflateFixedBlock data (lz77LazyIter data)
+
+/-! ## Packed distance-table implementation correctness -/
+
+private theorem packCodeBytesList_get_lt (xs : List UInt32) (acc : ByteArray)
+    (j : Nat) (hj : j < acc.size)
+    (hfold : j < (xs.foldl (fun b w => b.pushUInt32LE w) acc).size) :
+    (xs.foldl (fun b w => b.pushUInt32LE w) acc)[j]'hfold = acc[j]'hj := by
+  induction xs generalizing acc with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.foldl_cons]
+    have hfold' : j < (xs.foldl (fun b w => b.pushUInt32LE w)
+        (acc.pushUInt32LE x)).size := by
+      simpa only [List.foldl_cons] using hfold
+    calc
+      (xs.foldl (fun b w => b.pushUInt32LE w) (acc.pushUInt32LE x))[j]'hfold' =
+          (acc.pushUInt32LE x)[j]'(by rw [ByteArray.size_pushUInt32LE]; omega) :=
+        ih (acc := acc.pushUInt32LE x) (by rw [ByteArray.size_pushUInt32LE]; omega) hfold'
+      _ = acc[j]'hj := ByteArray.getElem_pushUInt32LE_lt acc x hj _
+
+private theorem packCodeBytesList_get_word (xs : List UInt32) (acc : ByteArray)
+    (i : Nat) (hi : i < xs.length) :
+    let b := xs.foldl (fun b w => b.pushUInt32LE w) acc
+    (b[acc.size + 4 * i]'(by rw [packCodeBytesList_size]; omega)).toUInt32 |||
+      ((b[acc.size + 4 * i + 1]'(by rw [packCodeBytesList_size]; omega)).toUInt32 <<< 8) |||
+      ((b[acc.size + 4 * i + 2]'(by rw [packCodeBytesList_size]; omega)).toUInt32 <<< 16) |||
+      ((b[acc.size + 4 * i + 3]'(by rw [packCodeBytesList_size]; omega)).toUInt32 <<< 24) =
+        xs[i] := by
+  induction xs generalizing acc i with
+  | nil => simp at hi
+  | cons x xs ih =>
+    cases i with
+    | zero =>
+      simp only [List.foldl_cons, Nat.mul_zero, Nat.add_zero, List.getElem_cons_zero]
+      rw [packCodeBytesList_get_lt xs (acc.pushUInt32LE x) acc.size
+            (by rw [ByteArray.size_pushUInt32LE]; omega),
+          packCodeBytesList_get_lt xs (acc.pushUInt32LE x) (acc.size + 1)
+            (by rw [ByteArray.size_pushUInt32LE]; omega),
+          packCodeBytesList_get_lt xs (acc.pushUInt32LE x) (acc.size + 2)
+            (by rw [ByteArray.size_pushUInt32LE]; omega),
+          packCodeBytesList_get_lt xs (acc.pushUInt32LE x) (acc.size + 3)
+            (by rw [ByteArray.size_pushUInt32LE]; omega),
+          ByteArray.getElem_pushUInt32LE_size,
+          ByteArray.getElem_pushUInt32LE_offset (k := 1),
+          ByteArray.getElem_pushUInt32LE_offset (k := 2),
+          ByteArray.getElem_pushUInt32LE_offset (k := 3)]
+      exact ByteArray.uint32_le_roundtrip x
+      all_goals omega
+    | succ i =>
+      have hi' : i < xs.length := by simpa using hi
+      have h := ih (acc := acc.pushUInt32LE x) i hi'
+      simp only [List.foldl_cons, List.getElem_cons_succ] at ⊢
+      simpa only [ByteArray.size_pushUInt32LE, Nat.mul_succ, Nat.add_assoc,
+        Nat.add_left_comm, Nat.add_comm] using h
+
+private theorem packCodeBytes_ugetUInt32LE (xs : Array UInt32) (i : Nat)
+    (hi : i < xs.size) (hoff : (4 * i).toUSize.toNat = 4 * i) :
+    (xs.foldl (fun b w => b.pushUInt32LE w) ByteArray.empty).ugetUInt32LE
+        (4 * i).toUSize (by rw [hoff, packCodeBytes_size]; omega) = xs[i] := by
+  simp only [ByteArray.ugetUInt32LE, hoff]
+  have hiL : i < xs.toList.length := by simpa using hi
+  have h := packCodeBytesList_get_word xs.toList ByteArray.empty i hiL
+  simpa only [Array.foldl_toList, Array.getElem_toList, ByteArray.size_empty,
+    Nat.zero_add] using h
+
+/-- The packed `ByteArray` implementation used by native code is extensionally
+    equal to the proof-facing `Array UInt32` lookup. -/
+theorem distCodeWordBytesImpl_eq_distCodeWord (dist : Nat) :
+    distCodeWordBytesImpl dist = distCodeWord dist := by
+  by_cases h : dist < 32769
+  · simp only [distCodeWordBytesImpl, distCodeWord, h, ↓reduceDIte]
+    have hoff : (4 * dist).toUSize.toNat = 4 * dist := by
+      simp only [Nat.toUSize]
+      apply Nat.mod_eq_of_lt
+      exact Nat.lt_of_lt_of_le (by omega) USize.le_size
+    let tab := (Array.range 32769).map (fun d => packCode (findDistCode d))
+    have htab : dist < tab.size := by simp only [tab, Array.size_map, Array.size_range]; exact h
+    simpa only [distCodeWordBytes, distCodeWordTab, tab] using
+      packCodeBytes_ugetUInt32LE tab dist htab hoff
+  · simp only [distCodeWordBytesImpl, distCodeWord, h, ↓reduceDIte]
 
 end Zip.Native.Deflate

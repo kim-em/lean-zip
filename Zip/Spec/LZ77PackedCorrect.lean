@@ -1,7 +1,7 @@
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77ChainLazyCorrect
 import Zip.Spec.LZ77MergedCorrect
-import Zip.Spec.EmitPackedCorrect
+import Zip.Spec.EmitFlatCorrect
 import Zip.Native.DeflateDynamic
 
 /-!
@@ -280,7 +280,8 @@ theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
   -- finish with the boxed/packed emitter and frequency equalities.  The
   -- `TokenArray` frequency walk routes to the boxed model through
   -- `tokenFreqsPTA_toArray` (the `.toArray` view) then `tokenFreqsP_eq`.
-  simp only [dynBlockBytesWith_dynHeaderCodes, deflateDynamicBlockCorePWith_dynHeaderCodes,
+  simp only [dynBlockBytesWith_dynHeaderCodes,
+    deflateDynamicBlockCorePWithFlat_dynHeaderCodes,
     deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsPTA_toArray, tokenFreqsP_eq,
     lzMatchP_map]
 
