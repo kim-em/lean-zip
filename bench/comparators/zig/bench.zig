@@ -6,7 +6,8 @@
 // comparator contract:
 //
 //   bench-zig <payload.bin> <level>  ->  stdout JSON
-//   {"out_size": N, "compress_mbps": X, "decompress_mbps": Y}
+//   {"out_size": N, "compress_mbps": X, "decompress_mbps": Y,
+//    "timing_aggregation": "median", "timing_reps": 5}
 //
 // Timing mirrors ZipBenchReport.lean: median-of-5 reps, itersFor(size) iters per
 // rep, throughput against the uncompressed byte count. Self-verifies its
@@ -18,6 +19,8 @@
 // 4–9 map straight through. L1–L4 therefore coincide for Zig.
 const std = @import("std");
 const flate = std.compress.flate;
+const timing_aggregation = "median";
+const timing_reps: usize = 5;
 
 var sink: u64 = 0; // accumulates work so the optimizer can't elide timed calls
 
@@ -72,7 +75,7 @@ fn runDecode(alloc: std.mem.Allocator, path: []const u8) !void {
     const out = try inflate(alloc, comp);
     const size = out.len;
     const iters = itersFor(size);
-    var dreps: [5]u64 = undefined;
+    var dreps: [timing_reps]u64 = undefined;
     for (&dreps) |*rep| {
         var timer = try std.time.Timer.start();
         var i: usize = 0;
@@ -86,7 +89,11 @@ fn runDecode(alloc: std.mem.Allocator, path: []const u8) !void {
     const d_ns = median(&dreps);
     if (sink == 0) std.debug.print("unreachable\n", .{});
     var buf: [256]u8 = undefined;
-    const line = try std.fmt.bufPrint(&buf, "{{\"decompress_mbps\": {d:.2}, \"decoded_size\": {d}}}\n", .{ mbps(size, d_ns), size });
+    const line = try std.fmt.bufPrint(
+        &buf,
+        "{{\"decompress_mbps\": {d:.2}, \"decoded_size\": {d}, \"timing_aggregation\": \"{s}\", \"timing_reps\": {d}}}\n",
+        .{ mbps(size, d_ns), size, timing_aggregation, timing_reps },
+    );
     try std.io.getStdOut().writeAll(line);
 }
 
@@ -115,7 +122,7 @@ pub fn main() !void {
         std.process.exit(1);
     }
 
-    var creps: [5]u64 = undefined;
+    var creps: [timing_reps]u64 = undefined;
     for (&creps) |*rep| {
         var timer = try std.time.Timer.start();
         var i: usize = 0;
@@ -128,7 +135,7 @@ pub fn main() !void {
     }
     const c_ns = median(&creps);
 
-    var dreps: [5]u64 = undefined;
+    var dreps: [timing_reps]u64 = undefined;
     for (&dreps) |*rep| {
         var timer = try std.time.Timer.start();
         var i: usize = 0;
@@ -143,6 +150,10 @@ pub fn main() !void {
 
     if (sink == 0) std.debug.print("unreachable\n", .{});
     var buf: [256]u8 = undefined;
-    const line = try std.fmt.bufPrint(&buf, "{{\"out_size\": {d}, \"compress_mbps\": {d:.2}, \"decompress_mbps\": {d:.2}}}\n", .{ comp.len, mbps(size, c_ns), mbps(size, d_ns) });
+    const line = try std.fmt.bufPrint(
+        &buf,
+        "{{\"out_size\": {d}, \"compress_mbps\": {d:.2}, \"decompress_mbps\": {d:.2}, \"timing_aggregation\": \"{s}\", \"timing_reps\": {d}}}\n",
+        .{ comp.len, mbps(size, c_ns), mbps(size, d_ns), timing_aggregation, timing_reps },
+    );
     try std.io.getStdOut().writeAll(line);
 }

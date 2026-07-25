@@ -110,9 +110,10 @@ def series_style(key, colour):
 
 
 def _provenance(meta):
+    timing = f"{meta.get('timing_aggregation', '?')}-of-{meta.get('timing_reps', '?')}"
     return (f"{meta.get('date','?')}  ·  {meta.get('machine','?')}  ·  "
             f"commit {meta.get('git_commit','?')}  ·  {meta.get('toolchain','?')}  ·  "
-            "throughput = median snapshot; ratio is deterministic")
+            f"throughput = {timing}; ratio is deterministic")
 
 
 def _level_points(results, corpus, key, speed_metric, ratio_mode="geomean"):

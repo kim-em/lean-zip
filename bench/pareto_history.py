@@ -255,6 +255,7 @@ def extract(corpus, include_worktree=False, only=None):
                 last_date=frames[-1]["commit_date"][:10],
                 ref_commit=m.get("git_commit", "?"),
                 ref_date=m.get("date", "?")[:10],
+                timing=f"{m.get('timing_aggregation', '?')}-of-{m.get('timing_reps', '?')}",
                 machine=m.get("machine", "?")
                          .replace("Linux ", "").replace(" x86_64", ""))
     return references, frames, meta
@@ -269,7 +270,7 @@ def provenance_of(meta):
     return (f"native curve replayed from the git history of latest.json · "
             f"references @ {meta['ref_commit']} "
             f"({meta['ref_date']}, {meta['machine']}) · "
-            f"throughput = median snapshot; ratio deterministic")
+            f"throughput = {meta['timing']}; ratio deterministic")
 
 
 # --------------------------------------------------------------------------

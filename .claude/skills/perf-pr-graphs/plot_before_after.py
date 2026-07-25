@@ -67,7 +67,9 @@ except FileNotFoundError:
 
 def _meta1(doc):
     m = doc.get("meta", {})
-    return f"machine={m.get('machine','?')} commit={m.get('git_commit','?')}"
+    timing = f"{m.get('timing_aggregation', '?')}-of-{m.get('timing_reps', '?')}"
+    return (f"machine={m.get('machine','?')} commit={m.get('git_commit','?')} "
+            f"timing={timing}")
 
 # Provenance: what is actually being compared. The user must confirm BEFORE's
 # commit is bench/results/latest.json's; confirm it is not stale — see SKILL.md step 4.
@@ -196,7 +198,9 @@ for corpus in corpora(AFTER):
     ax.set_ylabel(f"{label_speed}  (MB/s, log)")
     ax.set_title(f"DEFLATE {label_speed} vs ratio — {corpus}\n"
                  f"native before/after; other languages reused "
-                 f"({LMETA.get('machine','?')}; geomean over {len(files(AFTER, corpus))} files)")
+                 f"({LMETA.get('machine','?')}; "
+                 f"{LMETA.get('timing_aggregation','?')}-of-{LMETA.get('timing_reps','?')}; "
+                 f"geomean over {len(files(AFTER, corpus))} files)")
     ax.grid(True, which="both", ls=":", alpha=0.4)
     ax.legend(fontsize=8, ncol=2, loc="best")
     fig.tight_layout()

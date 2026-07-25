@@ -9,7 +9,8 @@ ceiling are timed on the Lean side; this driver covers the external comparators
 (Go / JS / Zig / OCaml) via their `decode` mode:
 
     <cmd...> decode <stream.deflate>   ->   stdout JSON
-    {"decompress_mbps": Y, "decoded_size": N}
+    {"decompress_mbps": Y, "decoded_size": N,
+     "timing_aggregation": "median", "timing_reps": 5}
 
 Each comparator self-times median-of-5, itersFor(decoded size) iters, throughput
 against the decoded (uncompressed) byte count — the same methodology as the Lean
@@ -25,7 +26,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from benchmark_json import load_routine
+from benchmark_json import load_routine, require_routine_timing
 
 # key -> (display label, decode-command prefix)
 COMPARATORS = {
@@ -82,6 +83,7 @@ def collect(key, streams):
         try:
             out = subprocess.run(cmd + [str(path)], capture_output=True, text=True, check=True)
             stat = json.loads(out.stdout.strip().splitlines()[-1])
+            require_routine_timing(stat, f"{key} {pat} L{level} comparator output")
         except (subprocess.CalledProcessError, json.JSONDecodeError, IndexError) as e:
             print(f"  {key} {pat} L{level} failed: {getattr(e, 'stderr', str(e))}", file=sys.stderr)
             continue

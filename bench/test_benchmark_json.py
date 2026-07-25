@@ -7,6 +7,7 @@ from benchmark_json import (
     require_frozen_zopfli,
     require_routine,
     require_routine_if_declared,
+    require_routine_timing,
 )
 
 
@@ -26,6 +27,17 @@ def zopfli_doc(reps=1, aggregation="single", frozen=True):
 
 
 class BenchmarkJsonTests(unittest.TestCase):
+    def test_flat_routine_timing_contract(self):
+        timing = {"timing_aggregation": "median", "timing_reps": 5}
+        self.assertIs(require_routine_timing(timing), timing)
+        for bad in (None, 1, "5", 5.0, True):
+            with self.subTest(reps=bad), self.assertRaises(ValueError):
+                require_routine_timing({**timing, "timing_reps": bad})
+        with self.assertRaises(ValueError):
+            require_routine_timing({**timing, "timing_aggregation": "single"})
+        with self.assertRaises(ValueError):
+            require_routine_timing([])
+
     def test_routine_requires_exact_median_of_five(self):
         doc = routine_doc()
         self.assertIs(require_routine(doc), doc)

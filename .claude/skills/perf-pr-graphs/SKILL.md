@@ -249,20 +249,31 @@ artifacts move into `$W`.
    native levels — **always include level 10, the crown** (L9/L10 are usually the
    point).
 
-4. **BEFORE is the base branch's committed `bench/results/latest.json` — do NOT
-   rebuild it.** Master already carries up-to-date native numbers:
-   `bench/results/latest.json` is the committed dashboard snapshot (native
-   `ratio` / `compress_mbps` / `decompress_mbps`, median-of-5 on every corpus,
-   same machine), and it is the canonical BEFORE. There is **no merge-base worktree
-   build** — that whole step was wasted work, because the data it would reproduce
-   is already recorded in the tree.
+4. **BEFORE is normally the base branch's committed
+   `bench/results/latest.json`, but only after both guards below pass.** Master
+   carries the canonical native `ratio` / `compress_mbps` / `decompress_mbps`
+   snapshot, median-of-5 on every corpus and on the recorded machine. Do not
+   rebuild a valid, fresh snapshot.
 
    Because **this PR refreshes `latest.json` in place** (step 8), capture the
    BEFORE copy *before* you overwrite it — snapshot the base-branch version to a
    scratch path and pass that to the plotter as BEFORE:
    ```
    git show origin/master:bench/results/latest.json > $W/perf_before.json
+   PYTHONPATH=bench python3 -c \
+     "from benchmark_json import load_routine; load_routine('$W/perf_before.json')"
    ```
+
+   **Protocol guard (the second command above): it must pass.** A missing or
+   non-median-of-5 timing field means this is a legacy snapshot. Never add the
+   fields by hand: legacy Silesia rows may be genuine one-shot measurements, so
+   relabelling them recreates the exact false-provenance bug this guard prevents.
+   For that exceptional transition, make a throwaway merge-base worktree,
+   backport only the current median-of-5 report-harness policy (no production
+   `Zip/Native` / `ZipCommon` changes), measure the full needed base matrix, and
+   validate the emitted JSON with the command above. Verify the worktree's
+   production paths still match the merge-base before trusting it. Once the
+   median-of-5 schema is on master, ordinary snapshots take the fast path.
 
    **The invariant that makes this valid: `latest.json` must always reflect the
    current native path on master — and the way it stays current is that every
@@ -284,8 +295,7 @@ artifacts move into `$W`.
    stale=$(git log --oneline ${rec}..${base} -- Zip/Native ZipCommon 2>/dev/null)
    [ -n "$stale" ] && echo "STALE latest.json (recorded at ${rec}); native commits since:" && echo "$stale"
    ```
-   - **Empty → snapshot `git show origin/master:bench/results/latest.json >
-     $W/perf_before.json` and use that as BEFORE.** Its native rows already
+   - **Empty and protocol-valid → use `$W/perf_before.json` as BEFORE.** Its native rows already
      reflect the merge-base; nothing to rebuild. (Snapshot it rather than reading
      the working-tree file directly, since step 8 overwrites the working tree.)
    - **Non-empty → `latest.json` is stale** (older history that predates this
