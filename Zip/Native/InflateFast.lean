@@ -1,4 +1,5 @@
 import Zip.Native.InflateTreeFree
+import Zip.Native.Wide
 
 /-!
 # Write-once cursor decode (fastloop spike — issue #2799)
@@ -13,8 +14,9 @@ pre-extends the output buffer to its final size **once** and writes each literal
 `goCur` is byte-for-byte `InflateBuf.goTreeFreeU` with the output side swapped:
 
   * literal write `output.push b` → `output.set!` at the `outPos` cursor,
-  * back-reference `Inflate.copyLoop` (append) → `ByteArray.copyWithinAt` at the
-    cursor (in-place, no realloc),
+  * back-reference `Inflate.copyLoop` (append) → an inline wide copy for
+    non-overlapping matches up to eight bytes, with `ByteArray.copyWithinAt` as
+    the general fallback (in-place, no realloc),
 
 and the logical output length `output.size` (used by the distance / max-size
 checks) → the `outPos` cursor. Everything on the **input** side — the `uget`
@@ -83,6 +85,26 @@ def copyWithinAt (a : ByteArray) (destOff distance len : Nat) : ByteArray :=
   if distance = 0 ∨ distance > destOff ∨ destOff + len > a.size then a
   else copyWithinAtGo a destOff distance 0 len
 
+/-- Copy a non-overlapping match of at most eight bytes with one wide load/store.
+    The destination word is blended into the bytes above `len`, so the wide
+    store changes exactly the logical match bytes. The `1 ≤ len ≤ 8`
+    hypotheses are load-bearing at runtime: `UInt64` shifts are modulo 64, so
+    an out-of-range length would not make this helper safely clamp. Limiting
+    this path to one exact store preserves the fastloop's whole-buffer
+    invariant; longer and overlapping matches use `copyWithinAt`. -/
+@[inline] def copyWithinAtShort (a : ByteArray) (destOff : USize)
+    (distance len : Nat) (_hdistance : 8 ≤ distance) (_hlenpos : 0 < len) (_hlen : len ≤ 8)
+    (hwindow : distance ≤ destOff.toNat) (hroom : destOff.toNat + 8 ≤ a.size) : ByteArray :=
+  let srcOff := (destOff.toNat - distance).toUSize
+  let src := a.ugetUInt64LE srcOff (by
+    rw [Zip.Native.InflateBuf.toUSize_toNat_of_lt
+      (show destOff.toNat - distance < USize.size by
+      exact Nat.lt_of_le_of_lt (Nat.sub_le ..) destOff.toNat_lt_two_pow_numBits)]
+    omega)
+  let dst := a.ugetUInt64LE destOff hroom
+  let mask := (0xffffffffffffffff : UInt64) >>> ((8 - len).toUInt64 <<< 3)
+  a.usetUInt64LE destOff ((src &&& mask) ||| (dst &&& ~~~mask)) hroom
+
 end ByteArray
 
 namespace Zip.Native
@@ -90,6 +112,15 @@ open ZipCommon (BitReader)
 
 namespace InflateBuf
 open Zip.Native.HuffTree (DecodeTable LongDecode decodeSymCanon)
+
+/-- Runtime-side table fact needed to make the masked-store length contract
+    explicit in `goCurU`'s definition. -/
+private theorem lengthBase_pos (idx : Nat) (h : idx < Inflate.lengthBase.size) :
+    0 < Inflate.lengthBase[idx].toNat := by
+  have hkey : ∀ k : Fin Inflate.lengthBase.size, 0 < Inflate.lengthBase[k.val]!.toNat := by
+    decide
+  have hk := hkey ⟨idx, h⟩
+  rwa [getElem!_pos Inflate.lengthBase idx h] at hk
 
 set_option maxRecDepth 4096 in
 /-- Write-once cursor copy of `goTreeFreeU` (issue #2799 spike). Identical input
@@ -205,11 +236,12 @@ set_option maxRecDepth 4096 in
     per-symbol margin guard `outPos + 299 ≤ output.size` gates the hot body, in
     which literal writes are proven-bounds `uset` (bound discharged from the
     margin, no per-literal bounds check) and the per-literal max-size check is
-    gone (the margin implies it, given `output.size ≤ maxOut`). Matches use the
-    total `copyWithinAt`, whose overshoot lands in the ≥299-byte margin. When the
-    margin fails — only in the final <299 output bytes — it delegates the rest of
-    the block to the bounds-checked `goCur` (same buffer, no copy). This isolates
-    the *branch-elision* increment over `goCur`. Same termination measure. -/
+    gone (the margin implies it, given `output.size ≤ maxOut`). Non-overlapping
+    matches of at most eight bytes use one inline masked wide store; general
+    matches use the total `copyWithinAt`. When the margin fails — only in the
+    final <299 output bytes — it delegates the rest of the block to the
+    bounds-checked `goCur` (same buffer, no copy). This isolates the
+    *branch-elision* increment over `goCur`. Same termination measure. -/
 def goCurU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
     (pos : USize) (bitBuf : UInt64) (cnt : USize)
@@ -271,7 +303,12 @@ def goCurU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
               else if hlen : length > 258 then throw "Inflate: length exceeds 258"
               else if hnp : cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
               else
-                let out := output.copyWithinAt outPos.toNat distance length
+                let out := if hshort : 8 ≤ distance ∧ length ≤ 8 then
+                  output.copyWithinAtShort outPos distance length hshort.1
+                    (by exact Nat.lt_of_lt_of_le (lengthBase_pos idx (by omega)) (Nat.le_add_right ..)) hshort.2
+                    (by omega) (by omega)
+                else
+                  output.copyWithinAt outPos.toNat distance length
                 goCurU litTable distTable litLD distLD maxBits data maxOut pos bitBuf
                   cnt4.toUSize hsz hlp out (outPos + length.toUSize)
   else
