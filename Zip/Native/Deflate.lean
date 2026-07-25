@@ -1280,27 +1280,37 @@ def chainWalkPackedUU (data : ByteArray) (prev : Array Nat)
           omega
         data.uget (candU + bestLenU) hb1 != data.uget (posU + bestLenU) hb2
       else false
-    have hidx : candU.toNat &&& 0x7FFF < prev.size := by
-      have h1 := winMask_lt candU.toNat
-      have h2 := Nat.and_le_left (n := candU.toNat) (m := 0x7FFF)
-      simp only [chainWinSize] at h1 hps
-      omega
-    let nextU := (prev[candU.toNat &&& 0x7FFF]'hidx).toUSize
-    if skip then
-      if bestLenU ≥ cutoffU then bestPosU * 512 + bestLenU
-      else if hn : nextU.toNat = (prev[candU.toNat &&& 0x7FFF]'hidx) then
-        chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU nextU
-          (fuelU - 1) bestLenU bestPosU hpm
-      else bestPosU * 512 + bestLenU
+    -- The final candidate still contributes, but its successor can never be
+    -- visited; avoid the otherwise-dead `prev` lookup and round-trip check.
+    if fuelU = 1 then
+      if skip then bestPosU * 512 + bestLenU
+      else
+        let mlU := countMatchUCore data candU posU maxLenU hsz hcand hpm
+        let blU := if mlU > bestLenU then mlU else bestLenU
+        let bpU := if mlU > bestLenU then candU else bestPosU
+        bpU * 512 + blU
     else
-      let mlU := countMatchUCore data candU posU maxLenU hsz hcand hpm
-      let blU := if mlU > bestLenU then mlU else bestLenU
-      let bpU := if mlU > bestLenU then candU else bestPosU
-      if blU ≥ cutoffU then bpU * 512 + blU
-      else if hn : nextU.toNat = (prev[candU.toNat &&& 0x7FFF]'hidx) then
-        chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU nextU
-          (fuelU - 1) blU bpU hpm
-      else bpU * 512 + blU
+      have hidx : candU.toNat &&& 0x7FFF < prev.size := by
+        have h1 := winMask_lt candU.toNat
+        have h2 := Nat.and_le_left (n := candU.toNat) (m := 0x7FFF)
+        simp only [chainWinSize] at h1 hps
+        omega
+      let nextU := (prev[candU.toNat &&& 0x7FFF]'hidx).toUSize
+      if skip then
+        if bestLenU ≥ cutoffU then bestPosU * 512 + bestLenU
+        else if hn : nextU.toNat = (prev[candU.toNat &&& 0x7FFF]'hidx) then
+          chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU nextU
+            (fuelU - 1) bestLenU bestPosU hpm
+        else bestPosU * 512 + bestLenU
+      else
+        let mlU := countMatchUCore data candU posU maxLenU hsz hcand hpm
+        let blU := if mlU > bestLenU then mlU else bestLenU
+        let bpU := if mlU > bestLenU then candU else bestPosU
+        if blU ≥ cutoffU then bpU * 512 + blU
+        else if hn : nextU.toNat = (prev[candU.toNat &&& 0x7FFF]'hidx) then
+          chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU nextU
+            (fuelU - 1) blU bpU hpm
+        else bpU * 512 + blU
   else bestPosU * 512 + bestLenU
 termination_by fuelU.toNat
 decreasing_by

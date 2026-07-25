@@ -744,6 +744,20 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
           rw [countMatchUCore_eq data candU.toNat pos maxLen candU posU maxLenU
             rfl hposU hmaxU hsz hcandNat hpm _ _]
           exact (lz77Greedy.countMatch_matches data candU.toNat pos maxLen hcandNat hpm).2
+        have hterminal (blU bpU : USize) (hblm : blU.toNat ≤ maxLen)
+            (hbpd : bpU.toNat ≤ data.size) (hone : fuelU = 1) :
+            (bpU * 512 + blU).toNat =
+            (if blU ≥ cutoffU then bpU.toNat * 512 + blU.toNat
+              else chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
+                posU maxLenU cutoffU hposU hmaxU hcutU next (fuelU - 1) blU bpU) := by
+          have hpack : (bpU * 512 + blU).toNat = bpU.toNat * 512 + blU.toNat :=
+            packMatchU_toNat bpU blU data.size hbpd (by omega) hfit
+          by_cases hge : blU ≥ cutoffU
+          · simp only [hge, ↓reduceIte, hpack]
+          · simp only [hge, ↓reduceIte]
+            have hfzero : fuelU - 1 = 0 := by simp [hone]
+            rw [chainWalkPackedU, if_pos hfzero]
+            exact hpack
         -- Once the candidate's round trip is collapsed, both walks have the
         -- same prefilter and match computation; only their continuation differs.
         by_cases hskip :
@@ -763,19 +777,33 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
                   exact Nat.lt_trans (by omega) hsz
                 omega)
             else false) = true
-        · rw [if_pos hskip, if_pos hskip]
-          exact hcont bestLenU bestPosU hblmax hbpdata
-        · rw [if_neg hskip, if_neg hskip]
+        · rw [if_pos hskip, if_pos hskip, if_pos hskip]
+          by_cases hone : fuelU = 1
+          · rw [if_pos hone]
+            exact hterminal bestLenU bestPosU hblmax hbpdata hone
+          · rw [if_neg hone]
+            exact hcont bestLenU bestPosU hblmax hbpdata
+        · rw [if_neg hskip, if_neg hskip, if_neg hskip]
           by_cases hml : countMatchUCore data candU posU maxLenU hsz
               (by rw [hmaxU]; exact hcandNat) hpmU > bestLenU
           · simp only [hml, ↓reduceIte]
-            exact hcont (countMatchUCore data candU posU maxLenU hsz
-              (by rw [hmaxU]; exact hcandNat) hpmU) candU hmlLe (by
+            have hcandLe : candU.toNat ≤ data.size := by
               have hcpos := USize.lt_iff_toNat_lt.mp hc.1
               rw [hposU] at hcpos
-              omega)
+              omega
+            by_cases hone : fuelU = 1
+            · rw [if_pos hone]
+              exact hterminal (countMatchUCore data candU posU maxLenU hsz
+                (by rw [hmaxU]; exact hcandNat) hpmU) candU hmlLe hcandLe hone
+            · rw [if_neg hone]
+              exact hcont (countMatchUCore data candU posU maxLenU hsz
+                (by rw [hmaxU]; exact hcandNat) hpmU) candU hmlLe hcandLe
           · simp only [hml, ↓reduceIte]
-            exact hcont bestLenU bestPosU hblmax hbpdata
+            by_cases hone : fuelU = 1
+            · rw [if_pos hone]
+              exact hterminal bestLenU bestPosU hblmax hbpdata hone
+            · rw [if_neg hone]
+              exact hcont bestLenU bestPosU hblmax hbpdata
       · have hcNat : ¬(candU.toNat < pos ∧ pos - candU.toNat ≤ windowSize) :=
           fun h => hc (hciff.mpr h)
         simp only [dif_neg hc, dif_neg hcNat]
