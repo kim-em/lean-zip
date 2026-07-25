@@ -542,6 +542,20 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
       have hcut : ∀ n : Nat, n < USize.size → (n.toUSize ≥ cutoffU) = (n ≥ min niceLen maxLen) := by
         intro n hn
         rw [eq_iff_iff, ge_iff_le, ge_iff_le, USize.le_iff_toNat_le, hcutU, toUSize_toNat_of_lt hn]
+      have hmllt : lz77Greedy.countMatch data cand pos maxLen hcand hpm < USize.size := by
+        have := (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+        omega
+      have hcmU : countMatchUCore data cand.toUSize posU maxLenU hsz
+          (by rw [hcU, hmaxU]; exact hcand) (by rw [hposU, hmaxU]; exact hpm) =
+          (lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize := by
+        apply USize.toNat_inj.mp
+        calc
+          (countMatchUCore data cand.toUSize posU maxLenU hsz _ _).toNat =
+              lz77Greedy.countMatch data cand pos maxLen hcand hpm :=
+            countMatchUCore_eq data cand pos maxLen cand.toUSize posU maxLenU
+              hcU hposU hmaxU hsz hcand hpm _ _
+          _ = (lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize.toNat :=
+            (toUSize_toNat_of_lt hmllt).symm
       -- The shared `countMatch` continuation (reached when the prefilter does not skip).
       have hstep :
           (let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
@@ -561,7 +575,6 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
              k bl bp) := by
         have hml_le : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ maxLen :=
           (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
-        have hmllt : lz77Greedy.countMatch data cand pos maxLen hcand hpm < USize.size := by omega
         have hmlU : (lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize.toNat
             = lz77Greedy.countMatch data cand pos maxLen hcand hpm := toUSize_toNat_of_lt hmllt
         have hmlcond : ((lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize > bestLen.toUSize)
@@ -587,13 +600,16 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
           rw [USize.toNat_add, hposU, hblU]; apply Nat.mod_eq_of_lt; omega
         simp only [e1, e2]
         by_cases hbyte : data[cand + bestLen]'(by omega) = data[pos + bestLen]'(by omega)
-        · simp only [hbyte, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]; exact hstep
+        · simp only [hbyte, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]
+          rw [hcmU]
+          exact hstep
         · simp only [bne_iff_ne.mpr hbyte, ↓reduceIte, hcut _ hbl]
           by_cases hge : bestLen ≥ min niceLen maxLen
           · simp only [hge, ↓reduceIte, hblU, hbpU]
           · simp only [hge, ↓reduceIte]; rw [hsub]; exact ih _ _ _ (by omega) hbl hbp
       · simp only [dif_neg (show ¬ (bestLen.toUSize < maxLenU) by rw [hcond]; exact hlt), dif_neg hlt,
           Bool.false_eq_true, ↓reduceIte]
+        rw [hcmU]
         exact hstep
     · rw [dif_neg hc, dif_neg hc, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
 

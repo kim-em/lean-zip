@@ -644,6 +644,17 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-- Reusable addressability-guard-free entry to the word-at-a-time match
+    counter.  Callers which already carry `USize` positions and the single
+    `data.size < USize.size` witness can enter `lz77Greedy.goUW` directly,
+    avoiding `countMatch`'s per-call round-trip guard and its `Nat`/`USize`
+    conversions. -/
+@[inline] def countMatchUCore (data : ByteArray) (p1 p2 maxLen : USize)
+    (hsz : data.size < USize.size)
+    (h1 : p1.toNat + maxLen.toNat ≤ data.size)
+    (h2 : p2.toNat + maxLen.toNat ≤ data.size) : USize :=
+  lz77Greedy.goUW data p1 p2 0 maxLen hsz h1 h2 (by simp)
+
 /-- Iterative (tail-recursive, Array-accumulating) version of `lz77Greedy`.
     Same output, but does not overflow the stack on large inputs because
     `mainLoop` and `trailing` accumulate into an `Array` parameter instead
@@ -1184,8 +1195,9 @@ def chainWalkPackedU (data : ByteArray) (prev : Array Nat)
         (prev[cand &&& 0x7FFF]'(by have h1 := winMask_lt cand; have h2 := Nat.and_le_left (n := cand) (m := 0x7FFF); simp only [chainWinSize] at h1 hps; omega))
         (fuelU - 1) bestLenU bestPosU
     else
-      let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
-      let mlU : USize := ml.toUSize
+      let mlU := countMatchUCore data candU posU maxLenU hsz
+        (by rw [hcandU, hmaxU]; exact hcand)
+        (by rw [hposU, hmaxU]; exact hpm)
       let blU : USize := if mlU > bestLenU then mlU else bestLenU
       let bpU : USize := if mlU > bestLenU then candU else bestPosU
       if blU ≥ cutoffU then bpU.toNat * 512 + blU.toNat
