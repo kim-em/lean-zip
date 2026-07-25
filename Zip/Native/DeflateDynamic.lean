@@ -2264,6 +2264,19 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
 theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseP data (lzMatchP data level) = deflateRawBase data level := rfl
 
+/-- Level-1-specialized fused base path.  The explicit branch exposes L1's
+    fixed `(chainDepth, insertCap, niceLen) = (4, 2, 258)` policy to the native
+    optimizer before falling back to the generic level ladder.  This is
+    extensionally the same policy as the generic calls below (the equality is
+    discharged inside `deflateRawBaseF_eq`). -/
+def deflateRawBaseFLevel1Impl (data : ByteArray) (level : UInt8) : ByteArray :=
+  let (ptokens, litF, distF) :=
+    if level == 1 then
+      lz77ChainIterPMergedF data 4 32768 2 258
+    else
+      lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  deflateRawBasePF data ptokens (litF.val, distF.val)
+
 /-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**:
     the fused matcher (`lz77ChainIterPMergedF`) produces the packed tokens and
     their `tokenFreqsP` histograms together, and the base sizing/emit consumes
@@ -2271,9 +2284,7 @@ theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
     token array with a second `tokenFreqsP`. Byte-identical to `deflateRawBase`
     on the greedy tier (`deflateRawBaseF_eq`). -/
 def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
-  let (ptokens, litF, distF) :=
-    lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
-  deflateRawBasePF data ptokens (litF.val, distF.val)
+  deflateRawBaseFLevel1Impl data level
 
 /-- On the greedy tier (`level ≤ 3`, i.e. `¬ 4 ≤ level`) the fused base candidate
     is byte-identical to `deflateRawBase`: the fused matcher returns exactly the
@@ -2284,7 +2295,16 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ lev
   have hlz : lzMatchP data level =
       lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level) := by
     unfold lzMatchP; rw [if_neg h]
-  unfold deflateRawBaseF deflateRawBase
+  have hpolicy :
+      (if level == 1 then lz77ChainIterPMergedF data 4 32768 2 258
+       else lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)) =
+        lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level) := by
+    by_cases h1 : level = 1
+    · subst level
+      simp [chainDepth, insertCap, niceLen]
+    · simp [h1]
+  unfold deflateRawBaseF deflateRawBaseFLevel1Impl deflateRawBase
+  rw [hpolicy]
   rw [hlz, lz77ChainIterPMergedF_eq]
   simp only [← tokenFreqsPTA_toArray]
   exact deflateRawBasePF_tokenFreqsP data _
