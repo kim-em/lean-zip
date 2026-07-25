@@ -1588,14 +1588,25 @@ abbrev chainWalkPackedUUSeededSafe (data : ByteArray) (prev : Array Nat)
     let p := lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos
     p.2 * 512 + p.1
 
-/-- Fully-native-word lazy chain walk when its scalar state is representable,
-    with the existing guarded walk as the defensive fallback. -/
+/-- Minimum stream size for L5's speed-oriented matcher/split policy. Kept next
+    to the matcher dispatch so every large-L5 specialization shares one gate. -/
+def l5LargeInputMinSize : Nat := 4 * 1024 * 1024
+
+/-- Use the unrolled fully-native-word lazy chain walk only for the large-input
+    L5 policy: `fuel = 22` is its main walk and `fuel = 5` its one-byte
+    lookahead. All other lazy levels and small L5 inputs retain the established
+    guarded walk exactly; the native-word safety guard remains the large-L5
+    path's defensive fallback. -/
 @[inline] def chainWalkGuardedPackedUU (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
     (cand fuel bestLen bestPos : Nat) : Nat :=
-  if hg : chainWalkPackedUUSeededSafe data prev windowSize maxLen cand fuel bestLen bestPos then
-    (chainWalkPackedUUSeededChecked data prev windowSize pos maxLen niceLen hpm
-      cand fuel bestLen bestPos hg).toNat
+  if l5LargeInputMinSize ≤ data.size ∧ (fuel = 22 ∨ fuel = 5) then
+    if hg : chainWalkPackedUUSeededSafe data prev windowSize maxLen cand fuel bestLen bestPos then
+      (chainWalkPackedUUSeededChecked data prev windowSize pos maxLen niceLen hpm
+        cand fuel bestLen bestPos hg).toNat
+    else
+      chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
+        cand fuel bestLen bestPos
   else
     chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
       cand fuel bestLen bestPos
@@ -2822,7 +2833,7 @@ def lz77LazyMergedLoop (data : ByteArray)
 termination_by 2 * (data.size - pos) + min pLen 1
 decreasing_by all_goals (first | assumption | omega)
 
-/-- Specialized lazy loop for the production no-H3, single-deferral policy.
+/-- Specialized lazy loop for the large-input L5 no-H3, single-deferral policy.
     It is the fresh-position arm of `lz77LazyMergedLoop` with the unreachable
     rolling/H3 state erased. The existing guarded native-word chain and merged
     insertion entries remain unchanged. -/
@@ -2906,9 +2917,10 @@ termination_by data.size - pos
 decreasing_by all_goals assumption
 
 /-- Merged-array entry mirroring `lz77ChainLazyIterP`: builds the combined
-    `prevSize + hashSize` array and selects the no-H3/single-deferral loop when
-    those properties hold, otherwise the general `lz77LazyMergedLoop`. Threads
-    the rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
+    `prevSize + hashSize` array and selects the no-H3/single-deferral loop only
+    for the large-input L5 policy (`maxChain = 22`, `lazyDepth = 5`); all other
+    configurations retain the general `lz77LazyMergedLoop`. Threads the
+    rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
     `lz77ChainLazyIterP` (`lz77ChainLazyIterPMerged_eq`). -/
 def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
@@ -2919,7 +2931,8 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
-    if _hfast : useH3 = false ∧ lazy2Steps ≤ 1 then
+    if _hfast : l5LargeInputMinSize ≤ data.size ∧ maxChain = 22 ∧ lazyDepth = 5 ∧
+        useH3 = false ∧ lazy2Steps ≤ 1 then
       lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
         insertCap goodMatch niceLen lazyDepth
         (.replicate (prevSize + hashSize) data.size) 0

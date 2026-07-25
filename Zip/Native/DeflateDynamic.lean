@@ -1130,12 +1130,6 @@ def lazyDepth (level : UInt8) : Nat :=
   else if level == 6 then 8
   else chainDepth level / 2
 
-/-- Minimum stream size for L5's speed-oriented large-input policy. The coarse
-    split checks and shallower chain amortize well on multi-megabyte streams;
-    smaller inputs keep the established chain-24 / 512-token policy, preserving
-    its output and its separate small-input Pareto point. -/
-def l5LargeInputMinSize : Nat := 4 * 1024 * 1024
-
 /-- Whether this call uses L5's large-stream matcher/split retune. -/
 def useL5LargeInputPolicy (data : ByteArray) (level : UInt8) : Bool :=
   level == 5 && l5LargeInputMinSize ≤ data.size

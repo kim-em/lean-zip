@@ -448,8 +448,7 @@ private theorem updateHashesMergedH3Guarded_eq (useH3 : Bool) (data : ByteArray)
     · rfl
   · rw [if_neg hu3, if_neg hu3, updateHashesMergedGuarded_eq]
 
-/-! The common no-H3, single-deferral policy (including L4/L5 and any other
-    qualifying lazy level) has neither the H3 side table nor rolling
+/-! The large-input L5 policy has neither the H3 side table nor rolling
     multi-deferral. Its specialized loop is therefore just the fresh-position
     arm of the general merged loop. -/
 set_option maxHeartbeats 2000000 in
@@ -876,7 +875,7 @@ theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize inse
     rw [← Array.replicate_append_replicate]
     split
     · rename_i hfast
-      obtain ⟨rfl, hsteps⟩ := hfast
+      obtain ⟨_, _, _, rfl, hsteps⟩ := hfast
       rw [noH3SingleLoop_eq (lazy2Steps := lazy2Steps) (hsteps := hsteps)
         (h3tab := Array.replicate 32768 data.size)]
       exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
