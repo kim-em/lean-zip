@@ -85,21 +85,26 @@ def copyWithinAt (a : ByteArray) (destOff distance len : Nat) : ByteArray :=
   if distance = 0 ∨ distance > destOff ∨ destOff + len > a.size then a
   else copyWithinAtGo a destOff distance 0 len
 
+/-- `USize` entry point for `copyWithinAt`. The reference body delegates after
+    conversion; the native implementation receives all three offsets as raw
+    machine words, avoiding `Nat` boxes in the decode hot loop. -/
+@[extern "lean_zip_byte_array_copy_within_at_u"]
+def copyWithinAtU (a : ByteArray) (destOff distance len : USize) : ByteArray :=
+  a.copyWithinAt destOff.toNat distance.toNat len.toNat
+
 /-- Copy a non-overlapping match of at most eight bytes with one wide load/store.
     The destination word is blended into the bytes above `len`, so the wide
     store changes exactly the logical match bytes. The `1 ≤ len ≤ 8`
     hypotheses are load-bearing at runtime: `UInt64` shifts are modulo 64, so
     an out-of-range length would not make this helper safely clamp. Limiting
     this path to one exact store preserves the fastloop's whole-buffer
-    invariant; longer and overlapping matches use `copyWithinAt`. -/
+    invariant; longer and overlapping matches use `copyWithinAtU`. -/
 @[inline] def copyWithinAtShort (a : ByteArray) (destOff : USize)
-    (distance len : Nat) (_hdistance : 8 ≤ distance) (_hlenpos : 0 < len) (_hlen : len ≤ 8)
-    (hwindow : distance ≤ destOff.toNat) (hroom : destOff.toNat + 8 ≤ a.size) : ByteArray :=
-  let srcOff := (destOff.toNat - distance).toUSize
+    (distance len : USize) (_hdistance : 8 ≤ distance) (_hlenpos : 0 < len) (_hlen : len ≤ 8)
+    (hwindow : distance ≤ destOff) (hroom : destOff.toNat + 8 ≤ a.size) : ByteArray :=
+  let srcOff := destOff - distance
   let src := a.ugetUInt64LE srcOff (by
-    rw [Zip.Native.InflateBuf.toUSize_toNat_of_lt
-      (show destOff.toNat - distance < USize.size by
-      exact Nat.lt_of_le_of_lt (Nat.sub_le ..) destOff.toNat_lt_two_pow_numBits)]
+    rw [USize.toNat_sub_of_le _ _ hwindow]
     omega)
   let dst := a.ugetUInt64LE destOff hroom
   let mask := (0xffffffffffffffff : UInt64) >>> ((8 - len).toUInt64 <<< 3)
@@ -113,6 +118,18 @@ open ZipCommon (BitReader)
 namespace InflateBuf
 open Zip.Native.HuffTree (DecodeTable LongDecode decodeSymCanon)
 
+/-- Read `n` buffered bits while keeping the count and extracted value in
+    native machine words. The extracted value is a `UInt16`, so callers must
+    ensure `n ≤ 16`; the DEFLATE length/distance call sites use at most 13 bits.
+    Callers only convert the remaining count when entering the Nat-based
+    long-code decoder. -/
+@[inline] def takeBitsU (bitBuf : UInt64) (cnt n : USize) :
+    Except String (UInt16 × UInt64 × USize) :=
+  if n > cnt then .error "BitReader: unexpected end of input"
+  else
+    let v := (bitBuf &&& ((1 <<< n.toUInt64) - 1)).toUInt16
+    .ok (v, bitBuf >>> n.toUInt64, cnt - n)
+
 /-- Runtime-side table fact needed to make the masked-store length contract
     explicit in `goCurU`'s definition. -/
 private theorem lengthBase_pos (idx : Nat) (h : idx < Inflate.lengthBase.size) :
@@ -121,6 +138,17 @@ private theorem lengthBase_pos (idx : Nat) (h : idx < Inflate.lengthBase.size) :
     decide
   have hk := hkey ⟨idx, h⟩
   rwa [getElem!_pos Inflate.lengthBase idx h] at hk
+
+/-- A positive `UInt16` base remains positive after native-width addition. -/
+private theorem uint16_add_usize_pos (base extra : UInt16) (hbase : 0 < base.toNat) :
+    0 < base.toUSize + extra.toUSize := by
+  rw [USize.lt_iff_toNat_lt]
+  rw [USize.toNat_add, UInt16.toNat_toUSize, UInt16.toNat_toUSize,
+    Nat.mod_eq_of_lt (by
+      have hb := UInt16.toNat_lt base
+      have he := UInt16.toNat_lt extra
+      exact Nat.lt_of_lt_of_le (by omega) USize.le_size)]
+  exact Nat.lt_of_lt_of_le hbase (Nat.le_add_right ..)
 
 set_option maxRecDepth 4096 in
 /-- Write-once cursor copy of `goTreeFreeU` (issue #2799 spike). Identical input
@@ -282,37 +310,49 @@ def goCurU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
             (output.uset outPos sym.toUInt8 (by omega)) (outPos + 1)
       else if sym == 256 then .ok (output, outPos, pos, bitBuf, cnt'.toUSize)
       else
-        let idx := sym.toNat - 257
-        if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
-        else
-          let base := Inflate.lengthBase[idx]
-          let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
-          let (extraBits, bitBuf, cnt'') ← takeBits bitBuf cnt' extra.toNat
-          let length := base.toNat + extraBits
-          match decodeSymCanon distLD distTable maxBits bitBuf cnt'' with
-          | .error e => .error e
-          | .ok (distSym, bitBuf, cnt3, _dused) =>
-            let dIdx := distSym.toNat
-            if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+      let idx := sym.toUSize - 257
+      if h : idx ≥ 29 then throw s!"Inflate: invalid length code {sym}"
+      else
+        let base := Inflate.lengthBase.uget idx (by
+          rw [Inflate.lengthBase_size]
+          simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))
+        let extra := Inflate.lengthExtra.uget idx (by
+          rw [Inflate.lengthExtra_size]
+          simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))
+        let (extraBits, bitBuf, cnt'') ← takeBitsU bitBuf cnt'.toUSize extra.toUSize
+        let length := base.toUSize + extraBits.toUSize
+        match decodeSymCanon distLD distTable maxBits bitBuf cnt''.toNat with
+        | .error e => .error e
+        | .ok (distSym, bitBuf, cnt3, _dused) =>
+          let dIdx := distSym.toUSize
+          if hd : dIdx ≥ 30 then throw s!"Inflate: invalid distance code {distSym}"
+          else
+            let dBase := Inflate.distBase.uget dIdx (by
+              rw [Inflate.distBase_size]
+              simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp hd))
+            let dExtra := Inflate.distExtra.uget dIdx (by
+              rw [Inflate.distExtra_size]
+              simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp hd))
+            let (dExtraBits, bitBuf, cnt4) ← takeBitsU bitBuf cnt3.toUSize dExtra.toUSize
+            let distance := dBase.toUSize + dExtraBits.toUSize
+            if hz : distance = 0 then throw s!"Inflate: zero back-reference distance"
+            else if hds : distance > outPos then
+              throw s!"Inflate: distance {distance.toNat} exceeds output size {outPos.toNat}"
+            else if hlen : length > 258 then throw "Inflate: length exceeds 258"
+            else if hnp : cnt0 ≤ cnt4.toNat then throw "Inflate: no progress in Huffman decode"
             else
-              let dBase := Inflate.distBase[dIdx]
-              let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
-              let (dExtraBits, bitBuf, cnt4) ← takeBits bitBuf cnt3 dExtra.toNat
-              let distance := dBase.toNat + dExtraBits
-              if hz : distance = 0 then throw s!"Inflate: zero back-reference distance"
-              else if hds : distance > outPos.toNat then
-                throw s!"Inflate: distance {distance} exceeds output size {outPos.toNat}"
-              else if hlen : length > 258 then throw "Inflate: length exceeds 258"
-              else if hnp : cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
-              else
-                let out := if hshort : 8 ≤ distance ∧ length ≤ 8 then
-                  output.copyWithinAtShort outPos distance length hshort.1
-                    (by exact Nat.lt_of_lt_of_le (lengthBase_pos idx (by omega)) (Nat.le_add_right ..)) hshort.2
-                    (by omega) (by omega)
+              let out := if hshort : 8 ≤ distance ∧ length ≤ 8 then
+                output.copyWithinAtShort outPos distance length hshort.1
+                  (uint16_add_usize_pos base extraBits
+                    (lengthBase_pos idx.toNat (by
+                      rw [Inflate.lengthBase_size]
+                      simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))))
+                  hshort.2
+                  (USize.not_lt.mp hds) (by omega)
                 else
-                  output.copyWithinAt outPos.toNat distance length
-                goCurU litTable distTable litLD distLD maxBits data maxOut pos bitBuf
-                  cnt4.toUSize hsz hlp out (outPos + length.toUSize)
+                  output.copyWithinAtU outPos distance length
+              goCurU litTable distTable litLD distLD maxBits data maxOut pos bitBuf
+                cnt4 hsz hlp out (outPos + length)
   else
     -- Tail (last <299 output bytes): finish the block with the bounds-checked
     -- `set!` loop over the same buffer — no copy, cost negligible.
@@ -349,9 +389,7 @@ def goCurU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
     · have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
       have hb : cnt'.toUSize.toNat = cnt' := toUSize_toNat_of_lt (by omega)
       rw [hb]; omega
-    · have hcsz : cnt.toNat < USize.size := cnt.toNat_lt_two_pow_numBits
-      have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
-      rw [hb]; omega
+    · omega
 
 /-- Unboxed state produced by one input-margin refill probe. -/
 structure WideRefillState where
@@ -452,37 +490,49 @@ def goCurUW (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       else if sym == 256 then
         .ok (output, outPos, pos, trimBitBufU bitBuf cnt'.toUSize, cnt'.toUSize)
       else
-        let idx := sym.toNat - 257
-        if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
+        let idx := sym.toUSize - 257
+        if h : idx ≥ 29 then throw s!"Inflate: invalid length code {sym}"
         else
-          let base := Inflate.lengthBase[idx]
-          let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
-          let (extraBits, bitBuf, cnt'') ← takeBits bitBuf cnt' extra.toNat
-          let length := base.toNat + extraBits
-          match decodeSymCanon distLD distTable maxBits bitBuf cnt'' with
+        let base := Inflate.lengthBase.uget idx (by
+          rw [Inflate.lengthBase_size]
+          simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))
+        let extra := Inflate.lengthExtra.uget idx (by
+          rw [Inflate.lengthExtra_size]
+          simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))
+        let (extraBits, bitBuf, cnt'') ← takeBitsU bitBuf cnt'.toUSize extra.toUSize
+        let length := base.toUSize + extraBits.toUSize
+        match decodeSymCanon distLD distTable maxBits bitBuf cnt''.toNat with
           | .error e => .error e
           | .ok (distSym, bitBuf, cnt3, _dused) =>
-            let dIdx := distSym.toNat
-            if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+            let dIdx := distSym.toUSize
+            if hd : dIdx ≥ 30 then throw s!"Inflate: invalid distance code {distSym}"
             else
-              let dBase := Inflate.distBase[dIdx]
-              let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
-              let (dExtraBits, bitBuf, cnt4) ← takeBits bitBuf cnt3 dExtra.toNat
-              let distance := dBase.toNat + dExtraBits
+              let dBase := Inflate.distBase.uget dIdx (by
+                rw [Inflate.distBase_size]
+                simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp hd))
+              let dExtra := Inflate.distExtra.uget dIdx (by
+                rw [Inflate.distExtra_size]
+                simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp hd))
+              let (dExtraBits, bitBuf, cnt4) ← takeBitsU bitBuf cnt3.toUSize dExtra.toUSize
+              let distance := dBase.toUSize + dExtraBits.toUSize
               if hz : distance = 0 then throw s!"Inflate: zero back-reference distance"
-              else if hds : distance > outPos.toNat then
-                throw s!"Inflate: distance {distance} exceeds output size {outPos.toNat}"
+              else if hds : distance > outPos then
+                throw s!"Inflate: distance {distance.toNat} exceeds output size {outPos.toNat}"
               else if hlen : length > 258 then throw "Inflate: length exceeds 258"
-              else if hnp : cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
+              else if hnp : cnt0 ≤ cnt4.toNat then throw "Inflate: no progress in Huffman decode"
               else
                 let out := if hshort : 8 ≤ distance ∧ length ≤ 8 then
                   output.copyWithinAtShort outPos distance length hshort.1
-                    (by exact Nat.lt_of_lt_of_le (lengthBase_pos idx (by omega)) (Nat.le_add_right ..)) hshort.2
-                    (by omega) (by omega)
-                else
-                  output.copyWithinAt outPos.toNat distance length
+                    (uint16_add_usize_pos base extraBits
+                      (lengthBase_pos idx.toNat (by
+                        rw [Inflate.lengthBase_size]
+                        simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))))
+                    hshort.2
+                    (USize.not_lt.mp hds) (by omega)
+                  else
+                    output.copyWithinAtU outPos distance length
                 goCurUW litTable distTable litLD distLD maxBits data maxOut pos bitBuf
-                  cnt4.toUSize hsz hlp out (outPos + length.toUSize)
+                  cnt4 hsz hlp out (outPos + length)
   else
     goCur litTable distTable litLD distLD maxBits data maxOut pos (trimBitBufU bitBuf cnt) cnt
       hsz hlp output outPos
@@ -537,12 +587,7 @@ def goCurUW (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       have hb : cnt'.toUSize.toNat = cnt' := toUSize_toNat_of_lt (by omega)
       rw [Nat.mod_eq_of_lt (by rw [← USize.size_eq_two_pow]; omega)]
       omega
-    · have hcsz : cnt0 < USize.size := by
-        dsimp only [cnt0]
-        exact USize.toNat_lt_two_pow_numBits _
-      have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
-      rw [Nat.mod_eq_of_lt (by rw [← USize.size_eq_two_pow]; omega)]
-      omega
+    · omega
 
 /-- Write `bytes[i]` at `output[outPos + i]` for `i ∈ [start, len)` via `set!`,
     by well-founded recursion. A `for i in [:len]` loop would compile to an opaque
