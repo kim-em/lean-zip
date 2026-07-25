@@ -276,6 +276,325 @@ private theorem insertHashL1U_bounded (data : ByteArray) (prevSize : Nat)
     · exact hc _ hidx
    · exact hc
 
+/-- The level-one native-word outer loop is the fixed-policy generic fused
+    loop.  The pointwise state invariant is proof-only; it witnesses that every
+    `Nat` chain head converted to `USize` round-trips exactly. -/
+set_option maxRecDepth 100000 in
+theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
+    (dataSizeU prevSizeU : USize)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hsz : data.size < USize.size) (hfit : data.size * 512 + 511 < USize.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hprev : prevSize ≤ chainWinSize)
+    (hshift : data.size.toUSize < ((~~~(0 : USize)) >>> 9))
+    (c : Array Nat) (hcs : prevSize + 65536 ≤ c.size)
+    (posU : USize) (hpos : posU.toNat ≤ data.size)
+    (hc : ∀ i, i < c.size → c[i]! ≤ data.size)
+    (acc : TokenArray)
+    (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30}) :
+    lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
+        c hcs posU hpos acc litF distF =
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+        c posU.toNat acc litF distF := by
+  induction hn : data.size - posU.toNat using Nat.strongRecOn
+      generalizing c posU acc litF distF with
+  | _ n ih =>
+    rw [lz77GreedyMergedLoopF1U, lz77GreedyMergedLoopF]
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have h2 : (2 : USize).toNat = 2 :=
+      USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    have ep2 : (posU + 2).toNat = posU.toNat + 2 := by
+      rw [USize.toNat_add, h2]
+      apply Nat.mod_eq_of_lt
+      omega
+    have hcond : posU + 2 < dataSizeU ↔ posU.toNat + 2 < data.size := by
+      rw [USize.lt_iff_toNat_lt, ep2, hds]
+    by_cases hlt : posU.toNat + 2 < data.size
+    · rw [dif_pos (hcond.mpr hlt), dif_pos hlt]
+      have eget : ∀ (a : Array Nat) (i : Nat) (h : i < a.size), a[i]'h = a[i]! :=
+        fun a i h => (getElem!_pos a i h).symm
+      have eset : ∀ (a : Array Nat) (i v : Nat) (h : i < a.size),
+          a.set i v h = a.set! i v := fun a i v h => by
+        rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos h]
+      have ehsh : ∀ (hp : posU.toNat + 2 < data.size),
+          (hash3L1U data dataSizeU posU hds hfit hp).toNat =
+            lz77Greedy.hash3 data posU.toNat 65536 hlt := by
+        intro hp
+        exact hash3L1U_toNat_eq data dataSizeU posU hds hfit hp
+      have eidx : ∀ (hp : posU.toNat + 2 < data.size),
+          (prevSizeU + hash3L1U data dataSizeU posU hds hfit hp).toNat =
+            prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt := by
+        intro hp
+        rw [USize.toNat_add, hpsU, ehsh]
+        apply Nat.mod_eq_of_lt
+        have hh := hash3L1U_toNat_lt data dataSizeU posU hds hfit hp
+        have hh' : lz77Greedy.hash3 data posU.toNat 65536 hlt < 65536 := by
+          rw [← ehsh hp]
+          exact hh
+        simp only [chainWinSize] at hprev
+        exact Nat.lt_of_lt_of_le (by omega) USize.le_size
+      have emask : (posU &&& 0x7FFF).toNat = posU.toNat &&& 0x7FFF := by
+        rw [USize.toNat_and,
+          USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+      let hNat := lz77Greedy.hash3 data posU.toNat 65536 hlt
+      have hhNat : hNat < 65536 := Nat.mod_lt _ (by omega)
+      have hiNat : prevSize + hNat < c.size := by omega
+      let head := c[prevSize + hNat]!
+      have hhead : head ≤ data.size := hc _ hiNat
+      let cRing := (c.set! (prevSize + hNat) posU.toNat).set!
+        (posU.toNat &&& 0x7FFF) head
+      have hmask : posU.toNat &&& 0x7FFF < c.size := by
+        have hm := winMask_lt posU.toNat
+        simp only [chainWinSize] at hprev hm
+        omega
+      have hcHash : ∀ i, i < (c.set! (prevSize + hNat) posU.toNat).size →
+          (c.set! (prevSize + hNat) posU.toNat)[i]! ≤ data.size :=
+        array_getElem_le_set! c data.size _ _ hc hiNat hpos
+      have hcRing : ∀ i, i < cRing.size → cRing[i]! ≤ data.size := by
+        exact array_getElem_le_set! _ data.size _ _ hcHash (by rwa [Array.size_set!]) hhead
+      have hcRingSize : cRing.size = c.size := by
+        simp only [cRing, Array.size_set!]
+      have hcsRing : prevSize + 65536 ≤ cRing.size := by rwa [hcRingSize]
+      let hshU := hash3L1U data dataSizeU posU hds hfit hlt
+      have hhU : hshU.toNat < 65536 :=
+        hash3L1U_toNat_lt data dataSizeU posU hds hfit hlt
+      have hidxU : (prevSizeU + hshU).toNat = prevSize + hNat := by
+        exact eidx hlt
+      have hbU : (prevSizeU + hshU).toNat < c.size := by rwa [hidxU]
+      let headNative := c.uget (prevSizeU + hshU) hbU
+      have eheadNative : headNative = head := by
+        simp only [headNative, Array.uget, eget, hidxU, head, hNat]
+      let cHashU := c.uset (prevSizeU + hshU) posU.toNat hbU
+      have hmaskU : (posU &&& 0x7FFF).toNat < cHashU.size := by
+        simp only [cHashU, Array.size_uset, emask]
+        exact hmask
+      let cRingU := cHashU.uset (posU &&& 0x7FFF) headNative hmaskU
+      have ecRingU : cRingU = cRing := by
+        simp only [cRingU, cHashU, Array.uset, eset, hidxU, emask,
+          eheadNative, cRing]
+      have eheadNative' := eheadNative
+      simp only [headNative, hshU] at eheadNative'
+      have ecRingU' := ecRingU
+      simp only [cRingU, cHashU, headNative, hshU] at ecRingU'
+      have ecRingRaw := ecRingU
+      simp only [cRingU, cHashU, headNative, hshU, Array.uget, Array.uset] at ecRingRaw
+      have hposLe : posU ≤ dataSizeU := by
+        rw [USize.le_iff_toNat_le, hds]
+        exact hpos
+      let remU := dataSizeU - posU
+      have hremN : remU.toNat = data.size - posU.toNat := by
+        unfold remU
+        rw [USize.toNat_sub_of_le _ _ hposLe, hds]
+      let maxLenU := if remU < 258 then remU else 258
+      let maxLen := min 258 (data.size - posU.toNat)
+      have h258 : (258 : USize).toNat = 258 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hmaxN : maxLenU.toNat = maxLen := by
+        unfold maxLenU maxLen
+        split
+        · rename_i hr
+          have hrN := USize.lt_iff_toNat_lt.mp hr
+          rw [h258, hremN] at hrN
+          rw [Nat.min_eq_right (by omega)]
+          exact hremN
+        · rename_i hr
+          have hrN : 258 ≤ remU.toNat := by
+            rw [← h258]
+            exact Nat.le_of_not_lt (fun hh => hr (USize.lt_iff_toNat_lt.mpr hh))
+          rw [hremN] at hrN
+          rw [Nat.min_eq_left hrN]
+          exact h258
+      have hmax258 : maxLen ≤ 258 := by simp only [maxLen]; omega
+      have hmaxVal : maxLen.toUSize = maxLenU := by
+        apply USize.toNat_inj.mp
+        rw [toUSize_toNat_of_lt (by omega), hmaxN]
+      have hmaxValRev' := hmaxVal.symm
+      simp only [maxLenU, remU, maxLen] at hmaxValRev'
+      have hpmN : posU.toNat + maxLen ≤ data.size := by
+        simp only [maxLen]
+        omega
+      have hwalk : min chainWinSize data.size ≤ cRing.size := by omega
+      have hdataRound : data.size.toUSize.toNat = data.size :=
+        toUSize_toNat_of_lt hsz
+      have hwinRound : (32768 : Nat).toUSize.toNat = 32768 :=
+        toUSize_toNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hheadRound : head.toUSize.toNat = head :=
+        toUSize_toNat_of_lt (by omega)
+      have hfourRound : (4 : Nat).toUSize.toNat = 4 :=
+        toUSize_toNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hg : chainWalkPackedUUSafe data cRing 32768 maxLen head 4 :=
+        ⟨hwalk, hdataRound, hwinRound, hheadRound, hfourRound, by omega, hshift⟩
+      let rU := chainWalkPackedUU data cRing hwalk hsz 32768 posU maxLenU maxLenU
+        head.toUSize 4 0 0 (by rw [hmaxN]; exact hpmN)
+      let rC := chainWalkPackedUUChecked data cRing 32768 posU.toNat maxLen 258
+        hpmN head 4 hg
+      have hrEq : rU = rC := by
+        simp only [rU, rC, chainWalkPackedUUChecked, USize.ofNat_toNat,
+          hmaxVal, Nat.min_eq_right hmax258]
+        congr
+      let walk := chainWalkGuardedPackedU data cRing 32768 posU.toNat maxLen 258
+        hpmN head 4 0 0
+      have hlow : (rU &&& 0x1FF).toNat = walk % 512 := by
+        rw [hrEq]
+        exact chainWalkPackedUUChecked_low data cRing 32768 posU.toNat maxLen 258
+          hpmN head 4 hg
+      have hhigh : (rU >>> 9).toNat = walk / 512 := by
+        rw [hrEq]
+        exact chainWalkPackedUUChecked_high data cRing 32768 posU.toNat maxLen 258
+          hpmN head 4 hg
+      have hmatchLe : walk % 512 ≤ maxLen := by
+        unfold walk
+        rw [chainWalkGuardedPackedU_eq,
+          chainWalkGuardedPacked_mod data cRing 32768 posU.toNat maxLen 258 hpmN head 4
+            (by omega)]
+        exact chainWalk_fst_le data cRing 32768 posU.toNat maxLen 258 hpmN head 4
+      have hg' := hg
+      simp only [cRing, maxLen, head, hNat] at hg'
+      have hlow' := hlow
+      simp only [rU, walk, cRing, maxLen, maxLenU, remU, head, hNat] at hlow'
+      have hhigh' := hhigh
+      simp only [rU, walk, cRing, maxLen, maxLenU, remU, head, hNat] at hhigh'
+      have hlow'' := hlow'
+      simp only [hmaxValRev'] at hlow''
+      have hhigh'' := hhigh'
+      simp only [hmaxValRev'] at hhigh''
+      simp only [Array.uget, Array.uset, eidx, emask, eset, eget,
+        headProbeGuarded_eq, guardedSet_eq, dif_pos hg',
+        hmaxValRev', hlow'', hhigh'', chainWalkPackedUUChecked_low,
+        chainWalkPackedUUChecked_high]
+      have hthree : (3 : USize).toNat = 3 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have hgeIff : (rU &&& 0x1FF) ≥ 3 ↔ walk % 512 ≥ 3 := by
+        rw [ge_iff_le, USize.le_iff_toNat_le, hthree, hlow, ge_iff_le]
+      split
+      · rename_i hgeU
+        have hgeU0 : (rU &&& 0x1FF) ≥ 3 := by
+          simpa only [rU, cRing, maxLenU, remU, head, hNat, hmaxValRev'] using hgeU
+        have hgeCommon : walk % 512 ≥ 3 := hgeIff.mp hgeU0
+        have hleCommon : posU.toNat + walk % 512 ≤ data.size := by omega
+        have hsum : (posU + (rU &&& 0x1FF)).toNat =
+            posU.toNat + walk % 512 := by
+          rw [USize.toNat_add, hlow]
+          apply Nat.mod_eq_of_lt
+          omega
+        have hleU0 : posU + (rU &&& 0x1FF) ≤ dataSizeU := by
+          rw [USize.le_iff_toNat_le, hsum, hds]
+          omega
+        have hleU' := hleU0
+        simp only [rU, cRing, maxLenU, remU, head, hNat, hmaxValRev'] at hleU'
+        split
+        · rename_i _hleU
+          let q := lz77Chain.chainWalk data cRing 32768 posU.toNat maxLen 258
+            hpmN head 4 0 0
+          have hq := chainWalk_spec data cRing 32768 posU.toNat maxLen 258
+            hpmN head 4 0 0 (Or.inl rfl)
+          have hmod : walk % 512 = q.1 := by
+            unfold walk q
+            rw [chainWalkGuardedPackedU_eq,
+              chainWalkGuardedPacked_mod data cRing 32768 posU.toNat maxLen 258
+                hpmN head 4 (by omega)]
+          have hdiv : walk / 512 = q.2 := by
+            unfold walk q
+            rw [chainWalkGuardedPackedU_eq,
+              chainWalkGuardedPacked_div data cRing 32768 posU.toNat maxLen 258
+                hpmN head 4 (by omega)]
+          have hposWalk : walk / 512 < posU.toNat := by
+            obtain hzero | hgood := hq
+            · have hz : q.1 = 0 := by simpa only [q] using hzero
+              rw [hmod] at hgeCommon
+              omega
+            · rw [hdiv]
+              exact hgood.1
+          have hposHigh : rU >>> 9 ≤ posU := by
+            rw [USize.le_iff_toNat_le, hhigh]
+            omega
+          have hdist : (posU - (rU >>> 9)).toNat = posU.toNat - walk / 512 := by
+            rw [USize.toNat_sub_of_le _ _ hposHigh, hhigh]
+          have hmlU : 3 ≤ (rU &&& 0x1FF).toNat := by
+            rw [hlow]
+            exact hgeCommon
+          have hmaskS : (posU &&& 0x7FFF).toNat <
+              (c.set (prevSizeU + hshU).toNat posU.toNat hbU).size := by
+            rw [Array.size_set]
+            rw [emask]
+            exact hmask
+          let cRingS := (c.set (prevSizeU + hshU).toNat posU.toNat hbU).set
+            (posU &&& 0x7FFF).toNat (c[(prevSizeU + hshU).toNat]'hbU) hmaskS
+          have ecRingS : cRingS = cRing := by
+            calc
+              cRingS = cRingU := by rfl
+              _ = cRing := ecRingU
+          have hcsRingS : prevSize + 65536 ≤ cRingS.size := by
+            rw [ecRingS]
+            exact hcsRing
+          have hcRingS : ∀ i, i < cRingS.size → cRingS[i]! ≤ data.size := by
+            rw [ecRingS]
+            exact hcRing
+          let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 cRingS
+            hds hpsU hfit hprev hcsRingS hpos (by rw [USize.toNat_one]; omega)
+          have hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcsRingS
+          have hc1b : ∀ i, i < c1.val.size → c1.val[i]! ≤ data.size :=
+            insertHashL1U_bounded data prevSize dataSizeU prevSizeU posU 1 cRingS
+              hds hpsU hfit hprev hcsRingS hpos (by rw [USize.toNat_one]; omega) hcRingS
+          let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
+            hds hpsU hfit hprev hc1s hpos (by rw [h2]; omega)
+          have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
+          have hc2b : ∀ i, i < c2.val.size → c2.val[i]! ≤ data.size :=
+            insertHashL1U_bounded data prevSize dataSizeU prevSizeU posU 2 c1.val
+              hds hpsU hfit hprev hc1s hpos (by rw [h2]; omega) hc1b
+          have hc12 : c2.val = updateHashesMergedGuarded data 65536 prevSize cRing
+              posU.toNat 1 (walk % 512) 2 := by
+            calc
+              c2.val = updateHashesMergedGuarded data 65536 prevSize cRingS
+                  posU.toNat 1 (rU &&& 0x1FF).toNat 2 := by
+                dsimp only [c2, c1]
+                exact insertHashL1U_cap2_eq data prevSize dataSizeU prevSizeU posU cRingS
+                  hds hpsU hfit hprev hcsRingS hpos (rU &&& 0x1FF).toNat hmlU
+              _ = updateHashesMergedGuarded data 65536 prevSize cRing
+                  posU.toNat 1 (rU &&& 0x1FF).toNat 2 := by rw [ecRingS]
+              _ = _ := by rw [hlow]
+          have hc12Raw := hc12
+          simp only [c2, c1, cRingS, hshU] at hc12Raw
+          let nextU := posU + (rU &&& 0x1FF)
+          have hnext : nextU.toNat = posU.toNat + walk % 512 := by
+            exact hsum
+          let w := packTok (.reference (walk % 512) (posU - (rU >>> 9)).toNat)
+          let wN := packTok (.reference (walk % 512) (posU.toNat - walk / 512))
+          have ew : w = wN := by simp only [w, wN, hdist]
+          have hdist' := hdist
+          simp only [rU, walk, cRing, maxLenU, maxLen, remU, head, hNat,
+            hmaxValRev'] at hdist'
+          have hsum' := hsum
+          simp only [rU, walk, cRing, maxLenU, maxLen, remU, head, hNat,
+            hmaxValRev'] at hsum'
+          have hi := ih (data.size - nextU.toNat) (by rw [hnext, ← hn]; omega)
+            c2.val hc2s nextU (by rw [hnext]; omega) hc2b
+            (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w) rfl
+          simpa only [c2, c1, cRingS, hshU, nextU, hsum', hc12Raw, hdist', ew,
+            rU, wN, walk, cRing, maxLenU, maxLen, remU, head, hNat, hmaxValRev'] using hi
+        · rename_i hleU
+          exact absurd hleU' hleU
+      · rename_i hgeU
+        have hnCommon : ¬ walk % 512 ≥ 3 := by
+          intro hh
+          apply hgeU
+          have := hgeIff.mpr hh
+          simpa only [rU, cRing, maxLenU, remU, head, hNat, hmaxValRev'] using this
+        split
+        · rename_i hgeN
+          exact absurd (by
+            simpa only [walk, cRing, maxLen, head, hNat] using hgeN) hnCommon
+        · simp only [uget_eq_getElem]
+          have hnext : (posU + 1).toNat = posU.toNat + 1 := by
+            rw [USize.toNat_add, USize.toNat_one]
+            apply Nat.mod_eq_of_lt
+            omega
+          let w := packTok (.literal data[posU.toNat])
+          have hi := ih (data.size - (posU + 1).toNat) (by rw [hnext, ← hn]; omega)
+            cRing hcsRing (posU + 1) (by rw [hnext]; omega) hcRing
+            (acc.push w) (bumpLitFreqP litF w) distF rfl
+          simpa only [hnext] using hi
+    · rw [dif_neg (fun h => hlt (hcond.mp h)), dif_neg hlt]
+
 /-- A packed literal token has the tag bit clear. -/
 theorem packTok_literal_tag (b : UInt8) :
     packTok (.literal b) &&& ((1 : UInt32) <<< 31) = 0 := by

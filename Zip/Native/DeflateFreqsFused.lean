@@ -284,26 +284,37 @@ def lz77GreedyMergedLoopF1U (data : ByteArray) (prevSize : Nat)
     let matchPosU := r >>> 9
     if hge : matchLenU ≥ 3 then
       if hle : posU + matchLenU ≤ dataSizeU then
-        if hprogress : posU < posU + matchLenU then
-          have hnextPos : (posU + matchLenU).toNat ≤ data.size := by
-            have hh := USize.le_iff_toNat_le.mp hle
-            rw [hds] at hh
+        have hmask511 : matchLenU.toNat ≤ 511 := by
+          unfold matchLenU
+          rw [USize.toNat_and,
+            USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+          exact Nat.and_le_right
+        have hsum : (posU + matchLenU).toNat = posU.toNat + matchLenU.toNat := by
+          rw [USize.toNat_add]
+          apply Nat.mod_eq_of_lt
+          omega
+        have hnextPos : (posU + matchLenU).toNat ≤ data.size := by
+          have hh := USize.le_iff_toNat_le.mp hle
+          rw [hds] at hh
+          exact hh
+        have hdec : data.size - (posU + matchLenU).toNat < data.size - posU.toNat := by
+          have hgeN : 3 ≤ matchLenU.toNat := by
+            have hh := USize.le_iff_toNat_le.mp hge
+            rw [USize.toNat_ofNat_of_lt
+              (Nat.lt_of_lt_of_le (by decide) USize.le_size)] at hh
             exact hh
-          have hdec : data.size - (posU + matchLenU).toNat < data.size - posU.toNat := by
-            have hh := USize.lt_iff_toNat_lt.mp hprogress
-            omega
-          let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 cRing
-            hds hpsU hfit hprev hcs' hpos (by rw [USize.toNat_one]; omega)
-          have hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcs'
-          let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
-            hds hpsU hfit hprev hc1s hpos (by rw [h2v]; omega)
-          have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
-          let w := packTok (.reference matchLenU.toNat (posU - matchPosU).toNat)
-          lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
-            c2.val hc2s (posU + matchLenU) hnextPos
-            (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w)
-        else
-          trailingPF data posU.toNat acc litF distF
+          rw [hsum] at hnextPos ⊢
+          omega
+        let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 cRing
+          hds hpsU hfit hprev hcs' hpos (by rw [USize.toNat_one]; omega)
+        have hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcs'
+        let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
+          hds hpsU hfit hprev hc1s hpos (by rw [h2v]; omega)
+        have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
+        let w := packTok (.reference matchLenU.toNat (posU - matchPosU).toNat)
+        lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
+          c2.val hc2s (posU + matchLenU) hnextPos
+          (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w)
       else
         let b := data.uget posU (by omega)
         let w := packTok (.literal b)
