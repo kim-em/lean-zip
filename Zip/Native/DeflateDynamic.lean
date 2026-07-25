@@ -967,7 +967,7 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
 
     The mid-band values are the `mid-sweep` optimum for the #2737 ladder
     (Silesia grid over chain × `goodMatch` × split, then interleaved pinned
-    timing): L4 = 64 (with the lazy gate, the old L5 point). **L5 = 22 after
+    timing): L4 = 64 (with the lazy gate, the old L5 point). **L5 = 24 since
     the L5 re-grid** (`gate-sweep`, run after the hash3 singleton #2824, gm/ld
     re-grid #2825, and greedy re-grid #2830 landings): the old L5 = (128,
     single-block, gate off) had fallen ~14% inside the L4↔L6 mixing line — the
@@ -975,9 +975,10 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     *split* point (initially chain 24, gate 64, probe /4, no singleton) matches the old
     L5's speed while banking −0.53pp weighted-Silesia ratio (0.3302 → 0.3249),
     +4% above the blend; every deeper single-block point stayed inside it. The
-    later `l5-cadence-finalists` sweep jointly retuned that point's chain and
-    split cadence: chain 22 with a 2016-token observation window keeps strict
-    ratio margin over miniz_oxide L5 and wins the paired corpus timing.
+    later `l5-cadence-finalists` sweep found a faster large-stream point at
+    chain 22 with a 2016-token observation window. `lazyChainDepthFor` selects
+    it only on large inputs; smaller streams retain this chain-24 point so the
+    established small-input frontier remains available.
     **L6's depth drops back to 64 on purpose** (the split tier historically
     started there): at equal
     cycles the observation-divergence split + a shallow chain beats a deep
@@ -1014,7 +1015,7 @@ def chainDepth (level : UInt8) : Nat :=
   else if level ≤ 2 then 8
   else if level ≤ 3 then 16
   else if level ≤ 4 then 64
-  else if level ≤ 5 then 22
+  else if level ≤ 5 then 24
   else if level ≤ 7 then 64
   else if level ≤ 8 then 512
   else 1024
@@ -1128,6 +1129,24 @@ def lazyDepth (level : UInt8) : Nat :=
   if level == 5 then chainDepth level / 4
   else if level == 6 then 8
   else chainDepth level / 2
+
+/-- Minimum stream size for L5's speed-oriented large-input policy. The coarse
+    split checks and shallower chain amortize well on multi-megabyte streams;
+    smaller inputs keep the established chain-24 / 512-token policy, preserving
+    its output and its separate small-input Pareto point. -/
+def l5LargeInputMinSize : Nat := 4 * 1024 * 1024
+
+/-- Whether this call uses L5's large-stream matcher/split retune. -/
+def useL5LargeInputPolicy (data : ByteArray) (level : UInt8) : Bool :=
+  level == 5 && l5LargeInputMinSize ≤ data.size
+
+/-- Lazy-tier chain depth after the size-aware L5 retune. -/
+def lazyChainDepthFor (data : ByteArray) (level : UInt8) : Nat :=
+  if useL5LargeInputPolicy data level then 22 else chainDepth level
+
+/-- Lazy lookahead depth paired with `lazyChainDepthFor`. -/
+def lazyDepthFor (data : ByteArray) (level : UInt8) : Nat :=
+  if useL5LargeInputPolicy data level then 22 / 4 else lazyDepth level
 
 /-- Number of contiguous sample regions the pre-scan reads, spread end to end
     across the input (first at offset 0, last ending at `n`). A region that looks
@@ -1271,7 +1290,7 @@ def lazy2StepsLevel (level : UInt8) : Nat :=
     Levels 6–8 additionally enable the hash3 length-3 singleton, content-gated by
     `useH3For` (on only when the input classifies as low-compressibility). -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
+  if 4 ≤ level then lz77ChainLazyIter data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -1280,7 +1299,7 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : TokenArray :=
-  if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
+  if 4 ≤ level then lz77ChainLazyIterPMerged data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-! ## Self-contained block-split dynamic compression
@@ -1462,13 +1481,13 @@ def splitNumClasses : Nat := 10
 def splitCheckTokens : Nat := 512
 
 /-- Per-level observation-window cadence for the shared-block split heuristic.
-    L5 uses a coarser window: at its shallow chain, checking every 2016 tokens
-    preserves enough block adaptation to remain smaller than miniz_oxide L5 on
-    Silesia while removing much of the entropy-check and tree-preparation overhead.
-    L6–L8 retain the established 512-token cadence, so their bytes are
-    unchanged. -/
-def splitCheckTokensLevel (level : UInt8) : Nat :=
-  if level == 5 then 2016 else splitCheckTokens
+    Large-stream L5 uses a coarser window: at its shallow chain, checking every
+    2016 tokens preserves enough block adaptation to remain smaller than
+    miniz_oxide L5 on Silesia while removing much of the entropy-check and
+    tree-preparation overhead. Small L5 streams and L6–L8 retain the established
+    512-token cadence, so their bytes are unchanged. -/
+def splitCheckTokensFor (data : ByteArray) (level : UInt8) : Nat :=
+  if useL5LargeInputPolicy data level then 2016 else splitCheckTokens
 
 /-- Floor on block *output* bytes, and on bytes remaining after a cut
     (libdeflate `MIN_BLOCK_LENGTH`): per-block tree headers stop paying for
@@ -2851,7 +2870,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
       -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
       let cuts := chooseSplitsHeuristicP ptokens data.size splitMinBlockBytes
-        splitSoftMaxBlockBytes (splitCheckTokensLevel level)
+        splitSoftMaxBlockBytes (splitCheckTokensFor data level)
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
       -- the split, matching `pickSmaller`), so the loser's captured per-block
