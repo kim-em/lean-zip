@@ -276,11 +276,245 @@ private theorem insertHashL1U_bounded (data : ByteArray) (prevSize : Nat)
     · exact hc _ hidx
    · exact hc
 
-/-- The level-one native-word outer loop is the fixed-policy generic fused
-    loop.  The pointwise state invariant is proof-only; it witnesses that every
-    `Nat` chain head converted to `USize` round-trips exactly. -/
+/-- Congruence for functions whose second argument proves a bound on the first.
+    Keeping this transport opaque prevents large callers from inlining the
+    dependent equality proof. -/
+private theorem dependentUSizeBound_congr {n : Nat} {α : Sort u}
+    (f : (p : USize) → p.toNat ≤ n → α) {p q : USize}
+    (hp : p.toNat ≤ n) (hq : q.toNat ≤ n) (h : p = q) :
+    f p hp = f q hq := by
+  subst q
+  rfl
+
+private theorem dependentArrayBound_congr {n : Nat} {α : Sort u}
+    (f : (a : Array Nat) → n ≤ a.size → α) {a b : Array Nat}
+    (ha : n ≤ a.size) (hb : n ≤ b.size) (h : a = b) :
+    f a ha = f b hb := by
+  subst b
+  rfl
+
+private theorem congrArgOpaque {α : Sort u} {β : Sort v} (f : α → β)
+    {a b : α} (h : a = b) : f a = f b := by
+  subst b
+  rfl
+
+private theorem eqTrans3Opaque {α : Sort u} {a b c d : α}
+    (hab : a = b) (hbc : b = c) (hcd : c = d) : a = d := by
+  exact hab.trans (hbc.trans hcd)
+
+/- The reference branch is deliberately an opaque declaration of its own.
+   Besides keeping the outer strong-recursion term small, this keeps the
+   cap-two insertion proof and the dependent recursive-call transports out of
+   the kernel term for the common one-step normalization. -/
 set_option maxRecDepth 100000 in
-theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
+set_option maxHeartbeats 200000 in
+private theorem lz77GreedyMergedLoopF1U_reference_step
+    (data : ByteArray) (prevSize : Nat) (dataSizeU prevSizeU : USize)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hsz : data.size < USize.size) (hfit : data.size * 512 + 511 < USize.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hprev : prevSize ≤ chainWinSize)
+    (cRing cRingS : Array Nat) (ecRingS : cRingS = cRing)
+    (hcsRing : prevSize + 65536 ≤ cRing.size)
+    (hcRing : ∀ i, i < cRing.size → cRing[i]! ≤ data.size)
+    (posU : USize) (hpos : posU.toNat ≤ data.size)
+    (acc : TokenArray)
+    (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30})
+    (maxLen head : Nat) (hmax258 : maxLen ≤ 258)
+    (hpmN : posU.toNat + maxLen ≤ data.size)
+    (rRaw rU : USize) (erRaw : rRaw = rU) (walk : Nat)
+    (hwalkEq : walk = chainWalkGuardedPackedU data cRing 32768 posU.toNat
+      maxLen 258 hpmN head 4 0 0)
+    (hlow : (rU &&& 0x1FF).toNat = walk % 512)
+    (hhigh : (rU >>> 9).toNat = walk / 512)
+    (hgeCommon : walk % 512 ≥ 3)
+    (hleCommon : posU.toNat + walk % 512 ≤ data.size)
+    (hsum : (posU + (rU &&& 0x1FF)).toNat = posU.toNat + walk % 512)
+    (h2 : (2 : USize).toNat = 2)
+    (n : Nat) (hn : data.size - posU.toNat = n)
+    (ih : ∀ (m : Nat), m < n →
+      ∀ (c' : Array Nat) (hcs' : prevSize + 65536 ≤ c'.size)
+        (posU' : USize) (hpos' : posU'.toNat ≤ data.size),
+      (∀ i, i < c'.size → c'[i]! ≤ data.size) →
+      ∀ (acc' : TokenArray)
+        (litF' : {a : Array Nat // a.size = 286})
+        (distF' : {a : Array Nat // a.size = 30}),
+        data.size - posU'.toNat = m →
+        lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+            hpv hprev c' hcs' posU' hpos' acc' litF' distF' =
+          lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+            c' posU'.toNat acc' litF' distF') :
+    let hcsRingS : prevSize + 65536 ≤ cRingS.size := by
+      rw [ecRingS]
+      exact hcsRing
+    let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 cRingS
+      hds hpsU hfit hprev hcsRingS hpos (by rw [USize.toNat_one]; omega)
+    let hc1s : prevSize + 65536 ≤ c1.val.size := by
+      rw [c1.property]
+      exact hcsRingS
+    let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
+      hds hpsU hfit hprev hc1s hpos (by rw [h2]; omega)
+    let hc2s : prevSize + 65536 ≤ c2.val.size := by
+      rw [c2.property]
+      exact hc1s
+    let nextRaw := posU + (rRaw &&& 0x1FF)
+    let hrawBound : nextRaw.toNat ≤ data.size := by
+      simp only [nextRaw, erRaw]
+      rw [hsum]
+      exact hleCommon
+    let wRaw := packTok (.reference (rRaw &&& 0x1FF).toNat
+      (posU - (rRaw >>> 9)).toNat)
+    let updated := updateHashesMergedGuarded data 65536 prevSize cRing
+      posU.toNat 1 (walk % 512) 2
+    let wN := packTok (.reference (walk % 512) (posU.toNat - walk / 512))
+    lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev c2.val hc2s nextRaw hrawBound
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) =
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258 updated
+        (posU.toNat + walk % 512) (acc.push wN)
+        (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN) := by
+  simp only
+  let q := lz77Chain.chainWalk data cRing 32768 posU.toNat maxLen 258
+    hpmN head 4 0 0
+  have hq := chainWalk_spec data cRing 32768 posU.toNat maxLen 258
+    hpmN head 4 0 0 (Or.inl rfl)
+  have hmod : walk % 512 = q.1 := by
+    rw [hwalkEq]
+    unfold q
+    rw [chainWalkGuardedPackedU_eq,
+      chainWalkGuardedPacked_mod data cRing 32768 posU.toNat maxLen 258
+        hpmN head 4 (by omega)]
+  have hdiv : walk / 512 = q.2 := by
+    rw [hwalkEq]
+    unfold q
+    rw [chainWalkGuardedPackedU_eq,
+      chainWalkGuardedPacked_div data cRing 32768 posU.toNat maxLen 258
+        hpmN head 4 (by omega)]
+  have hposWalk : walk / 512 < posU.toNat := by
+    obtain hzero | hgood := hq
+    · have hz : q.1 = 0 := by simpa only [q] using hzero
+      rw [hmod] at hgeCommon
+      omega
+    · rw [hdiv]
+      exact hgood.1
+  have hposHigh : rU >>> 9 ≤ posU := by
+    rw [USize.le_iff_toNat_le, hhigh]
+    omega
+  have hdist : (posU - (rU >>> 9)).toNat = posU.toNat - walk / 512 := by
+    rw [USize.toNat_sub_of_le _ _ hposHigh, hhigh]
+  have hmlU : 3 ≤ (rU &&& 0x1FF).toNat := by
+    rw [hlow]
+    exact hgeCommon
+  have hcsRingS : prevSize + 65536 ≤ cRingS.size := by
+    rw [ecRingS]
+    exact hcsRing
+  have hcRingS : ∀ i, i < cRingS.size → cRingS[i]! ≤ data.size := by
+    rw [ecRingS]
+    exact hcRing
+  let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 cRingS
+    hds hpsU hfit hprev hcsRingS hpos (by rw [USize.toNat_one]; omega)
+  have hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcsRingS
+  have hc1b : ∀ i, i < c1.val.size → c1.val[i]! ≤ data.size :=
+    insertHashL1U_bounded data prevSize dataSizeU prevSizeU posU 1 cRingS
+      hds hpsU hfit hprev hcsRingS hpos (by rw [USize.toNat_one]; omega) hcRingS
+  let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
+    hds hpsU hfit hprev hc1s hpos (by rw [h2]; omega)
+  have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
+  have hc2b : ∀ i, i < c2.val.size → c2.val[i]! ≤ data.size :=
+    insertHashL1U_bounded data prevSize dataSizeU prevSizeU posU 2 c1.val
+      hds hpsU hfit hprev hc1s hpos (by rw [h2]; omega) hc1b
+  have hc12 : c2.val = updateHashesMergedGuarded data 65536 prevSize cRing
+      posU.toNat 1 (walk % 512) 2 := by
+    calc
+      c2.val = updateHashesMergedGuarded data 65536 prevSize cRingS
+          posU.toNat 1 (rU &&& 0x1FF).toNat 2 := by
+        dsimp only [c2, c1]
+        exact insertHashL1U_cap2_eq data prevSize dataSizeU prevSizeU posU cRingS
+          hds hpsU hfit hprev hcsRingS hpos (rU &&& 0x1FF).toNat hmlU
+      _ = updateHashesMergedGuarded data 65536 prevSize cRing
+          posU.toNat 1 (rU &&& 0x1FF).toNat 2 := by rw [ecRingS]
+      _ = _ := by rw [hlow]
+  let nextU := posU + (rU &&& 0x1FF)
+  have hnext : nextU.toNat = posU.toNat + walk % 512 := hsum
+  let w := packTok (.reference (walk % 512) (posU - (rU >>> 9)).toNat)
+  let wN := packTok (.reference (walk % 512) (posU.toNat - walk / 512))
+  have ew : w = wN := by simp only [w, wN, hdist]
+  let nextRaw := posU + (rRaw &&& 0x1FF)
+  have enextRaw : nextRaw = nextU := by simp only [nextRaw, nextU, erRaw]
+  let wRaw := packTok (.reference (rRaw &&& 0x1FF).toNat
+    (posU - (rRaw >>> 9)).toNat)
+  have ewRaw : wRaw = wN := by
+    simp only [wRaw, wN, erRaw, hlow, hdist]
+  have hnextBound : nextU.toNat ≤ data.size := by rw [hnext]; exact hleCommon
+  have hrawBound : nextRaw.toNat ≤ data.size := by
+    rw [enextRaw]
+    exact hnextBound
+  let updated := updateHashesMergedGuarded data 65536 prevSize cRing
+    posU.toNat 1 (walk % 512) 2
+  have hupdatedSize : prevSize + 65536 ≤ updated.size := by
+    dsimp only [updated]
+    rw [← hc12]
+    exact hc2s
+  have hi := ih (data.size - nextU.toNat) (by rw [hnext, ← hn]; omega)
+    c2.val hc2s nextU hnextBound hc2b
+    (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w) rfl
+  simp only [hc12, hnext, ew] at hi
+  have hcall := dependentUSizeBound_congr
+    (fun p hp =>
+      lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz
+        hfit hpv hprev updated hupdatedSize p hp
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw))
+    hrawBound hnextBound enextRaw
+  change
+    lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev updated hupdatedSize nextRaw hrawBound
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) =
+      lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev updated hupdatedSize nextU hnextBound
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) at hcall
+  have htoken := congrArgOpaque
+    (fun z =>
+      lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz
+        hfit hpv hprev updated hupdatedSize nextU hnextBound
+        (acc.push z) (bumpRefLitFreqP litF z) (bumpRefDistFreqP distF z)) ewRaw
+  change
+    lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev updated hupdatedSize nextU hnextBound
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) =
+      lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev updated hupdatedSize nextU hnextBound
+        (acc.push wN) (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN) at htoken
+  change
+    lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev updated hupdatedSize nextU hnextBound
+        (acc.push wN) (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN) =
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258 updated
+        (posU.toNat + walk % 512) (acc.push wN)
+        (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN) at hi
+  change
+    lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev c2.val hc2s nextRaw hrawBound
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) =
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258 updated
+        (posU.toNat + walk % 512) (acc.push wN)
+        (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN)
+  have hcNative := dependentArrayBound_congr
+    (fun z hz =>
+      lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev z hz nextRaw hrawBound
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw))
+    hc2s hupdatedSize hc12
+  change
+    lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev c2.val hc2s nextRaw hrawBound
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) =
+      lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+        hpv hprev updated hupdatedSize nextRaw hrawBound
+        (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) at hcNative
+  exact hcNative.trans (eqTrans3Opaque hcall htoken hi)
+
+set_option maxRecDepth 100000 in
+set_option maxHeartbeats 200000 in
+private theorem lz77GreedyMergedLoopF1U_eq_step (data : ByteArray) (prevSize : Nat)
     (dataSizeU prevSizeU : USize)
     (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
     (hsz : data.size < USize.size) (hfit : data.size * 512 + 511 < USize.size)
@@ -290,14 +524,24 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
     (posU : USize) (hpos : posU.toNat ≤ data.size)
     (hc : ∀ i, i < c.size → c[i]! ≤ data.size)
     (acc : TokenArray)
-    (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30}) :
+    (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30})
+    (n : Nat) (hn : data.size - posU.toNat = n)
+    (ih : ∀ (m : Nat), m < n →
+      ∀ (c' : Array Nat) (hcs' : prevSize + 65536 ≤ c'.size)
+        (posU' : USize) (hpos' : posU'.toNat ≤ data.size),
+      (∀ i, i < c'.size → c'[i]! ≤ data.size) →
+      ∀ (acc' : TokenArray)
+        (litF' : {a : Array Nat // a.size = 286})
+        (distF' : {a : Array Nat // a.size = 30}),
+        data.size - posU'.toNat = m →
+        lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
+            hpv hprev c' hcs' posU' hpos' acc' litF' distF' =
+          lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+            c' posU'.toNat acc' litF' distF') :
     lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
         c hcs posU hpos acc litF distF =
       lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
         c posU.toNat acc litF distF := by
-  induction hn : data.size - posU.toNat using Nat.strongRecOn
-      generalizing c posU acc litF distF with
-  | _ n ih =>
     rw [lz77GreedyMergedLoopF1U, lz77GreedyMergedLoopF]
     have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
     have h2 : (2 : USize).toNat = 2 :=
@@ -371,12 +615,19 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
       have ecRingU : cRingU = cRing := by
         simp only [cRingU, cHashU, Array.uset, eset, hidxU, emask,
           eheadNative, cRing]
-      have eheadNative' := eheadNative
-      simp only [headNative, hshU] at eheadNative'
-      have ecRingU' := ecRingU
-      simp only [cRingU, cHashU, headNative, hshU] at ecRingU'
+      have eheadRaw := eheadNative
+      simp only [headNative, hshU, Array.uget] at eheadRaw
       have ecRingRaw := ecRingU
       simp only [cRingU, cHashU, headNative, hshU, Array.uget, Array.uset] at ecRingRaw
+      have ecRingRaw' := ecRingRaw
+      simp only [eheadRaw] at ecRingRaw'
+      have ecRingGuarded :
+          guardedSet
+              (guardedSet c (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt)
+                posU.toNat)
+              (posU.toNat &&& 0x7FFF)
+              c[prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt]! = cRing := by
+        simp only [guardedSet_eq, cRing, hNat, head]
       have hposLe : posU ≤ dataSizeU := by
         rw [USize.le_iff_toNat_le, hds]
         exact hpos
@@ -425,6 +676,10 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
         ⟨hwalk, hdataRound, hwinRound, hheadRound, hfourRound, by omega, hshift⟩
       let rU := chainWalkPackedUU data cRing hwalk hsz 32768 posU maxLenU maxLenU
         head.toUSize 4 0 0 (by rw [hmaxN]; exact hpmN)
+      have erUNorm : chainWalkPackedUU data cRing hwalk hsz 32768 posU
+          maxLen.toUSize maxLen.toUSize head.toUSize 4 0 0
+            (by rw [toUSize_toNat_of_lt (by omega)]; exact hpmN) = rU := by
+        simp only [rU, hmaxVal]
       let rC := chainWalkPackedUUChecked data cRing 32768 posU.toNat maxLen 258
         hpmN head 4 hg
       have hrEq : rU = rC := by
@@ -447,20 +702,9 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
           chainWalkGuardedPacked_mod data cRing 32768 posU.toNat maxLen 258 hpmN head 4
             (by omega)]
         exact chainWalk_fst_le data cRing 32768 posU.toNat maxLen 258 hpmN head 4
-      have hg' := hg
-      simp only [cRing, maxLen, head, hNat] at hg'
-      have hlow' := hlow
-      simp only [rU, walk, cRing, maxLen, maxLenU, remU, head, hNat] at hlow'
-      have hhigh' := hhigh
-      simp only [rU, walk, cRing, maxLen, maxLenU, remU, head, hNat] at hhigh'
-      have hlow'' := hlow'
-      simp only [hmaxValRev'] at hlow''
-      have hhigh'' := hhigh'
-      simp only [hmaxValRev'] at hhigh''
-      simp only [Array.uget, Array.uset, eidx, emask, eset, eget,
-        headProbeGuarded_eq, guardedSet_eq, dif_pos hg',
-        hmaxValRev', hlow'', hhigh'', chainWalkPackedUUChecked_low,
-        chainWalkPackedUUChecked_high]
+      simp only [Array.uget, Array.uset, eheadRaw, ecRingRaw', headProbeGuarded_eq,
+        ecRingGuarded, hmaxValRev',
+        chainWalkPackedUUChecked_low, chainWalkPackedUUChecked_high]
       have hthree : (3 : USize).toNat = 3 :=
         USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
       have hgeIff : (rU &&& 0x1FF) ≥ 3 ↔ walk % 512 ≥ 3 := by
@@ -483,35 +727,6 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
         simp only [rU, cRing, maxLenU, remU, head, hNat, hmaxValRev'] at hleU'
         split
         · rename_i _hleU
-          let q := lz77Chain.chainWalk data cRing 32768 posU.toNat maxLen 258
-            hpmN head 4 0 0
-          have hq := chainWalk_spec data cRing 32768 posU.toNat maxLen 258
-            hpmN head 4 0 0 (Or.inl rfl)
-          have hmod : walk % 512 = q.1 := by
-            unfold walk q
-            rw [chainWalkGuardedPackedU_eq,
-              chainWalkGuardedPacked_mod data cRing 32768 posU.toNat maxLen 258
-                hpmN head 4 (by omega)]
-          have hdiv : walk / 512 = q.2 := by
-            unfold walk q
-            rw [chainWalkGuardedPackedU_eq,
-              chainWalkGuardedPacked_div data cRing 32768 posU.toNat maxLen 258
-                hpmN head 4 (by omega)]
-          have hposWalk : walk / 512 < posU.toNat := by
-            obtain hzero | hgood := hq
-            · have hz : q.1 = 0 := by simpa only [q] using hzero
-              rw [hmod] at hgeCommon
-              omega
-            · rw [hdiv]
-              exact hgood.1
-          have hposHigh : rU >>> 9 ≤ posU := by
-            rw [USize.le_iff_toNat_le, hhigh]
-            omega
-          have hdist : (posU - (rU >>> 9)).toNat = posU.toNat - walk / 512 := by
-            rw [USize.toNat_sub_of_le _ _ hposHigh, hhigh]
-          have hmlU : 3 ≤ (rU &&& 0x1FF).toNat := by
-            rw [hlow]
-            exact hgeCommon
           have hmaskS : (posU &&& 0x7FFF).toNat <
               (c.set (prevSizeU + hshU).toNat posU.toNat hbU).size := by
             rw [Array.size_set]
@@ -523,54 +738,27 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
             calc
               cRingS = cRingU := by rfl
               _ = cRing := ecRingU
-          have hcsRingS : prevSize + 65536 ≤ cRingS.size := by
-            rw [ecRingS]
-            exact hcsRing
-          have hcRingS : ∀ i, i < cRingS.size → cRingS[i]! ≤ data.size := by
-            rw [ecRingS]
-            exact hcRing
-          let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 cRingS
-            hds hpsU hfit hprev hcsRingS hpos (by rw [USize.toNat_one]; omega)
-          have hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcsRingS
-          have hc1b : ∀ i, i < c1.val.size → c1.val[i]! ≤ data.size :=
-            insertHashL1U_bounded data prevSize dataSizeU prevSizeU posU 1 cRingS
-              hds hpsU hfit hprev hcsRingS hpos (by rw [USize.toNat_one]; omega) hcRingS
-          let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
-            hds hpsU hfit hprev hc1s hpos (by rw [h2]; omega)
-          have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
-          have hc2b : ∀ i, i < c2.val.size → c2.val[i]! ≤ data.size :=
-            insertHashL1U_bounded data prevSize dataSizeU prevSizeU posU 2 c1.val
-              hds hpsU hfit hprev hc1s hpos (by rw [h2]; omega) hc1b
-          have hc12 : c2.val = updateHashesMergedGuarded data 65536 prevSize cRing
-              posU.toNat 1 (walk % 512) 2 := by
-            calc
-              c2.val = updateHashesMergedGuarded data 65536 prevSize cRingS
-                  posU.toNat 1 (rU &&& 0x1FF).toNat 2 := by
-                dsimp only [c2, c1]
-                exact insertHashL1U_cap2_eq data prevSize dataSizeU prevSizeU posU cRingS
-                  hds hpsU hfit hprev hcsRingS hpos (rU &&& 0x1FF).toNat hmlU
-              _ = updateHashesMergedGuarded data 65536 prevSize cRing
-                  posU.toNat 1 (rU &&& 0x1FF).toNat 2 := by rw [ecRingS]
-              _ = _ := by rw [hlow]
-          have hc12Raw := hc12
-          simp only [c2, c1, cRingS, hshU] at hc12Raw
-          let nextU := posU + (rU &&& 0x1FF)
-          have hnext : nextU.toNat = posU.toNat + walk % 512 := by
-            exact hsum
-          let w := packTok (.reference (walk % 512) (posU - (rU >>> 9)).toNat)
-          let wN := packTok (.reference (walk % 512) (posU.toNat - walk / 512))
-          have ew : w = wN := by simp only [w, wN, hdist]
-          have hdist' := hdist
-          simp only [rU, walk, cRing, maxLenU, maxLen, remU, head, hNat,
-            hmaxValRev'] at hdist'
-          have hsum' := hsum
-          simp only [rU, walk, cRing, maxLenU, maxLen, remU, head, hNat,
-            hmaxValRev'] at hsum'
-          have hi := ih (data.size - nextU.toNat) (by rw [hnext, ← hn]; omega)
-            c2.val hc2s nextU (by rw [hnext]; omega) hc2b
-            (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w) rfl
-          simpa only [c2, c1, cRingS, hshU, nextU, hsum', hc12Raw, hdist', ew,
-            rU, wN, walk, cRing, maxLenU, maxLen, remU, head, hNat, hmaxValRev'] using hi
+          let rRaw := chainWalkPackedUU data
+                ((c.set! (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt)
+                    posU.toNat).set! (posU.toNat &&& 0x7FFF)
+                  c[prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt]!)
+                hwalk hsz 32768 posU maxLen.toUSize maxLen.toUSize head.toUSize
+                4 0 0 (by rw [toUSize_toNat_of_lt (by omega)]; exact hpmN)
+          have erRaw : rRaw = rU := by
+            simp only [rRaw]
+            exact erUNorm
+          exact lz77GreedyMergedLoopF1U_reference_step
+            (data := data) (prevSize := prevSize) (dataSizeU := dataSizeU)
+            (prevSizeU := prevSizeU) (hds := hds) (hpsU := hpsU)
+            (hsz := hsz) (hfit := hfit) (hpv := hpv) (hprev := hprev)
+            (cRing := cRing) (cRingS := cRingS) (ecRingS := ecRingS)
+            (hcsRing := hcsRing) (hcRing := hcRing) (posU := posU) (hpos := hpos)
+            (acc := acc) (litF := litF) (distF := distF) (maxLen := maxLen)
+            (head := head) (hmax258 := hmax258) (hpmN := hpmN)
+            (rRaw := rRaw) (rU := rU)
+            (erRaw := erRaw) (walk := walk) (hwalkEq := rfl) (hlow := hlow)
+            (hhigh := hhigh) (hgeCommon := hgeCommon) (hleCommon := hleCommon)
+            (hsum := hsum) (h2 := h2) (n := n) (hn := hn) (ih := ih)
         · rename_i hleU
           exact absurd hleU' hleU
       · rename_i hgeU
@@ -594,6 +782,31 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
             (acc.push w) (bumpLitFreqP litF w) distF rfl
           simpa only [hnext] using hi
     · rw [dif_neg (fun h => hlt (hcond.mp h)), dif_neg hlt]
+
+set_option maxRecDepth 100000 in
+/-- The level-one native-word outer loop is the fixed-policy generic fused
+    loop.  The pointwise state invariant is proof-only; it witnesses that every
+    `Nat` chain head converted to `USize` round-trips exactly. -/
+theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
+    (dataSizeU prevSizeU : USize)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hsz : data.size < USize.size) (hfit : data.size * 512 + 511 < USize.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hprev : prevSize ≤ chainWinSize)
+    (hshift : data.size.toUSize < ((~~~(0 : USize)) >>> 9))
+    (c : Array Nat) (hcs : prevSize + 65536 ≤ c.size)
+    (posU : USize) (hpos : posU.toNat ≤ data.size)
+    (hc : ∀ i, i < c.size → c[i]! ≤ data.size)
+    (acc : TokenArray)
+    (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30}) :
+    lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
+        c hcs posU hpos acc litF distF =
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+        c posU.toNat acc litF distF := by
+  induction hn : data.size - posU.toNat using Nat.strongRecOn
+      generalizing c posU acc litF distF with
+  | _ n ih =>
+    exact lz77GreedyMergedLoopF1U_eq_step data prevSize dataSizeU prevSizeU hds hpsU
+      hsz hfit hpv hprev hshift c hcs posU hpos hc acc litF distF n hn ih
 
 /-- A packed literal token has the tag bit clear. -/
 theorem packTok_literal_tag (b : UInt8) :
