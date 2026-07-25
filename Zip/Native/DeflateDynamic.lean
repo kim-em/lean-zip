@@ -309,10 +309,10 @@ def emitTokensWithCodesTAPTFlatFastLoop (data : ByteArray) (acc : UInt64) (bc : 
         let k := total >>> 3
         emitTokensWithCodesTAPTFlatFastLoop
           (BitWriter.flushBytesWideU data acc' k)
-          (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7)
+          (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
           tokens litT distT hlit hdist (i + 1)
       else
-        emitTokensWithCodesTAPTFlatFastLoop data acc' total
+        emitTokensWithCodesTAPTFlatFastLoop data acc' total.toUInt8.toUInt32
           tokens litT distT hlit hdist (i + 1)
     else
       let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
@@ -350,10 +350,10 @@ def emitTokensWithCodesTAPTFlatFastLoop (data : ByteArray) (acc : UInt64) (bc : 
               let k := total >>> 3
               emitTokensWithCodesTAPTFlatFastLoop
                 (BitWriter.flushBytesWideU data0 acc' k)
-                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7)
+                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
                 tokens litT distT hlit hdist (i + 1)
             else
-              emitTokensWithCodesTAPTFlatFastLoop data0 acc' total
+              emitTokensWithCodesTAPTFlatFastLoop data0 acc' total.toUInt8.toUInt32
                 tokens litT distT hlit hdist (i + 1)
           else
             let acc' := acc ||| (bits <<< bc.toUInt64)
@@ -362,10 +362,10 @@ def emitTokensWithCodesTAPTFlatFastLoop (data : ByteArray) (acc : UInt64) (bc : 
               let k := total >>> 3
               emitTokensWithCodesTAPTFlatFastLoop
                 (BitWriter.flushBytesWideU data acc' k)
-                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7)
+                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
                 tokens litT distT hlit hdist (i + 1)
             else
-              emitTokensWithCodesTAPTFlatFastLoop data acc' total
+              emitTokensWithCodesTAPTFlatFastLoop data acc' total.toUInt8.toUInt32
                 tokens litT distT hlit hdist (i + 1)
         else
           let acc' := acc ||| (lenBits <<< bc.toUInt64)
@@ -374,10 +374,10 @@ def emitTokensWithCodesTAPTFlatFastLoop (data : ByteArray) (acc : UInt64) (bc : 
             let k := total >>> 3
             emitTokensWithCodesTAPTFlatFastLoop
               (BitWriter.flushBytesWideU data acc' k)
-              (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7)
+              (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
               tokens litT distT hlit hdist (i + 1)
           else
-            emitTokensWithCodesTAPTFlatFastLoop data acc' total
+            emitTokensWithCodesTAPTFlatFastLoop data acc' total.toUInt8.toUInt32
               tokens litT distT hlit hdist (i + 1)
       else
         emitTokensWithCodesTAPTFlatFastLoop data acc bc
@@ -430,18 +430,17 @@ def emitTokensWithCodesTAPTFlatZero (bw : BitWriter) (tokens : TokenArray)
   emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf bw.bitCount.toUInt32
     tokens litT distT hlit hdist 0
 
-/-- Proof boundary for the flat single-block route.  Its reference body is the
-    existing packed emitter at index zero and its compiled body is the matching
-    flat zero-index entry point.  Unlike the former broad replacement, this
-    wrapper is selected only by `deflateDynamicBlockCorePWithFlat`, whose erased
-    length bounds and flush-extensional correctness theorem justify the
-    replacement.  The shared multi-block emitter continues to call
-    `emitTokensWithCodesTAPT`. -/
+/-- Proof boundary for the flat single-block route.  Its logical body is the
+    factored flat loop and its compiled body is the scalar-specialized zero
+    entry point.  `emitTokensWithCodesTAPTFlatZero_eq_routed` proves these
+    structurally equal under the canonical code-table bounds carried by the
+    single-block caller.  The shared multi-block emitter continues to call the
+    reference `emitTokensWithCodesTAPT`. -/
 @[implemented_by emitTokensWithCodesTAPTFlatZero]
 def emitTokensWithCodesTAPTFlatRouted (bw : BitWriter) (tokens : TokenArray)
     (litT distT : Array UInt32)
     (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
-  emitTokensWithCodesTAPT bw tokens litT distT hlit hdist 0
+  emitTokensWithCodesTAPTFlat bw tokens litT distT hlit hdist 0
 
 /-- Write the dynamic Huffman tree header via BitWriter.
     This is the native equivalent of spec `encodeDynamicTrees`, writing

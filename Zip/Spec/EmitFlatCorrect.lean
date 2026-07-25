@@ -627,6 +627,7 @@ private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt
             (val <<< bc0.toUInt64)) >>> (((bc0 + n) >>> 3).toUInt64 <<< 3) by
         simp only [BitWriter.dropBytesU, if_pos hk]]
     · rw [if_neg hflush, if_neg hflush]
+
   · rw [if_neg hpre, if_neg hpre]
     unfold BitWriter.writeBits64Small
     dsimp only
@@ -660,6 +661,336 @@ private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt
             (((bw.bitCount.toUInt32 + n) >>> 3).toUInt64 <<< 3) by
         simp only [BitWriter.dropBytesU, if_pos hk]]
     · rw [if_neg hflush, if_neg hflush]
+
+/-- No-pre-drain scalar transition used for a literal, whose at-most-15-bit
+    code cannot approach bit 64 from a well-formed pending state. -/
+private def flatWriteBits64FastLiteral (bw : BitWriter)
+    (n : UInt32) (val : UInt64) : BitWriter :=
+  let acc' := bw.bitBuf ||| (val <<< bw.bitCount.toUInt32.toUInt64)
+  let total := bw.bitCount.toUInt32 + n
+  if total ≥ 32 then
+    let k := total >>> 3
+    ⟨BitWriter.flushBytesWideU bw.data acc' k,
+      acc' >>> (k.toUInt64 <<< 3), (total &&& 7).toUInt8⟩
+  else
+    ⟨bw.data, acc', total.toUInt8⟩
+
+private theorem flatWriteBits64FastLiteral_eq (bw : BitWriter)
+    (n : UInt32) (val : UInt64) (hwf : bw.wf) (hn : n.toNat ≤ 15) :
+    flatWriteBits64FastLiteral bw n val = bw.writeBits64 n val := by
+  have hbc := hwf.1
+  have htotal : (bw.bitCount.toUInt32 + n).toNat =
+      bw.bitCount.toNat + n.toNat := by
+    rw [UInt32.toNat_add, UInt8.toNat_toUInt32, Nat.mod_eq_of_lt]
+    omega
+  have hpre : ¬bw.bitCount.toUInt32 + n ≥ (64 : UInt32) := by
+    intro hge
+    have hgeN := UInt32.le_iff_toNat_le.mp hge
+    rw [htotal, show (64 : UInt32).toNat = 64 by decide] at hgeN
+    omega
+  calc
+    flatWriteBits64FastLiteral bw n val = flatWriteBits64Fast bw n val := by
+      unfold flatWriteBits64FastLiteral flatWriteBits64Fast
+      rw [if_neg hpre]
+    _ = bw.writeBits64 n val := flatWriteBits64Fast_eq bw n val hwf (by omega)
+
+/-- The production reference arm flattens the distance-code and distance-extra
+    shifts.  Below bit 64 this is the same packed word as shifting their
+    already-concatenated field. -/
+private theorem flat_ref_bits_reassoc (a b c : UInt64) (n m : UInt32)
+    (h : n.toUInt64 + m.toUInt64 < (64 : UInt64)) :
+    a ||| (b <<< n.toUInt64) ||| (c <<< (n.toUInt64 + m.toUInt64)) =
+      a ||| ((b ||| (c <<< m.toUInt64)) <<< n.toUInt64) := by
+  bv_decide
+
+/-- One reference-token step in the exact scalar form used by the production
+    loop, packaged as a writer transition for the induction proof. -/
+private def emitRefWithCodesPTFlatFast (bw : BitWriter)
+    (litT distT : Array UInt32) (w : UInt32) : BitWriter :=
+  let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
+  let idx := codeIdx lw
+  if hlitlt : idx + 257 < litT.size then
+    let e := litT[idx + 257]
+    let lenN : UInt32 := (e >>> 16) &&& 0xFF
+    let lenExtraN : UInt32 := (lw >>> 8) &&& 0xFF
+    let lenMask : UInt64 := (1 <<< lenExtraN.toUInt64) - 1
+    let lenBits : UInt64 := e.toUInt16.toUInt64 |||
+      (((codeVal lw).toUInt64 &&& lenMask) <<< lenN.toUInt64)
+    let lenTotal := lenN + lenExtraN
+    let dw := distCodeWord ((w &&& 0xFFFF).toNat)
+    let dIdx := codeIdx dw
+    if hdistlt : dIdx < distT.size then
+      let de := distT[dIdx]
+      let distN : UInt32 := (de >>> 16) &&& 0xFF
+      let distExtraN : UInt32 := (dw >>> 8) &&& 0xFF
+      let distMask : UInt64 := (1 <<< distExtraN.toUInt64) - 1
+      let bits : UInt64 :=
+        lenBits ||| (de.toUInt16.toUInt64 <<< lenTotal.toUInt64) |||
+          (((codeVal dw).toUInt64 &&& distMask) <<<
+            (lenTotal.toUInt64 + distN.toUInt64))
+      flatWriteBits64Fast bw (lenTotal + distN + distExtraN) bits
+    else
+      flatWriteBits64FastLiteral bw lenTotal lenBits
+  else bw
+
+/-- For canonical bounded code tables, the production scalar reference step
+    is structurally the factored flat reference step. -/
+private theorem emitRefWithCodesPTFlatFast_eq (bw : BitWriter)
+    (litCodes distCodes : Array (UInt16 × UInt8)) (w : UInt32)
+    (hlit : litCodes.size ≥ 286) (hdist : distCodes.size ≥ 30)
+    (hwf : bw.wf)
+    (hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15)
+    (hdist_le : ∀ j, j < distCodes.size → distCodes[j]!.2.toNat ≤ 15) :
+    emitRefWithCodesPTFlatFast bw (packCodeTab litCodes) (packCodeTab distCodes) w =
+      emitRefWithCodesPTFlat bw (packCodeTab litCodes) (packCodeTab distCodes) w := by
+  let len := ((w >>> 16) &&& 0x7FFF).toNat
+  let dist := (w &&& 0xFFFF).toNat
+  obtain ⟨⟨idx, en, ev⟩, hflc⟩ := Option.isSome_iff_exists.mp
+    (findLengthCode_isSome len)
+  obtain ⟨⟨dIdx, den, dev⟩, hfdc⟩ := Option.isSome_iff_exists.mp
+    (findDistCode_isSome dist)
+  have hidx := nativeFindLengthCode_idx_bound len idx en ev hflc
+  have hdidx := nativeFindDistCode_idx_bound dist dIdx den dev hfdc
+  have hen := nativeFindLengthCode_extraN_bound len idx en ev hflc
+  have hden := nativeFindDistCode_extraN_bound dist dIdx den dev hfdc
+  have hl : idx + 257 < litCodes.size := by omega
+  have hd : dIdx < distCodes.size := by omega
+  have hlT : idx + 257 < (packCodeTab litCodes).size := by simpa using hl
+  have hdT : dIdx < (packCodeTab distCodes).size := by simpa using hd
+  have hei := codeIdx_lenCodeWord len idx en ev hflc
+  have hee := codeExtra_lenCodeWord len idx en ev hflc
+  have hcv := codeVal_lenCodeWord len idx en ev (by
+    dsimp only [len]; exact lenField_lt w) hflc
+  have hdi := codeIdx_distCodeWord dist dIdx den dev hfdc
+  have hde := codeExtra_distCodeWord dist dIdx den dev hfdc
+  have hdv := codeVal_distCodeWord dist dIdx den dev (by
+    dsimp only [dist]; exact distField_lt w) hfdc
+  have hllen := hlit_le (idx + 257) hl
+  rw [getElem!_pos litCodes (idx + 257) hl] at hllen
+  have hdlen := hdist_le dIdx hd
+  rw [getElem!_pos distCodes dIdx hd] at hdlen
+  have henNat : en.toUInt32.toNat = en := by
+    simp only [Nat.toUInt32, UInt32.toNat_ofNat']
+    rw [Nat.mod_eq_of_lt]
+    omega
+  have hdenNat : den.toUInt32.toNat = den := by
+    simp only [Nat.toUInt32, UInt32.toNat_ofNat']
+    rw [Nat.mod_eq_of_lt]
+    omega
+  let le := litCodes[idx + 257]'hl
+  let de := distCodes[dIdx]'hd
+  have hll : le.2.toNat ≤ 15 := by simpa only [le] using hllen
+  have hdl : de.2.toNat ≤ 15 := by simpa only [de] using hdlen
+  let lenTotal := le.2.toUInt32 + en.toUInt32
+  have hlenTotal : lenTotal.toNat = le.2.toNat + en := by
+    dsimp only [lenTotal]
+    rw [uint32_add_toNat _ _ (by rw [UInt8.toNat_toUInt32, henNat]; omega),
+      UInt8.toNat_toUInt32, henNat]
+  have hmid : (lenTotal + de.2.toUInt32).toNat =
+      lenTotal.toNat + de.2.toNat := by
+    rw [uint32_add_toNat _ _ (by rw [UInt8.toNat_toUInt32, hlenTotal]; omega),
+      UInt8.toNat_toUInt32]
+  have hn : (lenTotal + de.2.toUInt32 + den.toUInt32).toNat ≤ 48 := by
+    rw [uint32_add_toNat _ _ (by rw [hmid, hlenTotal, hdenNat]; omega),
+      hmid, hlenTotal, hdenNat]
+    omega
+  have hshift : lenTotal.toUInt64 + de.2.toUInt32.toUInt64 < (64 : UInt64) := by
+    apply UInt64.lt_iff_toNat_lt.mpr
+    rw [UInt64.toNat_add, UInt32.toNat_toUInt64, UInt32.toNat_toUInt64,
+      Nat.mod_eq_of_lt (by rw [hlenTotal, UInt8.toNat_toUInt32]; omega),
+      show (64 : UInt64).toNat = 64 by decide, hlenTotal, UInt8.toNat_toUInt32]
+    omega
+  unfold emitRefWithCodesPTFlatFast emitRefWithCodesPTFlat
+  simp only [len, dist, hei, hdi]
+  rw [dif_pos hlT, dif_pos hdT, dif_pos hlT, dif_pos hdT]
+  simp only [len, dist, packCodeTab, Array.getElem_map, flat_packCodeEntry_len32,
+    flat_codeExtra32, hee, hde, hcv, hdv, le, de, lenTotal]
+  rw [flat_ref_bits_reassoc _ _ _ _ _ hshift]
+  exact flatWriteBits64Fast_eq bw _ _ hwf (by simpa only [lenTotal] using hn)
+
+/-- One token step, in the exact writer-valued form represented by the scalar
+    production loop after its fields are regrouped. -/
+private def emitTokenWithCodesPTFlatFast (bw : BitWriter) (w : UInt32)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
+  if w &&& ((1 : UInt32) <<< 31) = 0 then
+    have he : w.toUInt8.toNat < litT.size := by
+      have := UInt8.toNat_lt w.toUInt8
+      omega
+    let e := litT[w.toUInt8.toNat]
+    flatWriteBits64FastLiteral bw ((e >>> 16) &&& 0xFF) e.toUInt16.toUInt64
+  else
+    emitRefWithCodesPTFlatFast bw litT distT w
+
+/-- Matching writer-valued step in the factored proof loop. -/
+private def emitTokenWithCodesPTFlatFactored (bw : BitWriter) (w : UInt32)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
+  if w &&& ((1 : UInt32) <<< 31) = 0 then
+    have he : w.toUInt8.toNat < litT.size := by
+      have := UInt8.toNat_lt w.toUInt8
+      omega
+    let e := litT[w.toUInt8.toNat]
+    bw.writeBits64 ((e >>> 16) &&& 0xFF) e.toUInt16.toUInt64
+  else
+    emitRefWithCodesPTFlat bw litT distT w
+
+private theorem emitTokenWithCodesPTFlatFast_eq (bw : BitWriter) (w : UInt32)
+    (litCodes distCodes : Array (UInt16 × UInt8))
+    (hlitT : (packCodeTab litCodes).size ≥ 286)
+    (hdistT : (packCodeTab distCodes).size ≥ 30) (hwf : bw.wf)
+    (hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15)
+    (hdist_le : ∀ j, j < distCodes.size → distCodes[j]!.2.toNat ≤ 15) :
+    emitTokenWithCodesPTFlatFast bw w (packCodeTab litCodes) (packCodeTab distCodes)
+        hlitT hdistT =
+      emitTokenWithCodesPTFlatFactored bw w (packCodeTab litCodes) (packCodeTab distCodes)
+        hlitT hdistT := by
+  have hlit : litCodes.size ≥ 286 := by simpa using hlitT
+  have hdist : distCodes.size ≥ 30 := by simpa using hdistT
+  unfold emitTokenWithCodesPTFlatFast emitTokenWithCodesPTFlatFactored
+  by_cases hc : w &&& ((1 : UInt32) <<< 31) = 0
+  · simp only [hc, ↓reduceIte]
+    have hj : w.toUInt8.toNat < litCodes.size := by
+      have hj8 := UInt8.toNat_lt w.toUInt8
+      omega
+    have hlen := hlit_le w.toUInt8.toNat hj
+    rw [getElem!_pos litCodes w.toUInt8.toNat hj] at hlen
+    simp only [packCodeTab, Array.getElem_map]
+    exact flatWriteBits64FastLiteral_eq bw _ _ hwf
+      (by simpa only [flat_packCodeEntry_len] using hlen)
+  · simp only [hc, ↓reduceIte]
+    exact emitRefWithCodesPTFlatFast_eq bw litCodes distCodes w hlit hdist hwf
+      hlit_le hdist_le
+
+private theorem emitTokenWithCodesPTFlatFactored_wf (bw : BitWriter) (w : UInt32)
+    (litCodes distCodes : Array (UInt16 × UInt8))
+    (hlitT : (packCodeTab litCodes).size ≥ 286)
+    (hdistT : (packCodeTab distCodes).size ≥ 30) (hwf : bw.wf)
+    (hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15)
+    (hdist_le : ∀ j, j < distCodes.size → distCodes[j]!.2.toNat ≤ 15) :
+    (emitTokenWithCodesPTFlatFactored bw w (packCodeTab litCodes)
+      (packCodeTab distCodes) hlitT hdistT).wf := by
+  have hlit : litCodes.size ≥ 286 := by simpa using hlitT
+  have hdist : distCodes.size ≥ 30 := by simpa using hdistT
+  unfold emitTokenWithCodesPTFlatFactored
+  by_cases hc : w &&& ((1 : UInt32) <<< 31) = 0
+  · simp only [hc, ↓reduceIte]
+    have hj : w.toUInt8.toNat < litCodes.size := by
+      have hj8 := UInt8.toNat_lt w.toUInt8
+      omega
+    have hlen := hlit_le w.toUInt8.toNat hj
+    rw [getElem!_pos litCodes w.toUInt8.toNat hj] at hlen
+    simp only [packCodeTab, Array.getElem_map]
+    apply BitWriter.writeBits64_wf
+    · exact hwf
+    · rw [flat_packCodeEntry_len]
+      omega
+    · simpa only [flat_packCodeEntry_len] using
+        (flat_packCodeEntry_bound _ (by simpa using hlen))
+  · simp only [hc, ↓reduceIte]
+    exact (emitRefWithCodesPTFlatStep_spec bw bw litCodes distCodes w hlit hdist
+      rfl hwf hwf hlit_le hdist_le).2.1
+
+/-- Regrouping a scalar step as a writer moves its branch outside the recursive
+    continuation.  These two normalization lemmas bridge that harmless shape
+    difference in the optimized-loop induction. -/
+private theorem emitTokensWithCodesTAPTFlatFastLoop_ite (p : Prop) [Decidable p]
+    (a b : BitWriter) (tokens : TokenArray) (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) (i : Nat) :
+    emitTokensWithCodesTAPTFlatFastLoop (if p then a else b).data
+        (if p then a else b).bitBuf (if p then a else b).bitCount.toUInt32
+        tokens litT distT hlit hdist i =
+      if p then
+        emitTokensWithCodesTAPTFlatFastLoop a.data a.bitBuf a.bitCount.toUInt32
+          tokens litT distT hlit hdist i
+      else
+        emitTokensWithCodesTAPTFlatFastLoop b.data b.bitBuf b.bitCount.toUInt32
+          tokens litT distT hlit hdist i := by
+  by_cases h : p <;> simp [h]
+
+private theorem emitTokensWithCodesTAPTFlatFastLoop_dite (p : Prop) [Decidable p]
+    (a : p → BitWriter) (b : ¬p → BitWriter)
+    (tokens : TokenArray) (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) (i : Nat) :
+    emitTokensWithCodesTAPTFlatFastLoop (if h : p then a h else b h).data
+        (if h : p then a h else b h).bitBuf
+        (if h : p then a h else b h).bitCount.toUInt32
+        tokens litT distT hlit hdist i =
+      if h : p then
+        emitTokensWithCodesTAPTFlatFastLoop (a h).data (a h).bitBuf
+          (a h).bitCount.toUInt32 tokens litT distT hlit hdist i
+      else
+        emitTokensWithCodesTAPTFlatFastLoop (b h).data (b h).bitBuf
+          (b h).bitCount.toUInt32 tokens litT distT hlit hdist i := by
+  by_cases h : p <;> simp [h]
+
+/-- The optimized scalar loop is structurally the factored flat loop for the
+    canonical bounded tables used by production. -/
+theorem emitTokensWithCodesTAPTFlatFastLoop_eq (bw : BitWriter)
+    (tokens : TokenArray) (litCodes distCodes : Array (UInt16 × UInt8))
+    (hlitT : (packCodeTab litCodes).size ≥ 286)
+    (hdistT : (packCodeTab distCodes).size ≥ 30) (i : Nat) (hwf : bw.wf)
+    (hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15)
+    (hdist_le : ∀ j, j < distCodes.size → distCodes[j]!.2.toNat ≤ 15) :
+    emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf bw.bitCount.toUInt32
+        tokens (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT i =
+      emitTokensWithCodesTAPTFlatLoop bw.data bw.bitBuf bw.bitCount.toUInt32
+        tokens (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT i := by
+  induction hrem : tokens.size - i using Nat.strongRecOn generalizing bw i with
+  | _ n ih =>
+    unfold emitTokensWithCodesTAPTFlatFastLoop emitTokensWithCodesTAPTFlatLoop
+    by_cases hi : i < tokens.size
+    · simp only [hi, dif_pos]
+      let w := tokens.get i hi
+      by_cases hc : w &&& ((1 : UInt32) <<< 31) = 0
+      · simp only [w, hc, ↓reduceIte]
+        rw [flat_writer_reconstruct bw]
+        have hj : w.toUInt8.toNat < litCodes.size := by
+          have hj8 := UInt8.toNat_lt w.toUInt8
+          have hlit : litCodes.size ≥ 286 := by simpa using hlitT
+          omega
+        have hlen := hlit_le w.toUInt8.toNat hj
+        rw [getElem!_pos litCodes w.toUInt8.toNat hj] at hlen
+        let e := (packCodeTab litCodes)[w.toUInt8.toNat]'(by simpa using hj)
+        let rw' := bw.writeBits64 ((e >>> 16) &&& 0xFF) e.toUInt16.toUInt64
+        have heq := flatWriteBits64FastLiteral_eq bw
+          ((e >>> 16) &&& 0xFF) e.toUInt16.toUInt64 hwf (by
+            simpa only [e, packCodeTab, Array.getElem_map, flat_packCodeEntry_len]
+              using hlen)
+        have hw' := BitWriter.writeBits64_wf bw
+          ((e >>> 16) &&& 0xFF) e.toUInt16.toUInt64 hwf
+          (by
+            have ht : ((e >>> 16) &&& 0xFF).toNat ≤ 15 := by
+              simpa only [e, packCodeTab, Array.getElem_map, flat_packCodeEntry_len]
+                using hlen
+            omega)
+          (by simpa only [e, packCodeTab, Array.getElem_map, flat_packCodeEntry_len]
+            using (flat_packCodeEntry_bound
+              (litCodes[w.toUInt8.toNat]'hj) (by simpa using hlen)))
+        have hind := ih _ (by omega) rw' (i + 1) hw' rfl
+        have hcont := congrArg (fun fw =>
+          emitTokensWithCodesTAPTFlatFastLoop fw.data fw.bitBuf fw.bitCount.toUInt32
+            tokens (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT (i + 1)) heq
+        simpa only [w, e, rw', flatWriteBits64FastLiteral,
+          emitTokensWithCodesTAPTFlatFastLoop_ite] using hcont.trans hind
+      · simp only [w, hc, ↓reduceIte]
+        rw [flat_writer_reconstruct bw]
+        let rw' := emitRefWithCodesPTFlat bw
+          (packCodeTab litCodes) (packCodeTab distCodes) w
+        have hlit : litCodes.size ≥ 286 := by simpa using hlitT
+        have hdist : distCodes.size ≥ 30 := by simpa using hdistT
+        have heq := emitRefWithCodesPTFlatFast_eq bw litCodes distCodes w
+          hlit hdist hwf hlit_le hdist_le
+        have hw' := (emitRefWithCodesPTFlatStep_spec bw bw litCodes distCodes w
+          hlit hdist rfl hwf hwf hlit_le hdist_le).2.1
+        have hind := ih _ (by omega) rw' (i + 1) hw' rfl
+        have hcont := congrArg (fun fw =>
+          emitTokensWithCodesTAPTFlatFastLoop fw.data fw.bitBuf fw.bitCount.toUInt32
+            tokens (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT (i + 1)) heq
+        simpa only [w, rw', emitRefWithCodesPTFlatFast, flatWriteBits64Fast,
+          flatWriteBits64FastLiteral, emitTokensWithCodesTAPTFlatFastLoop_ite,
+          emitTokensWithCodesTAPTFlatFastLoop_dite] using hcont.trans hind
+    · simp [hi, flat_writer_reconstruct]
 
 /-- The complete flat token loop is observationally equal to the existing
     `TokenArray` packed-table loop when its tables are packed canonical entries
@@ -748,6 +1079,25 @@ theorem emitTokensWithCodesTAPTFlat_spec (bw : BitWriter) (tokens : TokenArray)
   exact emitTokensWithCodesTAPTFlatLoop_spec bw bw tokens litCodes distCodes
     hlitT hdistT i rfl hwf hwf hlit_le hdist_le
 
+/-- Direct proof contract for the actual scalar implementation selected by
+    `emitTokensWithCodesTAPTFlatRouted`: at the production zero entry it is
+    structurally equal to the routed logical body, not merely observationally
+    equal after flushing. -/
+theorem emitTokensWithCodesTAPTFlatZero_eq_routed (bw : BitWriter)
+    (tokens : TokenArray) (litCodes distCodes : Array (UInt16 × UInt8))
+    (hlitT : (packCodeTab litCodes).size ≥ 286)
+    (hdistT : (packCodeTab distCodes).size ≥ 30) (hwf : bw.wf)
+    (hlit_le : ∀ j, j < litCodes.size → litCodes[j]!.2.toNat ≤ 15)
+    (hdist_le : ∀ j, j < distCodes.size → distCodes[j]!.2.toNat ≤ 15) :
+    emitTokensWithCodesTAPTFlatZero bw tokens
+        (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT =
+      emitTokensWithCodesTAPTFlatRouted bw tokens
+        (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT := by
+  unfold emitTokensWithCodesTAPTFlatZero emitTokensWithCodesTAPTFlatRouted
+    emitTokensWithCodesTAPTFlat
+  exact emitTokensWithCodesTAPTFlatFastLoop_eq bw tokens litCodes distCodes
+    hlitT hdistT 0 hwf hlit_le hdist_le
+
 /-- Appending the same bounded Huffman field and flushing erases the internal
     byte-drain boundary difference between the flat and reference loops. -/
 private theorem emitTokensWithCodesTAPTFlat_eob_flush_eq (bw : BitWriter)
@@ -830,6 +1180,6 @@ theorem deflateDynamicBlockCorePWithFlat_dynHeaderCodes (data : ByteArray)
       (writeDynamicHeader ((BitWriter.empty.writeBits 1 1).writeBits 2 2) litLens distLens)
       tokens litCodes distCodes hlitT_size hdistT_size
       (litCodes[256]'h256).1 (litCodes[256]'h256).2 hwf_header hlit_le hdist_le heob_len
-    exact hflat.symm.trans hflat
+    exact hflat
 
 end Zip.Native.Deflate
