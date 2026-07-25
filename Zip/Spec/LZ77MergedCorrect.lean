@@ -3,17 +3,19 @@ import Zip.Spec.LZ77ChainCorrect
 /-!
 # Correctness of the merged-array matchers (#2767, greedy port)
 
-`lz77ChainLazyIterPMerged` (lazy tier, levels ≥ 4) and `lz77ChainIterPMerged`
-(greedy tier, levels 1–3) hold the chain state (`hashTable`, `prev`) in a
-single combined `Array Nat`, laid out as `prev ++ hashTable` — the `prev` ring
-at offset `[0, prevSize)`, the hash table at `[prevSize, prevSize + hashSize)`.
-This deletes the per-matched-position `(hashTable, prev)` Prod that
-`updateHashesFastU` returns (measured +3–5% compress on the lazy tier).
+`lz77ChainLazyIterPMerged` (general lazy tier),
+`lz77ChainLazyIterPMergedL5Large` (large-input L5), and
+`lz77ChainIterPMerged` (greedy tier, levels 1–3) hold the chain state
+(`hashTable`, `prev`) in a single combined `Array Nat`, laid out as
+`prev ++ hashTable` — the `prev` ring at offset `[0, prevSize)`, the hash table
+at `[prevSize, prevSize + hashSize)`. This deletes the per-matched-position
+`(hashTable, prev)` Prod that `updateHashesFastU` returns (measured +3–5%
+compress on the lazy tier).
 
-The whole file is the pair of equality transfers `lz77ChainLazyIterPMerged =
-lz77ChainLazyIterP` and `lz77ChainIterPMerged = lz77ChainIterP`, so the
-packed-token correctness column (`lz77ChainLazyIterP_eq`, `lz77ChainIterP_eq`,
-`lzMatchP_map`, the roundtrip proofs) is reused verbatim through these rewrites.
+The file transfers both lazy entries and the greedy entry to their corresponding
+packed matchers, so the packed-token correctness column
+(`lz77ChainLazyIterP_eq`, `lz77ChainIterP_eq`, `lzMatchP_map`, the roundtrip
+proofs) is reused verbatim through these rewrites.
 
 The proof carries the invariant `c = prev ++ hashTable` through a lockstep
 induction that mirrors `lz77ChainLazyIterP.mainLoop`. Two per-step facts make it
@@ -862,7 +864,27 @@ theorem lz77ChainIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCa
       (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
       (Nat.le_of_eq (by rw [Array.size_replicate]))
 
-/-- The merged-array lazy matcher equals the two-array packed lazy matcher. -/
+/-- The large-input L5 entry equals the two-array packed lazy matcher at L5's
+    fixed chain depths and no-H3/single-deferral policy. -/
+theorem lz77ChainLazyIterPMergedL5Large_eq (data : ByteArray)
+    (windowSize insertCap goodMatch niceLen : Nat) :
+    lz77ChainLazyIterPMergedL5Large data windowSize insertCap goodMatch niceLen =
+      lz77ChainLazyIterP data 22 windowSize insertCap goodMatch niceLen 5 false 1 := by
+  unfold lz77ChainLazyIterPMergedL5Large lz77ChainLazyIterP
+  split
+  · rfl
+  · dsimp only
+    rw [← Array.replicate_append_replicate]
+    rw [noH3SingleLoop_eq (lazy2Steps := 1) (hsteps := by omega)
+      (h3tab := Array.replicate 32768 data.size)]
+    exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) 22 insertCap
+      goodMatch niceLen 5 1 false (Array.replicate 65536 data.size)
+      (Array.replicate (min chainWinSize data.size) data.size)
+      (Array.replicate 32768 data.size) 0 _
+      (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
+      (Nat.le_of_eq (by rw [Array.size_replicate]))
+
+/-- The general merged-array lazy matcher equals the two-array packed lazy matcher. -/
 theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize insertCap goodMatch niceLen lazyDepth : Nat) (useH3 : Bool) (lazy2Steps : Nat) :
     lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps =
       lz77ChainLazyIterP data maxChain windowSize insertCap goodMatch niceLen lazyDepth useH3 lazy2Steps := by
@@ -871,20 +893,11 @@ theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize inse
   · rfl
   · dsimp only
     rw [← Array.replicate_append_replicate]
-    split
-    · rename_i hfast
-      obtain ⟨_, _, _, rfl, hsteps⟩ := hfast
-      rw [noH3SingleLoop_eq (lazy2Steps := lazy2Steps) (hsteps := hsteps)
-        (h3tab := Array.replicate 32768 data.size)]
-      exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
-        goodMatch niceLen lazyDepth lazy2Steps false (Array.replicate 65536 data.size)
-        (Array.replicate (min chainWinSize data.size) data.size) (Array.replicate 32768 data.size) 0 _
-        (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
-        (Nat.le_of_eq (by rw [Array.size_replicate]))
-    · exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
-        goodMatch niceLen lazyDepth lazy2Steps useH3 (Array.replicate 65536 data.size)
-        (Array.replicate (min chainWinSize data.size) data.size) (Array.replicate 32768 data.size) 0 _
-        (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
-        (Nat.le_of_eq (by rw [Array.size_replicate]))
+    exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
+      goodMatch niceLen lazyDepth lazy2Steps useH3 (Array.replicate 65536 data.size)
+      (Array.replicate (min chainWinSize data.size) data.size)
+      (Array.replicate 32768 data.size) 0 _
+      (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
+      (Nat.le_of_eq (by rw [Array.size_replicate]))
 
 end Zip.Native.Deflate

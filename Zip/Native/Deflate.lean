@@ -2911,11 +2911,25 @@ def lz77LazyMergedLoopNoH3Single (data : ByteArray)
 termination_by data.size - pos
 decreasing_by all_goals assumption
 
+/-- Large-input L5 entry: builds the combined `prevSize + hashSize` array and
+    runs the no-H3/single-deferral loop at L5's fixed chain depths (22 / 5).
+    `lzMatchP` selects this entry only under `useL5LargeInputPolicy`. -/
+def lz77ChainLazyIterPMergedL5Large (data : ByteArray) (windowSize : Nat := 32768)
+    (insertCap : Nat := 1000000000) (goodMatch : Nat := 64) (niceLen : Nat := 65) :
+    TokenArray :=
+  if data.size < 3 then
+    trailingPT data 0 TokenArray.empty
+  else
+    let hashSize := 65536
+    let prevSize := min chainWinSize data.size
+    lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize 22
+      insertCap goodMatch niceLen 5
+      (.replicate (prevSize + hashSize) data.size) 0
+      (TokenArray.emptyWithCapacity data.size)
+
 /-- Merged-array entry mirroring `lz77ChainLazyIterP`: builds the combined
-    `prevSize + hashSize` array and selects the no-H3/single-deferral loop only
-    for the large-input L5 policy (`maxChain = 22`, `lazyDepth = 5`); all other
-    configurations retain the general `lz77LazyMergedLoop`. Threads the
-    rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
+    `prevSize + hashSize` array and runs the general `lz77LazyMergedLoop`.
+    Threads the rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
     `lz77ChainLazyIterP` (`lz77ChainLazyIterPMerged_eq`). -/
 def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)
@@ -2926,16 +2940,10 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
-    if _hfast : l5LargeInputMinSize ≤ data.size ∧ maxChain = 22 ∧ lazyDepth = 5 ∧
-        useH3 = false ∧ lazy2Steps ≤ 1 then
-      lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
-        insertCap goodMatch niceLen lazyDepth
-        (.replicate (prevSize + hashSize) data.size) 0
-        (TokenArray.emptyWithCapacity data.size)
-    else
-      lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
-        (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0 0 0 0
-        (TokenArray.emptyWithCapacity data.size)
+    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen
+      lazyDepth lazy2Steps useH3
+      (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0 0 0 0
+      (TokenArray.emptyWithCapacity data.size)
 
 /-- Merged-array twin of `lz77ChainIterP.mainLoop` (the greedy tier, levels
     1–3): identical control flow, but the chain state is the single combined

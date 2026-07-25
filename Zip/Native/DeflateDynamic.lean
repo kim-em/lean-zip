@@ -1292,7 +1292,14 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : TokenArray :=
-  if 4 ≤ level then lz77ChainLazyIterPMerged data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
+  if 4 ≤ level then
+    if useL5LargeInputPolicy data level then
+      lz77ChainLazyIterPMergedL5Large data 32768
+        (insertCap level) (goodMatch level) (niceLen level)
+    else
+      lz77ChainLazyIterPMerged data (lazyChainDepthFor data level) 32768
+        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+        (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-! ## Self-contained block-split dynamic compression

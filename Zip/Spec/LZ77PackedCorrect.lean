@@ -236,12 +236,27 @@ theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap
 theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).toArray = (lzMatch data level).map packTok := by
   unfold lzMatchP lzMatch
-  split
-  · rw [lz77ChainLazyIterPMerged_eq]
-    exact lz77ChainLazyIterP_eq data (lazyChainDepthFor data level) 32768
-      (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-      (useH3For data level) (lazy2StepsLevel level)
-  · rw [lz77ChainIterPMerged_eq]
+  by_cases h4 : 4 ≤ level
+  · simp only [if_pos h4]
+    by_cases hlarge : useL5LargeInputPolicy data level = true
+    · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
+      have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
+        simpa [useL5LargeInputPolicy] using hlarge
+      obtain ⟨rfl, _hsize⟩ := hp
+      have hchain : lazyChainDepthFor data 5 = 22 := by
+        unfold lazyChainDepthFor
+        rw [if_pos hlarge]
+      rw [hchain]
+      simpa [lazyDepthFor, hlarge,
+        useH3For, useH3Level, lazy2StepsLevel] using
+        (lz77ChainLazyIterP_eq data 22 32768 (insertCap 5) (goodMatch 5)
+          (niceLen 5) 5 false 1)
+    · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_eq data (lazyChainDepthFor data level) 32768
+        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+        (useH3For data level) (lazy2StepsLevel level)
+  · simp only [if_neg h4]
+    rw [lz77ChainIterPMerged_eq]
     exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- The boxed view of the packed token stream is exactly `lzMatch`'s stream:
@@ -250,13 +265,28 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
 theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).toArray.map unpackTok = lzMatch data level := by
   unfold lzMatchP lzMatch
-  split
-  · rw [lz77ChainLazyIterPMerged_eq]
-    exact lz77ChainLazyIterP_map data (lazyChainDepthFor data level) 32768
-      (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-      (useH3For data level) (lazy2StepsLevel level)
-      (by omega) (by omega)
-  · rw [lz77ChainIterPMerged_eq]
+  by_cases h4 : 4 ≤ level
+  · simp only [if_pos h4]
+    by_cases hlarge : useL5LargeInputPolicy data level = true
+    · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
+      have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
+        simpa [useL5LargeInputPolicy] using hlarge
+      obtain ⟨rfl, _hsize⟩ := hp
+      have hchain : lazyChainDepthFor data 5 = 22 := by
+        unfold lazyChainDepthFor
+        rw [if_pos hlarge]
+      rw [hchain]
+      simpa [lazyDepthFor, hlarge,
+        useH3For, useH3Level, lazy2StepsLevel] using
+        (lz77ChainLazyIterP_map data 22 32768 (insertCap 5) (goodMatch 5)
+          (niceLen 5) 5 false 1 (by omega) (by omega))
+    · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_map data (lazyChainDepthFor data level) 32768
+        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+        (useH3For data level) (lazy2StepsLevel level)
+        (by omega) (by omega)
+  · simp only [if_neg h4]
+    rw [lz77ChainIterPMerged_eq]
     exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
       (by omega) (by omega)
 
