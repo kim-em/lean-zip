@@ -1349,6 +1349,30 @@ abbrev chainWalkPackedUUSafe (data : ByteArray) (prev : Array Nat)
         toUSize_toNat_of_lt (show maxLen < USize.size by omega)]
       exact hpm)
 
+/-- Runtime guard for entering the fully-`USize` walk with an existing best
+    match.  Lazy lookahead seeds the walk with the match at the preceding
+    position, unlike the zero-seeded greedy tier. -/
+abbrev chainWalkPackedUUSeededSafe (data : ByteArray) (prev : Array Nat)
+    (windowSize maxLen cand fuel bestLen bestPos : Nat) : Prop :=
+  chainWalkPackedUUSafe data prev windowSize maxLen cand fuel ∧
+    bestLen.toUSize.toNat = bestLen ∧ bestPos.toUSize.toNat = bestPos ∧
+    bestLen ≤ maxLen ∧ bestPos ≤ data.size
+
+/-- Seeded entry to `chainWalkPackedUU`, used by the lazy matcher. -/
+@[inline] def chainWalkPackedUUSeededChecked (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat)
+    (hg : chainWalkPackedUUSeededSafe data prev windowSize maxLen cand fuel bestLen bestPos) :
+    USize :=
+  have hsz : data.size < USize.size := by
+    rw [← hg.1.2.1]
+    exact USize.toNat_lt_two_pow_numBits _
+  chainWalkPackedUU data prev hg.1.1 hsz windowSize.toUSize pos.toUSize maxLen.toUSize
+    (min niceLen maxLen).toUSize cand.toUSize fuel.toUSize bestLen.toUSize bestPos.toUSize (by
+      rw [toUSize_toNat_of_lt (show pos < USize.size by omega),
+        toUSize_toNat_of_lt (show maxLen < USize.size by omega)]
+      exact hpm)
+
 /-- One runtime addressability + accumulator-faithfulness check guards the whole
     `chainWalkPackedU` inner loop: the single `Nat`-round-trip test
     `data.size.toUSize.toNat = data.size` witnesses `data.size < USize.size` (the
@@ -1373,6 +1397,18 @@ abbrev chainWalkPackedUUSafe (data : ByteArray) (prev : Array Nat)
   else
     let p := lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand fuel bestLen bestPos
     p.2 * 512 + p.1
+
+/-- Fully-native-word lazy chain walk when its scalar state is representable,
+    with the existing guarded walk as the defensive fallback. -/
+@[inline] def chainWalkGuardedPackedUU (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) : Nat :=
+  if hg : chainWalkPackedUUSeededSafe data prev windowSize maxLen cand fuel bestLen bestPos then
+    (chainWalkPackedUUSeededChecked data prev windowSize pos maxLen niceLen hpm
+      cand fuel bestLen bestPos hg).toNat
+  else
+    chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
+      cand fuel bestLen bestPos
 
 /-- Proven-bounds copy of `lz77Chain.updateHashes`: the bucket index `hsh` is
     `< hashSize ≤ hashTable.size`, so `hashTable[hsh]` needs no runtime check. -/
@@ -2490,7 +2526,7 @@ def lz77LazyMergedLoop (data : ByteArray)
       let seed := h3Seed useH3 data h3tab windowSize pos hlt
       let h3tab := if useH3 then guardedSet h3tab (hash3Single data pos hlt) pos else h3tab
       have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
-      let r := chainWalkGuardedPackedU data c windowSize pos (min 258 (data.size - pos)) niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+      let r := chainWalkGuardedPackedUU data c windowSize pos (min 258 (data.size - pos)) niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
       let matchLen := r % 512
       let matchPos := r / 512
       if hge : matchLen ≥ 3 then
@@ -2503,7 +2539,7 @@ def lz77LazyMergedLoop (data : ByteArray)
               let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
               let seed := if matchLen < cutoff2 then matchLen else 0
               let r2 :=
-                chainWalkGuardedPackedU data c windowSize (pos + 1) (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 lazyDepth seed 0
+                chainWalkGuardedPackedUU data c windowSize (pos + 1) (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 lazyDepth seed 0
               let matchLen2 := r2 % 512
               let matchPos2 := r2 / 512
               if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
@@ -2575,7 +2611,7 @@ def lz77LazyMergedLoop (data : ByteArray)
       -- `seeded_probe_bridge` (as the main lookahead already does).
       let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
       let seed := if pLen < cutoff2 then pLen else 0
-      let r2 := chainWalkGuardedPackedU data c windowSize (pos + 1) (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 (lazy2ProbeDepth maxChain) seed 0
+      let r2 := chainWalkGuardedPackedUU data c windowSize (pos + 1) (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 (lazy2ProbeDepth maxChain) seed 0
       let len' := r2 % 512
       let pos' := r2 / 512
       if lazyAcceptCost pLen (pos - pMatchPos) len' (pos + 1 - pos') = true ∧ (pos + 1) + len' ≤ data.size then

@@ -874,6 +874,55 @@ theorem chainWalkPackedUUChecked_toNat (data : ByteArray) (prev : Array Nat)
   rw [dif_pos hg.1, dif_pos hold]
   simpa only [hg.2.2.2.1] using heq
 
+/-- The seeded checked entry is the existing guarded packed walk. -/
+theorem chainWalkPackedUUSeededChecked_toNat (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat)
+    (hg : chainWalkPackedUUSeededSafe data prev windowSize maxLen cand fuel bestLen bestPos) :
+    (chainWalkPackedUUSeededChecked data prev windowSize pos maxLen niceLen hpm
+      cand fuel bestLen bestPos hg).toNat =
+      chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
+        cand fuel bestLen bestPos := by
+  have hsz : data.size < USize.size := by
+    rw [← hg.1.2.1]
+    exact USize.toNat_lt_two_pow_numBits _
+  have hposlt : pos < USize.size := by omega
+  have hmaxlt : maxLen < USize.size := by omega
+  have hcutlt : min niceLen maxLen < USize.size := by omega
+  have heq := chainWalkPackedUU_eq data prev windowSize pos maxLen niceLen hpm hg.1.1 hsz
+    windowSize.toUSize pos.toUSize maxLen.toUSize (min niceLen maxLen).toUSize
+    cand.toUSize fuel.toUSize bestLen.toUSize bestPos.toUSize hg.1.2.2.1
+    (toUSize_toNat_of_lt hposlt) (toUSize_toNat_of_lt hmaxlt)
+    (toUSize_toNat_of_lt hcutlt)
+    (by
+      rw [toUSize_toNat_of_lt hposlt, toUSize_toNat_of_lt hmaxlt]
+      exact hpm)
+    hg.1.2.2.2.2.2.1
+    (by rw [hg.2.1]; exact hg.2.2.2.1)
+    (by rw [hg.2.2.1]; exact hg.2.2.2.2)
+    (packFit_of_lt_maxShift data.size hg.1.2.1 hg.1.2.2.2.2.2.2)
+  unfold chainWalkPackedUUSeededChecked chainWalkGuardedPackedU
+  have hold : data.size.toUSize.toNat = data.size ∧ fuel.toUSize.toNat = fuel ∧
+      bestLen.toUSize.toNat = bestLen ∧ bestPos.toUSize.toNat = bestPos :=
+    ⟨hg.1.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1⟩
+  rw [dif_pos hg.1.1, dif_pos hold]
+  simpa only [hg.1.2.2.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1] using heq
+
+/-- The fully-native-word guarded wrapper is observationally identical to the
+    existing mixed-`Nat`/`USize` guarded walk. -/
+theorem chainWalkGuardedPackedUU_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel bestLen bestPos : Nat) :
+    chainWalkGuardedPackedUU data prev windowSize pos maxLen niceLen hpm
+      cand fuel bestLen bestPos =
+      chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
+        cand fuel bestLen bestPos := by
+  unfold chainWalkGuardedPackedUU
+  split
+  · exact chainWalkPackedUUSeededChecked_toNat data prev windowSize pos maxLen niceLen
+      hpm cand fuel bestLen bestPos _
+  · rfl
+
 /-- Low nine bits of the checked word decode to the old packed walk's length. -/
 theorem chainWalkPackedUUChecked_low (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)

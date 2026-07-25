@@ -515,6 +515,7 @@ private theorem mergedLoop_eq (data : ByteArray)
   induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab hht hps hpv with
   | _ n ih =>
     unfold lz77LazyMergedLoop lz77ChainLazyIterP.mainLoop
+    simp only [chainWalkGuardedPackedUU_eq]
     by_cases hlt : pos + 2 < data.size
     · have hh : lz77Greedy.hash3 data pos hashSize hlt < hashTable.size := by
         have : lz77Greedy.hash3 data pos hashSize hlt < hashSize := Nat.mod_lt _ hhs
@@ -540,6 +541,7 @@ private theorem mergedLoop_eq (data : ByteArray)
         induction hnm : data.size - mp using Nat.strongRecOn generalizing mp pLen pMatchPos step accd htd prevd h3td hhtd hpsd hpvd hlo hpl with
         | _ mnat ihm =>
           unfold lz77LazyMergedLoop
+          simp only [chainWalkGuardedPackedUU_eq]
           rw [dif_neg hpl]
           unfold lz77ChainLazyIterP.rollDefer
           by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch

@@ -163,11 +163,13 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
     exact inflate_deflateDynamicBlocksSharedAt data _ l' _ hsize
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
   have hwithObs : ∀ (l' : UInt8) (p : Nat × (Unit → ByteArray)),
-      p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size).isEmpty then
+      p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
+              splitSoftMaxBlockBytes (splitCheckTokensLevel l')).isEmpty then
             deflateRawBasePPrep data (lzMatchP data l')
           else
             let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data l')
-              (chooseSplitsHeuristicP (lzMatchP data l') data.size)
+              (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
+                splitSoftMaxBlockBytes (splitCheckTokensLevel l'))
             let basePrep := deflateRawBasePPrepF data (lzMatchP data l') obsFreqs.2
             if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       Zip.Native.Inflate.inflateReference (p.2 ()) maxOutputSize = .ok data := by
@@ -306,11 +308,13 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
     exact deflateDynamicBlocksSharedAt_pad data _ l' 
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
   have hwithObs : ∀ (l' : UInt8) (p : Nat × (Unit → ByteArray)),
-      p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size).isEmpty then
+      p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
+              splitSoftMaxBlockBytes (splitCheckTokensLevel l')).isEmpty then
             deflateRawBasePPrep data (lzMatchP data l')
           else
             let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data l')
-              (chooseSplitsHeuristicP (lzMatchP data l') data.size)
+              (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
+                splitSoftMaxBlockBytes (splitCheckTokensLevel l'))
             let basePrep := deflateRawBasePPrepF data (lzMatchP data l') obsFreqs.2
             if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       ∃ (contentBits padding : List Bool),
@@ -534,11 +538,13 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
     exact deflateDynamicBlocksSharedAt_goR_pad data _ l' 
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
   have hwithObs : ∀ (l' : UInt8) (p : Nat × (Unit → ByteArray)),
-      p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size).isEmpty then
+      p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
+              splitSoftMaxBlockBytes (splitCheckTokensLevel l')).isEmpty then
             deflateRawBasePPrep data (lzMatchP data l')
           else
             let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data l')
-              (chooseSplitsHeuristicP (lzMatchP data l') data.size)
+              (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
+                splitSoftMaxBlockBytes (splitCheckTokensLevel l'))
             let basePrep := deflateRawBasePPrepF data (lzMatchP data l') obsFreqs.2
             if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       ∃ remaining,
