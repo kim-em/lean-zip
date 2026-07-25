@@ -274,7 +274,7 @@ private theorem insertHashL1U_bounded (data : ByteArray) (prevSize : Nat)
     · exact array_getElem_le_set! c data.size _ _ hc hidx (by omega)
     · rwa [Array.size_set!]
     · exact hc _ hidx
-   · exact hc
+  · exact hc
 
 /-- Congruence for functions whose second argument proves a bound on the first.
     Keeping this transport opaque prevents large callers from inlining the
