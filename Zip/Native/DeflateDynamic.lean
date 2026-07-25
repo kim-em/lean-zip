@@ -430,13 +430,11 @@ def emitTokensWithCodesTAPTFlatZero (bw : BitWriter) (tokens : TokenArray)
   emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf bw.bitCount.toUInt32
     tokens litT distT hlit hdist 0
 
-/-- Proof boundary for the flat single-block route.  Its logical body is the
-    factored flat loop and its compiled body is the scalar-specialized zero
-    entry point.  `emitTokensWithCodesTAPTFlatZero_eq_routed` proves these
-    structurally equal under the canonical code-table bounds carried by the
-    single-block caller.  The shared multi-block emitter continues to call the
-    reference `emitTokensWithCodesTAPT`. -/
-@[implemented_by emitTokensWithCodesTAPTFlatZero]
+/-- Logical proof helper for the flat single-block route.  The proof-gated
+    production block calls `emitTokensWithCodesTAPTFlatZero` directly and uses
+    `emitTokensWithCodesTAPTFlatZero_eq_routed` to connect that implementation
+    to this body under its canonical code-table bounds.  The shared multi-block
+    emitter continues to call the reference `emitTokensWithCodesTAPT`. -/
 def emitTokensWithCodesTAPTFlatRouted (bw : BitWriter) (tokens : TokenArray)
     (litT distT : Array UInt32)
     (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
@@ -773,7 +771,7 @@ def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : TokenArray)
       rw [packCodeTab_size]; exact hlit_size
     have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
       rw [packCodeTab_size]; exact hdist_size
-    let bw := emitTokensWithCodesTAPTFlatRouted bw tokens
+    let bw := emitTokensWithCodesTAPTFlatZero bw tokens
       (packCodeTab litCodes) (packCodeTab distCodes) hlitT_size hdistT_size
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len

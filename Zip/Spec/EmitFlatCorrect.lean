@@ -1079,10 +1079,9 @@ theorem emitTokensWithCodesTAPTFlat_spec (bw : BitWriter) (tokens : TokenArray)
   exact emitTokensWithCodesTAPTFlatLoop_spec bw bw tokens litCodes distCodes
     hlitT hdistT i rfl hwf hwf hlit_le hdist_le
 
-/-- Direct proof contract for the actual scalar implementation selected by
-    `emitTokensWithCodesTAPTFlatRouted`: at the production zero entry it is
-    structurally equal to the routed logical body, not merely observationally
-    equal after flushing. -/
+/-- Direct proof contract for the scalar implementation called by the
+    production block: at the zero entry it is structurally equal to the routed
+    logical body, not merely observationally equal after flushing. -/
 theorem emitTokensWithCodesTAPTFlatZero_eq_routed (bw : BitWriter)
     (tokens : TokenArray) (litCodes distCodes : Array (UInt16 × UInt8))
     (hlitT : (packCodeTab litCodes).size ≥ 286)
@@ -1176,6 +1175,9 @@ theorem deflateDynamicBlockCorePWithFlat_dynHeaderCodes (data : ByteArray)
   by_cases hempty : data.size == 0
   · simp only [hempty, ↓reduceIte]
   · simp only [hempty, ↓reduceIte]
+    rw [emitTokensWithCodesTAPTFlatZero_eq_routed
+      (writeDynamicHeader ((BitWriter.empty.writeBits 1 1).writeBits 2 2) litLens distLens)
+      tokens litCodes distCodes hlitT_size hdistT_size hwf_header hlit_le hdist_le]
     have hflat := emitTokensWithCodesTAPTFlat_eob_flush_eq
       (writeDynamicHeader ((BitWriter.empty.writeBits 1 1).writeBits 2 2) litLens distLens)
       tokens litCodes distCodes hlitT_size hdistT_size
