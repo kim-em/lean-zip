@@ -14,7 +14,7 @@ import Zip.Native.InflateFast
 
 open Zip.Native
 
-/-! ### Direct FFI conformance: `presize` and `copyWithinAt`
+/-! ### Direct FFI conformance: `presize`, `copyWithinAt`, and the short copy
 
     Validate each `@[extern]` against an **independent** reference (not its own
     reference body), so the C is checked to agree with the trusted model on every
@@ -51,6 +51,25 @@ def ZipTest.InflateFast.checkCopyWithinAt (a : ByteArray) (destOff distance len 
   unless snapshot == a do
     throw (IO.userError s!"copyWithinAt mutated a shared array at destOff {destOff}")
 
+/-- Check the composed wide-load/store short copy against the independent
+    `copyWithinAt` reference, including copy-on-write behavior. -/
+def ZipTest.InflateFast.checkCopyWithinAtShort (a : ByteArray) (destOff distance len : Nat)
+    (hdest : destOff < USize.size) (hdistance : 8 ≤ distance) (hlenpos : 0 < len)
+    (hlen : len ≤ 8) (hwindow : distance ≤ destOff) (hroom : destOff + 8 ≤ a.size) :
+    IO Unit := do
+  have hdest' : destOff.toUSize.toNat = destOff :=
+    Zip.Native.InflateBuf.toUSize_toNat_of_lt hdest
+  let snapshot := a.extract 0 a.size
+  let got := a.copyWithinAtShort destOff.toUSize distance len hdistance hlenpos hlen
+    (by rwa [hdest']) (by rwa [hdest'])
+  let want := ZipTest.InflateFast.refCopyWithinAt a destOff distance len
+  unless got == want do
+    throw (IO.userError
+      s!"copyWithinAtShort mismatch at destOff {destOff}, distance {distance}, len {len}: \
+         got {got.toList}, want {want.toList}")
+  unless snapshot == a do
+    throw (IO.userError s!"copyWithinAtShort mutated a shared array at destOff {destOff}")
+
 /-- Sweep `presize` and `copyWithinAt` over small sizes, all in-bounds
     `(destOff, distance, len)`, and the degenerate / OOB edges. -/
 def ZipTest.InflateFast.ffiConformance : IO Unit := do
@@ -74,6 +93,15 @@ def ZipTest.InflateFast.ffiConformance : IO Unit := do
   -- RLE (distance = 1) and overlapping smear (len > distance):
   ZipTest.InflateFast.checkCopyWithinAt base 200 1 100
   ZipTest.InflateFast.checkCopyWithinAt base 200 3 100
+  -- The production short-match composition: disjoint source window, exact
+  -- one-word destination update, and all supported logical lengths.
+  for destOff in [8, 50, 200, 392] do
+    for distance in [8, 9, 64, destOff] do
+      for len in [1, 2, 3, 7, 8] do
+        if h : destOff < USize.size ∧ 8 ≤ distance ∧ 0 < len ∧ len ≤ 8 ∧
+            distance ≤ destOff ∧ destOff + 8 ≤ base.size then
+          ZipTest.InflateFast.checkCopyWithinAtShort base destOff distance len
+            h.1 h.2.1 h.2.2.1 h.2.2.2.1 h.2.2.2.2.1 h.2.2.2.2.2
 
 /-- Compress `data` (raw DEFLATE at `level`), then assert both cursor spikes
     decode it — with `sizeHint := data.size` — to exactly `data` and to the same

@@ -2569,6 +2569,8 @@ theorem goCurU_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : Hu
     rw [if_neg hnlt, if_neg hneob, dif_pos hidx']
   | case8 pos bitBuf cnt output outPos hrc hm ent hlit cnt0 sym bb c' used hde hsym hneob idx hh base ih =>
     intro hsize
+    -- Normalize functional-induction's local table lets so the dependent
+    -- short-copy dispatch in `ih` matches the unfolded recursive call below.
     dsimp only [base, idx] at ih
     have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
     have hhc29 : sym.toNat - 257 < 29 := by
