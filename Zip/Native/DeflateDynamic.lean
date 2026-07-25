@@ -2406,18 +2406,38 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
 theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseP data (lzMatchP data level) = deflateRawBase data level := rfl
 
-/-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**:
-    the fused matcher (`lz77ChainIterPMergedF`) produces the packed tokens and
-    their `tokenFreqsP` histograms together, and the base sizing/emit consumes
-    those frequencies directly (`deflateRawBasePF`) instead of re-walking the
-    token array with a second `tokenFreqsP`. Byte-identical to `deflateRawBase`
-    on the greedy tier (`deflateRawBaseF_eq`). -/
-def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
+/-- Boxed-histogram fused base path. Level one uses the specialized native-word
+    outer loop; levels two and three retain the generic fused matcher. -/
+def deflateRawBaseFLevel1Impl (data : ByteArray) (level : UInt8) : ByteArray :=
   let fused :=
     if level == 1 then lz77ChainIterPMergedF1U data
     else lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
   let (ptokens, litF, distF) := fused
   deflateRawBasePF data ptokens (litF.val, distF.val)
+
+/-- Proven L1 path combining the native-word specialized outer loop with one
+    unboxed `ByteArray` histogram. The matcher entry owns the packing guard and
+    retains the boxed specialized implementation as its exact fallback. -/
+def deflateRawBaseFU64Level1 (data : ByteArray) : ByteArray :=
+  let (ptokens, litF, distF) := lz77ChainIterPMergedF1U64 data
+  deflateRawBasePF data ptokens (litF, distF)
+
+/-- The guarded wide-counter L1 implementation is byte-identical to the
+    established boxed-histogram fused implementation. -/
+theorem deflateRawBaseFU64Level1_eq (data : ByteArray) :
+    deflateRawBaseFU64Level1 data = deflateRawBaseFLevel1Impl data 1 := by
+  unfold deflateRawBaseFU64Level1 deflateRawBaseFLevel1Impl
+  rw [lz77ChainIterPMergedF1U64_eq]
+  simp
+
+/-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**.
+    Level 1 uses the guarded wide-counter matcher; levels 2–3 use the established
+    boxed fused matcher.  Both produce the packed tokens and `tokenFreqsP`
+    histograms together, so base sizing/emission avoids a second token walk.
+    Byte-identical to `deflateRawBase` on the greedy tier (`deflateRawBaseF_eq`). -/
+def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
+  if level == 1 then deflateRawBaseFU64Level1 data
+  else deflateRawBaseFLevel1Impl data level
 
 /-- On the greedy tier (`level ≤ 3`, i.e. `¬ 4 ≤ level`) the fused base candidate
     is byte-identical to `deflateRawBase`: the fused matcher returns exactly the

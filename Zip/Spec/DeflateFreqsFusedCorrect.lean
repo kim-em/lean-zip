@@ -1140,6 +1140,172 @@ theorem lz77GreedyMergedLoopF_spec (data : ByteArray)
     · simp only [hlt, ↓reduceDIte]
       exact trailingPF_spec data pos acc litF distF hlit hdist
 
+/-- The specialized native-word wide loop has exactly the same token result as
+    the boxed specialized loop, while its final byte buffer represents that
+    token stream's mathematical histogram. -/
+theorem lz77GreedyMergedLoopF1U64_spec (data : ByteArray) (prevSize : Nat)
+    (dataSizeU prevSizeU : USize)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hsz : data.size < USize.size) (hfit : data.size * 512 + 511 < USize.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hprev : prevSize ≤ chainWinSize)
+    (c : Array Nat) (hcs : prevSize + 65536 ≤ c.size)
+    (posU : USize) (hpos : posU.toNat ≤ data.size)
+    (acc : TokenArray) (freqs : FusedFreqBytes)
+    (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30})
+    (hsize : acc.toArray.size ≤ posU.toNat)
+    (hrep : FusedFreqBytesRep freqs acc.toArray)
+    (hlit : litF.val = (tokenFreqsP acc.toArray).1)
+    (hdist : distF.val = (tokenFreqsP acc.toArray).2) :
+    let wide := lz77GreedyMergedLoopF1U64 data prevSize dataSizeU prevSizeU
+      hds hpsU hsz hfit hpv hprev c hcs posU hpos acc freqs
+    let boxed := lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU
+      hds hpsU hsz hfit hpv hprev c hcs posU hpos acc litF distF
+    wide.1 = boxed.1 ∧ FusedFreqBytesRep wide.2 boxed.1.toArray ∧
+      boxed.2.1.val = (tokenFreqsP boxed.1.toArray).1 ∧
+      boxed.2.2.val = (tokenFreqsP boxed.1.toArray).2 := by
+  induction hn : data.size - posU.toNat using Nat.strongRecOn
+      generalizing posU c acc freqs litF distF with
+  | _ n ih =>
+    dsimp only
+    unfold lz77GreedyMergedLoopF1U64 lz77GreedyMergedLoopF1U
+    by_cases hlt : posU + 2 < dataSizeU
+    · simp only [hlt, ↓reduceDIte]
+      have haddr : data.size.toUSize.toNat = data.size := toUSize_toNat_of_lt hsz
+      have h2v : (2 : USize).toNat = 2 :=
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+      have ep2 : (posU + 2).toNat = posU.toNat + 2 := by
+        rw [USize.toNat_add, h2v]
+        apply Nat.mod_eq_of_lt
+        have hdata2 : data.size + 2 < USize.size := by omega
+        exact Nat.lt_of_le_of_lt (Nat.add_le_add_right hpos 2) hdata2
+      have hltN : posU.toNat + 2 < data.size := by
+        have hh := USize.lt_iff_toNat_lt.mp hlt
+        rw [ep2, hds] at hh
+        exact hh
+      have hnextOne : (posU + 1).toNat = posU.toNat + 1 := by
+        rw [USize.toNat_add, USize.toNat_one]
+        apply Nat.mod_eq_of_lt
+        have hdata1 : data.size + 1 < USize.size := by omega
+        exact Nat.lt_of_le_of_lt (Nat.add_le_add_right hpos 1) hdata1
+      have hcap : acc.toArray.size + 1 < UInt64.size := by
+        have hdata := byteArray_size_lt_uint64 data haddr
+        omega
+      split
+      all_goals
+        split
+        · split
+          · split
+            · refine ih _ ?_ _ _ _ _ _ _ _ _ ?_ ?_ ?_ ?_ rfl
+              · have hh := USize.lt_iff_toNat_lt.mp
+                    (by assumption : posU < posU + _)
+                omega
+              · rw [TokenArray.push_toArray, Array.size_push]
+                have hh := USize.lt_iff_toNat_lt.mp
+                  (by assumption : posU < posU + _)
+                omega
+              · rw [TokenArray.push_toArray]
+                exact bumpRefFreqU64_rep freqs acc.toArray _
+                  (packTok_reference_tag _ _) hrep hcap
+              · rw [TokenArray.push_toArray]
+                exact bumpRefLitFreqP_push acc.toArray _ litF
+                  (packTok_reference_tag _ _) hlit
+              · rw [TokenArray.push_toArray]
+                exact bumpRefDistFreqP_push acc.toArray _ distF
+                  (packTok_reference_tag _ _) hdist
+            · have hw := trailingPFU64_spec data posU.toNat acc freqs haddr hsize hrep
+              have hb := trailingPF_spec data posU.toNat acc litF distF hlit hdist
+              rw [hb]
+              exact ⟨hw.1, hw.2, rfl, rfl⟩
+          · refine ih _ (by rw [hnextOne]; omega) _ _ _ _ _ _ _ _ ?_ ?_ ?_ ?_ rfl
+            · rw [TokenArray.push_toArray, Array.size_push, hnextOne]
+              omega
+            · rw [TokenArray.push_toArray]
+              exact bumpLitFreqU64_rep freqs acc.toArray _
+                (packTok_literal_tag _) hrep hcap
+            · rw [TokenArray.push_toArray]
+              exact bumpLitFreqP_push acc.toArray _ litF (packTok_literal_tag _) hlit
+            · rw [TokenArray.push_toArray]
+              exact distFreq_push_lit acc.toArray _ distF (packTok_literal_tag _) hdist
+        · refine ih _ (by rw [hnextOne]; omega) _ _ _ _ _ _ _ _ ?_ ?_ ?_ ?_ rfl
+          · rw [TokenArray.push_toArray, Array.size_push]
+            rw [hnextOne]
+            omega
+          · rw [TokenArray.push_toArray]
+            exact bumpLitFreqU64_rep freqs acc.toArray _
+              (packTok_literal_tag _) hrep hcap
+          · rw [TokenArray.push_toArray]
+            exact bumpLitFreqP_push acc.toArray _ litF (packTok_literal_tag _) hlit
+          · rw [TokenArray.push_toArray]
+            exact distFreq_push_lit acc.toArray _ distF (packTok_literal_tag _) hdist
+    · simp only [hlt, ↓reduceDIte]
+      have haddr : data.size.toUSize.toNat = data.size := toUSize_toNat_of_lt hsz
+      have hw := trailingPFU64_spec data posU.toNat acc freqs haddr hsize hrep
+      have hb := trailingPF_spec data posU.toNat acc litF distF hlit hdist
+      rw [hb]
+      exact ⟨hw.1, hw.2, rfl, rfl⟩
+
+/-- The production specialized-wide entry is exactly the boxed specialized
+    entry after its single final histogram materialization. -/
+theorem lz77ChainIterPMergedF1U64_eq (data : ByteArray) :
+    lz77ChainIterPMergedF1U64 data =
+      let boxed := lz77ChainIterPMergedF1U data
+      (boxed.1, boxed.2.1.val, boxed.2.2.val) := by
+  unfold lz77ChainIterPMergedF1U64 lz77ChainIterPMergedF1U
+  by_cases hsmall : data.size < 3
+  · simp only [hsmall, if_pos]
+    have haddr : data.size.toUSize.toNat = data.size :=
+      toUSize_toNat_of_lt (Nat.lt_of_lt_of_le (by omega) USize.le_size)
+    generalize hr : trailingPFU64 data 0 TokenArray.empty initFusedFreqBytes = r
+    rcases r with ⟨tokens, freqs⟩
+    have hw := trailingPFU64_spec data 0 TokenArray.empty initFusedFreqBytes haddr
+      (by rw [TokenArray.empty_toArray]; simp) (by
+        rw [TokenArray.empty_toArray]
+        exact initFusedFreqBytes_rep)
+    rw [hr] at hw
+    have hb := trailingPF_spec data 0 TokenArray.empty initLitFreqF initDistFreqF
+      (by rw [TokenArray.empty_toArray]; exact tokenFreqsP_nil_fst)
+      (by rw [TokenArray.empty_toArray]; exact tokenFreqsP_nil_snd)
+    have hf := fusedFreqBytesToNat_eq freqs
+      (trailingPT data 0 TokenArray.empty).toArray hw.2
+    rw [hb, hf, hw.1]
+  · simp only [hsmall, if_false]
+    by_cases hg : data.size.toUSize.toNat = data.size ∧
+        data.size.toUSize < ((~~~(0 : USize)) >>> 9) ∧
+        data.size * 512 + 511 < USize.size
+    · simp only [dif_pos hg]
+      let prevSize := min chainWinSize data.size
+      let c := Array.replicate (prevSize + 65536) data.size
+      have hsz : data.size < USize.size := by
+        rw [← hg.1]
+        exact USize.toNat_lt_two_pow_numBits _
+      have hfit : data.size * 512 + 511 < USize.size := hg.2.2
+      have hps : prevSize.toUSize.toNat = prevSize :=
+        toUSize_toNat_of_lt (by simp only [prevSize, chainWinSize]; omega)
+      have hcs : prevSize + 65536 ≤ c.size := by
+        simp only [c, Array.size_replicate]
+        omega
+      have hw := lz77GreedyMergedLoopF1U64_spec data prevSize
+        data.size.toUSize prevSize.toUSize hg.1 hps hsz hfit
+        (Nat.le_refl _) (Nat.min_le_left _ _) c hcs 0 (by simp)
+        (TokenArray.emptyWithCapacity data.size) initFusedFreqBytes initLitFreqF initDistFreqF
+        (by rw [TokenArray.emptyWithCapacity_toArray]; simp)
+        (by rw [TokenArray.emptyWithCapacity_toArray]; exact initFusedFreqBytes_rep)
+        (by rw [TokenArray.emptyWithCapacity_toArray]; exact tokenFreqsP_nil_fst)
+        (by rw [TokenArray.emptyWithCapacity_toArray]; exact tokenFreqsP_nil_snd)
+      generalize hwide : lz77GreedyMergedLoopF1U64 data prevSize
+        data.size.toUSize prevSize.toUSize hg.1 hps hsz hfit
+        (Nat.le_refl _) (Nat.min_le_left _ _) c hcs 0 (by simp)
+        (TokenArray.emptyWithCapacity data.size) initFusedFreqBytes = wide at hw
+      generalize hboxed : lz77GreedyMergedLoopF1U data prevSize
+        data.size.toUSize prevSize.toUSize hg.1 hps hsz hfit
+        (Nat.le_refl _) (Nat.min_le_left _ _) c hcs 0 (by simp)
+        (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF = boxed at hw
+      rcases wide with ⟨wideTokens, freqs⟩
+      rcases boxed with ⟨boxedTokens, litF, distF⟩
+      have hf := fusedFreqBytesToNat_eq freqs boxedTokens.toArray hw.2.1
+      rw [hf, hw.1, hw.2.2.1, hw.2.2.2]
+    · simp only [dif_neg hg]
+
 /-- **The fused greedy entry computes the merged matcher's tokens and their
     frequencies in one pass.** -/
 theorem lz77ChainIterPMergedF_eq (data : ByteArray) (maxChain windowSize insertCap niceLen : Nat) :
