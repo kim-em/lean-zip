@@ -2449,6 +2449,9 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ lev
   by_cases hlevel : level = 1
   · subst level
     simp only [beq_self_eq_true, ↓reduceIte]
+    rw [deflateRawBaseFU64Level1_eq]
+    unfold deflateRawBaseFLevel1Impl
+    simp only [beq_self_eq_true, ↓reduceIte]
     rw [lz77ChainIterPMergedF1U_eq]
     simp only [lz77ChainIterPMergedF_eq]
     rw [← tokenFreqsPTA_toArray]
@@ -2457,6 +2460,8 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ lev
     simp only [show ¬ (4 : UInt8) ≤ 1 by decide,
       show (1 : UInt8) ≤ 1 by decide, show (1 : UInt8) ≤ 4 by decide, ↓reduceIte]
   · rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+    unfold deflateRawBaseFLevel1Impl
+    rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
     simp only [lz77ChainIterPMergedF_eq]
     rw [← tokenFreqsPTA_toArray]
     rw [deflateRawBasePF_tokenFreqsP]
