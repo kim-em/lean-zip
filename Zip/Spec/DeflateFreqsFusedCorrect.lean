@@ -231,22 +231,24 @@ theorem lz77GreedyMergedLoopF_spec (data : ByteArray)
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
       split
-      · split
-        · refine ih _ (by omega) _ _ _ _ _ ?_ ?_ rfl
-          · rw [TokenArray.push_toArray]
-            exact bumpRefLitFreqP_push acc.toArray _ _ (packTok_reference_tag _ _) hlit
-          · rw [TokenArray.push_toArray]
-            exact bumpRefDistFreqP_push acc.toArray _ _ (packTok_reference_tag _ _) hdist
+      all_goals
+        split
+        · split
+          · refine ih _ (by omega) _ _ _ _ _ ?_ ?_ rfl
+            · rw [TokenArray.push_toArray]
+              exact bumpRefLitFreqP_push acc.toArray _ _ (packTok_reference_tag _ _) hlit
+            · rw [TokenArray.push_toArray]
+              exact bumpRefDistFreqP_push acc.toArray _ _ (packTok_reference_tag _ _) hdist
+          · refine ih _ (by omega) _ _ _ _ _ ?_ ?_ rfl
+            · rw [TokenArray.push_toArray]
+              exact bumpLitFreqP_push acc.toArray _ _ (packTok_literal_tag _) hlit
+            · rw [TokenArray.push_toArray]
+              exact distFreq_push_lit acc.toArray _ _ (packTok_literal_tag _) hdist
         · refine ih _ (by omega) _ _ _ _ _ ?_ ?_ rfl
           · rw [TokenArray.push_toArray]
             exact bumpLitFreqP_push acc.toArray _ _ (packTok_literal_tag _) hlit
           · rw [TokenArray.push_toArray]
             exact distFreq_push_lit acc.toArray _ _ (packTok_literal_tag _) hdist
-      · refine ih _ (by omega) _ _ _ _ _ ?_ ?_ rfl
-        · rw [TokenArray.push_toArray]
-          exact bumpLitFreqP_push acc.toArray _ _ (packTok_literal_tag _) hlit
-        · rw [TokenArray.push_toArray]
-          exact distFreq_push_lit acc.toArray _ _ (packTok_literal_tag _) hdist
     · simp only [hlt, ↓reduceDIte]
       exact trailingPF_spec data pos acc litF distF hlit hdist
 
