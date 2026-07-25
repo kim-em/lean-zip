@@ -44,6 +44,11 @@ Frame hygiene — two filters run over the raw history (reported to stderr):
   for a snapshot wobble that lands just over the noise threshold and reads as
   the frontier stepping backwards (see the constant for the current entries).
 
+Each frame's ticker also states its timing protocol. Silesia frames from before
+the machine-readable timing schema are labelled as legacy single-repetition
+snapshots; declared frames are validated and labelled median-of-5. Protocol
+transitions are never removed by the spike/noise filters.
+
 Aggregation is identical to plot.py's pareto_scatter (geomean ratio and
 geomean compress MB/s per level over the corpus files), and the connectors
 are the same achievable mixing frontier (`plot._mix_curve` maths: ratio
@@ -146,6 +151,41 @@ def _levels(f):
     return {p[0] for p in f["points"]}
 
 
+def frame_timing(doc, corpus, source="benchmark history frame"):
+    """Return ``(label, declared)`` for one historical dashboard frame.
+
+    Timing fields were introduced when Silesia moved from its legacy one-shot
+    shortcut to the uniform median-of-5 protocol. Do not retrofit those fields
+    onto old JSON: classify legacy Silesia honestly at render time, and require
+    any frame that does declare timing metadata to satisfy the current schema.
+    """
+    meta = doc.get("meta", {})
+    declared = "timing_aggregation" in meta or "timing_reps" in meta
+    # Deliberately outside extraction's JSON-error handling: a partially or
+    # incorrectly declared frame is a provenance error, not a frame to hide.
+    require_routine_if_declared(doc, source)
+    if declared:
+        return f"{meta['timing_aggregation']}-of-{meta['timing_reps']}", True
+    if corpus == "silesia":
+        return "legacy single-rep", False
+    return "legacy protocol undeclared", False
+
+
+def history_timing_summary(frames, corpus):
+    """Concise, honest timing-protocol provenance for the whole animation."""
+    first_declared = next((f for f in frames if f.get("timing_declared")), None)
+    has_legacy = any(not f.get("timing_declared") for f in frames)
+    if has_legacy and first_declared:
+        legacy = ("legacy Silesia single-rep" if corpus == "silesia"
+                  else "legacy protocol undeclared")
+        return (f"{legacy} → {first_declared['timing']} at "
+                f"{first_declared['commit']}")
+    if first_declared:
+        return first_declared["timing"]
+    return ("legacy Silesia = single-rep" if corpus == "silesia"
+            else "legacy protocol undeclared")
+
+
 def drop_spikes(frames):
     """Drop stale-refresh spikes: a frame that jumps away from its
     predecessor, matches an older frame's deterministic ratios, AND is
@@ -153,7 +193,9 @@ def drop_spikes(frames):
     regression that *persists* fails the transience test and is kept."""
     kept = []
     for i, f in enumerate(frames):
-        if kept and i < len(frames) - 1 and _dratio(kept[-1], f) > SPIKE_JUMP \
+        protocol_change = kept and f.get("timing") != kept[-1].get("timing")
+        if kept and not protocol_change and i < len(frames) - 1 \
+                and _dratio(kept[-1], f) > SPIKE_JUMP \
                 and any(_dratio(g, f) < SPIKE_MATCH for g in kept[:-1]) \
                 and _dratio(kept[-1], frames[i + 1]) < 0.5 * _dratio(kept[-1], f):
             print(f"spike: drop {f['commit']} ({f['subject'][:60]})",
@@ -170,7 +212,9 @@ def drop_noise(frames):
         return frames
     out = [frames[0]]
     for f in frames[1:-1]:
-        if _levels(f) != _levels(out[-1]) or _dratio(out[-1], f) > RATIO_EPS \
+        if f.get("timing") != out[-1].get("timing") \
+                or _levels(f) != _levels(out[-1]) \
+                or _dratio(out[-1], f) > RATIO_EPS \
                 or _dspeed(out[-1], f) > LOGSPEED_EPS:
             out.append(f)
         else:
@@ -219,15 +263,17 @@ def extract(corpus, include_worktree=False, only=None):
         if any(sha.startswith(deny) for deny in DENY_COMMITS):
             print(f"deny: drop {sha[:8]} ({subject[:60]})", file=sys.stderr)
             continue
+        source = f"{sha}:bench/results/latest.json"
         try:
-            d = json.loads(git("show", f"{sha}:bench/results/latest.json"))
-            require_routine_if_declared(d, f"{sha}:bench/results/latest.json")
-        except Exception:
-            continue
+            d = json.loads(git("show", source))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{source}: invalid benchmark JSON: {e}") from e
+        timing, timing_declared = frame_timing(d, corpus, source)
         pts = native_points(d.get("results", []), corpus)
         if pts:
             frames.append(dict(commit=sha[:8], subject=subject,
-                               commit_date=cdate, points=pts))
+                               commit_date=cdate, points=pts, timing=timing,
+                               timing_declared=timing_declared))
     if not frames:
         sys.exit(f"no native {corpus} rows anywhere in the history of "
                  "bench/results/latest.json")
@@ -237,9 +283,12 @@ def extract(corpus, include_worktree=False, only=None):
     if include_worktree:
         wt = native_points(now["results"], corpus)
         if wt and wt != frames[-1]["points"]:
+            timing, timing_declared = frame_timing(
+                now, corpus, "working-tree bench/results/latest.json")
             frames.append(dict(commit="worktree", subject="uncommitted dashboard refresh",
                                commit_date=now.get("meta", {}).get("date", "?"),
-                               points=wt))
+                               points=wt, timing=timing,
+                               timing_declared=timing_declared))
 
     raw = len(frames)
     frames = drop_noise(drop_spikes(frames))
@@ -255,7 +304,7 @@ def extract(corpus, include_worktree=False, only=None):
                 last_date=frames[-1]["commit_date"][:10],
                 ref_commit=m.get("git_commit", "?"),
                 ref_date=m.get("date", "?")[:10],
-                timing=f"{m.get('timing_aggregation', '?')}-of-{m.get('timing_reps', '?')}",
+                history_timing=history_timing_summary(frames, corpus),
                 machine=m.get("machine", "?")
                          .replace("Linux ", "").replace(" x86_64", ""))
     return references, frames, meta
@@ -267,10 +316,21 @@ def title_of(meta):
 
 
 def provenance_of(meta):
-    return (f"native curve replayed from the git history of latest.json · "
-            f"references @ {meta['ref_commit']} "
+    return (f"native history · refs @ {meta['ref_commit']} "
             f"({meta['ref_date']}, {meta['machine']}) · "
-            f"throughput = {meta['timing']}; ratio deterministic")
+            f"per-frame timing: {meta['history_timing']} · "
+            f"ratio deterministic")
+
+
+def ticker_text(frame, index, count, max_chars=102):
+    """Frame ticker text, bounded to the available SVG header width."""
+    prefix = (f"{frame['commit_date'][:10]} · {frame['commit']} · "
+              f"{index + 1:2d}/{count} · [{frame['timing']}] — ")
+    subject = frame["subject"]
+    budget = max(max_chars - len(prefix), 1)
+    if len(subject) > budget:
+        subject = subject[:max(budget - 1, 0)] + "…"
+    return prefix + subject
 
 
 # --------------------------------------------------------------------------
@@ -504,11 +564,7 @@ def build_svg(references, frames, meta, outfile):
     # varying line width doesn't wobble
     out.append(f'<g font-size="13.5" fill="#333333" {mono}>')
     for i, f in enumerate(frames):
-        subj = f["subject"]
-        if len(subj) > 72:
-            subj = subj[:69] + "…"
-        txt = escape(f"{f['commit_date'][:10]} · {f['commit']} · "
-                     f"{i+1:2d}/{N} — {subj}")
+        txt = escape(ticker_text(f, i, N))
         s0 = starts[i] / T
         s1 = starts[i + 1] / T if i + 1 < N else None
         if N == 1:                      # single frame: static ticker, no animation
@@ -645,13 +701,9 @@ def draw_video_frame(plt, references, frames, meta, t, outfile):
 
     k = round(t)
     fr = frames[k]
-    subject = fr["subject"]
-    if len(subject) > 76:
-        subject = subject[:73] + "…"
     fig.suptitle(title_of(meta), fontsize=12, fontweight="bold")
     # left-anchored so the line doesn't wobble as its width changes
-    fig.text(0.075, 0.912, f"{fr['commit_date'][:10]} · {fr['commit']} · "
-             f"{k + 1:2d}/{N} — {subject}",
+    fig.text(0.075, 0.912, ticker_text(fr, k, N, max_chars=112),
              ha="left", fontsize=8.5, family="monospace")
     fig.text(0.5, 0.005, provenance_of(meta), ha="center", fontsize=7,
              color="#555555")
