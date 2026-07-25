@@ -2641,6 +2641,89 @@ def lz77LazyMergedLoop (data : ByteArray)
 termination_by 2 * (data.size - pos) + min pLen 1
 decreasing_by all_goals (first | assumption | omega)
 
+/-- Specialized lazy loop for the production no-H3, single-deferral policy.
+    It is the fresh-position arm of `lz77LazyMergedLoop` with the unreachable
+    rolling/H3 state erased. The existing guarded native-word chain and merged
+    insertion entries remain unchanged. -/
+def lz77LazyMergedLoopNoH3Single (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth : Nat)
+    (c : Array Nat) (pos : Nat) (acc : TokenArray) : TokenArray :=
+  if hlt : pos + 2 < data.size then
+    let h := lz77Greedy.hash3 data pos hashSize hlt
+    let head := headProbeGuarded c (prevSize + h)
+    let c := guardedSet c (prevSize + h) pos
+    let c := guardedSet c (pos &&& 0x7FFF) head
+    have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
+    let r := chainWalkGuardedPackedUU data c windowSize pos
+      (min 258 (data.size - pos)) niceLen hmaxLenP head maxChain 0 0
+    let matchLen := r % 512
+    let matchPos := r / 512
+    if hge : matchLen ≥ 3 then
+      if hle : pos + matchLen ≤ data.size then
+        if h3lt : pos + 3 < data.size then
+          if matchLen < goodMatch then
+            let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+            let head2 := headProbeGuarded c (prevSize + h2)
+            have hmaxLen2P :
+                (pos + 1) + min 258 (data.size - (pos + 1)) ≤ data.size := by omega
+            let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
+            let seed := if matchLen < cutoff2 then matchLen else 0
+            let r2 := chainWalkGuardedPackedUU data c windowSize (pos + 1)
+              (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P
+              head2 lazyDepth seed 0
+            let matchLen2 := r2 % 512
+            let matchPos2 := r2 / 512
+            if lazyAcceptCost matchLen (pos - matchPos) matchLen2
+                (pos + 1 - matchPos2) then
+              if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                have : data.size - (pos + 1 + matchLen2) < data.size - pos := by omega
+                let c := updateHashesMergedGuarded data hashSize prevSize c pos 1
+                  (matchLen2 + 1) insertCap
+                lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
+                  insertCap goodMatch niceLen lazyDepth c (pos + 1 + matchLen2)
+                  (acc.push (packTok (.literal (data[pos]'(by omega)))) |>.push
+                    (packTok (.reference matchLen2 (pos + 1 - matchPos2))))
+              else
+                have : data.size - (pos + matchLen) < data.size - pos := by omega
+                let c := updateHashesMergedGuarded data hashSize prevSize c pos 1
+                  matchLen insertCap
+                lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
+                  insertCap goodMatch niceLen lazyDepth c (pos + matchLen)
+                  (acc.push (packTok (.reference matchLen (pos - matchPos))))
+            else
+              have : data.size - (pos + matchLen) < data.size - pos := by omega
+              let c := updateHashesMergedGuarded data hashSize prevSize c pos 1
+                matchLen insertCap
+              lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
+                insertCap goodMatch niceLen lazyDepth c (pos + matchLen)
+                (acc.push (packTok (.reference matchLen (pos - matchPos))))
+          else
+            have : data.size - (pos + matchLen) < data.size - pos := by omega
+            let c := updateHashesMergedGuarded data hashSize prevSize c pos 1
+              matchLen insertCap
+            lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
+              insertCap goodMatch niceLen lazyDepth c (pos + matchLen)
+              (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
+            insertCap goodMatch niceLen lazyDepth c (pos + matchLen)
+            (acc.push (packTok (.reference matchLen (pos - matchPos))))
+      else
+        have : data.size - (pos + 1) < data.size - pos := by omega
+        lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
+          insertCap goodMatch niceLen lazyDepth c (pos + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      have : data.size - (pos + 1) < data.size - pos := by omega
+      lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
+        insertCap goodMatch niceLen lazyDepth c (pos + 1)
+        (acc.push (packTok (.literal (data[pos]'(by omega)))))
+  else
+    trailingPT data pos acc
+termination_by data.size - pos
+decreasing_by all_goals assumption
+
 /-- Merged-array entry mirroring `lz77ChainLazyIterP`: builds the combined
     `prevSize + hashSize` array and runs `lz77LazyMergedLoop`. Threads the
     rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
@@ -2654,9 +2737,15 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
-    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
-      (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0 0 0 0
-      (TokenArray.emptyWithCapacity data.size)
+    if _hfast : useH3 = false ∧ lazy2Steps ≤ 1 then
+      lz77LazyMergedLoopNoH3Single data windowSize hashSize prevSize maxChain
+        insertCap goodMatch niceLen lazyDepth
+        (.replicate (prevSize + hashSize) data.size) 0
+        (TokenArray.emptyWithCapacity data.size)
+    else
+      lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
+        (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0 0 0 0
+        (TokenArray.emptyWithCapacity data.size)
 
 /-- Merged-array twin of `lz77ChainIterP.mainLoop` (the greedy tier, levels
     1–3): identical control flow, but the chain state is the single combined
