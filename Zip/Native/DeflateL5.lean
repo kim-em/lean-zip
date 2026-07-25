@@ -333,4 +333,3 @@ def lz77ChainLazyIterPMergedL5Large (data : ByteArray) (windowSize : Nat := 3276
       (TokenArray.emptyWithCapacity data.size)
 
 end Zip.Native.Deflate
-
