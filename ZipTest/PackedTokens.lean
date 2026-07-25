@@ -195,6 +195,70 @@ private def checkSplitP (label : String) (data : ByteArray) : IO Unit := do
           s!"{label} level {level}: deflateDynamicBlocksSharedAtP ({splitP.size} bytes) ≠ \
              boxed reference ({splitB.size} bytes) at cuts {cuts}")
 
+/-- A 4 MiB fixture that defeats the incompressible pre-scan, then repeats one
+    random 32 KiB window. It exercises mixed packed-counter traffic,
+    exact-window matches, and nonempty split arbitration while keeping CI
+    bounded. -/
+private def largeL5ExerciseData : ByteArray :=
+  let seed := mkPrngData chainWinSize 0xC0FFEE
+  ByteArray.mk (Array.ofFn (n := l5LargeInputMinSize) (fun i =>
+    if i.val < prescanRegionBytes then 0x42
+    else seed[(i.val - prescanRegionBytes) % seed.size]!))
+
+/-- Emit the established level-5 base/split arbitration from an explicit token
+    stream and cut list, independently of the production matcher dispatch. -/
+private def emitL5Reference (data : ByteArray) (ptokens : TokenArray)
+    (cuts : List Nat) : ByteArray :=
+  let withObs : Nat × (Unit → ByteArray) :=
+    if cuts.isEmpty then
+      deflateRawBasePPrep data ptokens
+    else
+      let obsFreqs := deflateObsSplitSizedFreqsP data ptokens cuts
+      let basePrep := deflateRawBasePPrepF data ptokens obsFreqs.2
+      if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
+  withObs.2 ()
+
+/-- Compiled-path coverage for the ≥4 MiB L5 specialization. Compare its
+    native-word matcher, packed-counter splitter, and production output against
+    their established separately-array/scalar compiled references. -/
+private def checkLargeL5CompiledPath : IO Unit := do
+  let data := largeL5ExerciseData
+  let belowThreshold := data.extract 0 (l5LargeInputMinSize - 1)
+  if useL5LargeInputPolicy belowThreshold 5 then
+    throw (IO.userError "large-L5 policy engaged below its size threshold")
+  unless lazyChainDepthFor belowThreshold 5 == chainDepth 5 &&
+      lazyDepthFor belowThreshold 5 == lazyDepth 5 &&
+      splitCheckTokensFor belowThreshold 5 == splitCheckTokens do
+    throw (IO.userError "below-threshold L5 policy did not retain its fallback parameters")
+  unless useL5LargeInputPolicy data 5 do
+    throw (IO.userError "large-L5 policy did not engage")
+  if incompressiblePrescan data then
+    throw (IO.userError "large-L5 fixture hit the stored pre-scan")
+
+  let specialized := lzMatchP data 5
+  let reference := lz77ChainLazyIterP data 22 32768
+    (insertCap 5) (goodMatch 5) (niceLen 5) 5 false 1
+  unless specialized.toArray == reference.toArray do
+    throw (IO.userError "large-L5 specialized/reference token mismatch")
+
+  let cadence := splitCheckTokensFor data 5
+  let packedCuts :=
+    chooseSplitsHeuristicPUPacked specialized data.size cadence
+  let scalarCuts :=
+    chooseSplitsHeuristicPU specialized data.size cadence
+  let referenceCuts :=
+    chooseSplitsHeuristicP reference data.size
+      splitMinBlockBytes splitSoftMaxBlockBytes cadence
+  unless packedCuts == scalarCuts && packedCuts == referenceCuts do
+    throw (IO.userError "large-L5 split-walker mismatch")
+  if packedCuts.isEmpty then
+    throw (IO.userError "large-L5 fixture did not exercise split arbitration")
+
+  let production := deflateRaw data 5
+  let established := emitL5Reference data reference referenceCuts
+  unless production == established do
+    throw (IO.userError "large-L5 production/reference output mismatch")
+
 def tests : IO Unit := do
   IO.println "  PackedTokens tests..."
   let alice ← IO.FS.readBinFile "bench/corpora/canterbury/alice29.txt"
@@ -267,6 +331,7 @@ def tests : IO Unit := do
   checkSplitP "prng64k" (mkPrngData 65536)
   checkSplitP "size0" ByteArray.empty
   checkSplitP "size1" (ByteArray.mk #[42])
+  checkLargeL5CompiledPath
   IO.println "  PackedTokens tests passed"
 
 end ZipTest.PackedTokens

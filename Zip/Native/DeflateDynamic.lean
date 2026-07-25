@@ -3,6 +3,7 @@ import Zip.Native.DeflateFreqs
 import Zip.Native.DeflateFreqsFused
 import Zip.Spec.DeflateFreqsFusedCorrect
 import Zip.Native.DeflateParse
+import Zip.Native.DeflateL5
 import Zip.Spec.DeflateEncodeDynamic
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.EmitTokensCorrect
@@ -430,11 +431,10 @@ def emitTokensWithCodesTAPTFlatZero (bw : BitWriter) (tokens : TokenArray)
   emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf bw.bitCount.toUInt32
     tokens litT distT hlit hdist 0
 
-/-- Logical proof helper for the flat single-block route.  The proof-gated
-    production block calls `emitTokensWithCodesTAPTFlatZero` directly and uses
+/-- Logical proof helper for the flat emitter. The proof-gated single-block
+    production route calls `emitTokensWithCodesTAPTFlatZero` directly and uses
     `emitTokensWithCodesTAPTFlatZero_eq_routed` to connect that implementation
-    to this body under its canonical code-table bounds.  The shared multi-block
-    emitter continues to call the reference `emitTokensWithCodesTAPT`. -/
+    to this body under its canonical code-table bounds. -/
 def emitTokensWithCodesTAPTFlatRouted (bw : BitWriter) (tokens : TokenArray)
     (litT distT : Array UInt32)
     (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
@@ -972,9 +972,13 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     re-grid #2825, and greedy re-grid #2830 landings): the old L5 = (128,
     single-block, gate off) had fallen ~14% inside the L4↔L6 mixing line — the
     recent landings made the split tier so much cheaper that a shallow-chain
-    *split* point (chain 24, gate 64, probe /4, no singleton) matches the old
+    *split* point (initially chain 24, gate 64, probe /4, no singleton) matches the old
     L5's speed while banking −0.53pp weighted-Silesia ratio (0.3302 → 0.3249),
-    +4% above the blend; every deeper single-block point stayed inside it.
+    +4% above the blend; every deeper single-block point stayed inside it. The
+    later `l5-cadence-finalists` sweep found a faster large-stream point at
+    chain 22 with a 2016-token observation window. `lazyChainDepthFor` selects
+    it only on large inputs; smaller streams retain this chain-24 point so the
+    established small-input frontier remains available.
     **L6's depth drops back to 64 on purpose** (the split tier historically
     started there): at equal
     cycles the observation-divergence split + a shallow chain beats a deep
@@ -1047,8 +1051,9 @@ def insertCap (level : UInt8) : Nat :=
     miniz_oxide L6; L7 keeps the gate off and the old L6 ratio point.
     **L5 also gates at 64 since the L5 re-grid** (`gate-sweep`, see
     `chainDepth`): the winning shallow split point pairs the intermediate gate
-    with its chain-24 walk — at that depth the gate's skipped lookahead probes
-    are most of the lazy tier's marginal cost. -/
+    with its original chain-24 walk — at that depth the gate's skipped lookahead
+    probes are most of the lazy tier's marginal cost. The later chain-22 cadence
+    retune retains that gate. -/
 def goodMatch (level : UInt8) : Nat :=
   if level ≤ 4 then 8
   else if level ≤ 6 then 64
@@ -1111,9 +1116,10 @@ def niceLen (level : UInt8) : Nat :=
     whole-tar win waits on shrinking the token footprint (fault-reserve +
     unboxing). L7 keeps its own rolling (a genuine whole-tar win at that level).
     **L5 probes at `/4` since the L5 re-grid**
-    (`gate-sweep`, see `chainDepth`): the winning (chain 24, gate 64) split
-    point took its probe at 6 — deep enough to keep the deferral wins the
-    gate lets through, half the cost of the `/2` default.
+    (`gate-sweep`, see `chainDepth`): the original winning (chain 24, gate 64)
+    split point took its probe at 6. The later chain-22 cadence retune takes it
+    at 5 — deep enough to keep the deferral wins the gate lets through, roughly
+    half the cost of the `/2` default.
 
     Only levels ≥ 4 (the lazy `deflate_slow` tier) consult this; the greedy
     matcher (1–3) has no lookahead. Depth is a pure heuristic — the chain is
@@ -1123,6 +1129,18 @@ def lazyDepth (level : UInt8) : Nat :=
   if level == 5 then chainDepth level / 4
   else if level == 6 then 8
   else chainDepth level / 2
+
+/-- Whether this call uses L5's large-stream matcher/split retune. -/
+def useL5LargeInputPolicy (data : ByteArray) (level : UInt8) : Bool :=
+  level == 5 && l5LargeInputMinSize ≤ data.size
+
+/-- Lazy-tier chain depth after the size-aware L5 retune. -/
+def lazyChainDepthFor (data : ByteArray) (level : UInt8) : Nat :=
+  if useL5LargeInputPolicy data level then 22 else chainDepth level
+
+/-- Lazy lookahead depth paired with `lazyChainDepthFor`. -/
+def lazyDepthFor (data : ByteArray) (level : UInt8) : Nat :=
+  if useL5LargeInputPolicy data level then 22 / 4 else lazyDepth level
 
 /-- Number of contiguous sample regions the pre-scan reads, spread end to end
     across the input (first at offset 0, last ending at `n`). A region that looks
@@ -1266,7 +1284,7 @@ def lazy2StepsLevel (level : UInt8) : Nat :=
     Levels 6–8 additionally enable the hash3 length-3 singleton, content-gated by
     `useH3For` (on only when the input classifies as low-compressibility). -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
+  if 4 ≤ level then lz77ChainLazyIter data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -1275,7 +1293,14 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : TokenArray :=
-  if 4 ≤ level then lz77ChainLazyIterPMerged data (chainDepth level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepth level) (useH3For data level) (lazy2StepsLevel level)
+  if 4 ≤ level then
+    if useL5LargeInputPolicy data level then
+      lz77ChainLazyIterPMergedL5Large data 32768
+        (insertCap level) (goodMatch level) (niceLen level)
+    else
+      lz77ChainLazyIterPMerged data (lazyChainDepthFor data level) 32768
+        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+        (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-! ## Self-contained block-split dynamic compression
@@ -1455,6 +1480,18 @@ def splitNumClasses : Nat := 10
 /-- New observations between divergence checks (libdeflate
     `NUM_OBSERVATIONS_PER_BLOCK_CHECK`): the recent-window size in tokens. -/
 def splitCheckTokens : Nat := 512
+
+/-- Per-level observation-window cadence for the shared-block split heuristic.
+    Large-stream L5 uses a coarser window: at its shallow chain, checking every
+    2016 tokens preserves enough block adaptation that its 12-file geometric-mean
+    ratio remains slightly smaller than the established miniz_oxide L5 Silesia
+    reference (0.327237 vs 0.327302), while removing much of the entropy-check
+    and tree-preparation overhead. Corpus-total bytes instead favor miniz_oxide by
+    0.17%, led by `mozilla`; this is an intentional fixed-L5 ratio/speed trade.
+    Small L5 streams and L6–L8 retain the established 512-token cadence, so their
+    bytes are unchanged. -/
+def splitCheckTokensFor (data : ByteArray) (level : UInt8) : Nat :=
+  if useL5LargeInputPolicy data level then 2016 else splitCheckTokens
 
 /-- Floor on block *output* bytes, and on bytes remaining after a cut
     (libdeflate `MIN_BLOCK_LENGTH`): per-block tree headers stop paying for
@@ -1707,9 +1744,10 @@ The libdeflate-style divergence heuristic and the shared-window block emitter,
 both walking the `packTok`-encoded `UInt32` stream directly — the packed twins
 of `chooseSplitsHeuristic` and `emitSharedBlocksAt`. This is what lets the
 mid-band levels (5–8) afford per-block Huffman trees at all: the per-block
-frequency pass runs on `tokenFreqsP` (dense packed tables) and the emit on
-`emitTokensWithCodesP`, so the split candidate never materializes boxed
-`LZ77Token`s and never touches the `findTableCode` linear scans. At level 8 the
+frequency pass runs on `tokenFreqsPTA` (dense packed tables), while the shared
+emitter uses the packed `emitDynBlockP` token loop, so the split candidate never
+materializes boxed `LZ77Token`s and never touches the `findTableCode` linear
+scans. At level 8 the
 same pipeline **replaces** the `chooseSplitsArbitrated` sizing pass: libdeflate
 picks boundaries with the streaming heuristic alone (no exact-bits arbitration),
 and the sizing pass — two extra boxed `tokenFreqs`+`symbolBitCount` walks over
@@ -1735,6 +1773,24 @@ boxed reference via `deflateDynamicBlocksSharedAtP_eq`
   if w &&& ((1 : UInt32) <<< 31) = 0 then 1
   else ((w >>> 16) &&& 0x7FFF).toNat
 
+/-- Increment the observation counter selected by a `Nat` class.  Kept as a
+    named inline helper so the reference and native-word split walkers can be
+    related without expanding ten nested tuple projections at every step. -/
+@[inline] def splitBumpN (c : Nat)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 : Nat) :
+    Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat :=
+  match c with
+  | 0 => (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
+  | 1 => (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
+  | 2 => (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
+  | 3 => (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
+  | 4 => (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
+  | 5 => (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
+  | 6 => (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
+  | 7 => (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
+  | 8 => (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
+  | _ => (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+
 /-- The per-token core of `chooseSplitsHeuristicP`, threaded as a tail-recursive
     loop over explicit scalar state so the hot accumulators compile to register
     arithmetic instead of `Array Nat` `set!`/`getD` (#2762). The ten observation
@@ -1755,17 +1811,7 @@ def chooseSplitsHeuristicP.go (toks : TokenArray)
     let c := splitTokenClassP t
     let tb := splitTokenBytesP t
     let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
-      match c with
-      | 0 => (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
-      | 1 => (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
-      | 2 => (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
-      | 3 => (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
-      | 4 => (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
-      | 5 => (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
-      | 6 => (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
-      | 7 => (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
-      | 8 => (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
-      | _ => (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+      splitBumpN c n0 n1 n2 n3 n4 n5 n6 n7 n8 n9
     let newTot := newTot + 1
     let blockBytes := blockBytes + tb
     let remaining := remaining - tb
@@ -1808,7 +1854,8 @@ decreasing_by all_goals omega
     obligations; `ZipTest/PackedTokens.lean` pins it to the boxed heuristic
     over the `unpackTok` view. The block floor/ceiling and check cadence are
     defaulted parameters so the `mid-sweep` tuning tool can grid them without
-    touching the dispatch (which always calls with the tuned defaults).
+    touching the dispatch. Production normally uses those defaults; large L5
+    streams explicitly pass their coarser 2016-token cadence.
 
     `totalBytes` is the whole-stream output byte count `Σ splitTokenBytesP t`.
     The boxed reference computes it with a leading pass over `toks`; the packed
@@ -1821,10 +1868,15 @@ def chooseSplitsHeuristicP (toks : TokenArray) (totalBytes : Nat)
     (minBlockBytes : Nat := splitMinBlockBytes)
     (softMaxBlockBytes : Nat := splitSoftMaxBlockBytes)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
-  (chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens 0
-    0 0 0 0 0 0 0 0 0 0 0
-    0 0 0 0 0 0 0 0 0 0 0
-    0 totalBytes #[]).toList
+  -- Before an underflow, `blockBytes + remaining = totalBytes`; after one,
+  -- saturated `remaining` stays below the tail floor. Thus both min-block
+  -- floors cannot hold when the whole stream is below twice the floor.
+  if totalBytes < 2 * minBlockBytes then []
+  else
+    (chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 totalBytes #[]).toList
 
 /-- `Array UInt32` reference walker for `chooseSplitsHeuristicP.go`: the exact
     pre-`TokenArray` body, reading each packed word from an `Array UInt32` slot
@@ -1845,17 +1897,7 @@ def chooseSplitsHeuristicPArray.go (toks : Array UInt32)
     let c := splitTokenClassP t
     let tb := splitTokenBytesP t
     let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
-      match c with
-      | 0 => (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
-      | 1 => (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
-      | 2 => (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
-      | 3 => (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
-      | 4 => (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
-      | 5 => (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
-      | 6 => (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
-      | 7 => (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
-      | 8 => (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
-      | _ => (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+      splitBumpN c n0 n1 n2 n3 n4 n5 n6 n7 n8 n9
     let newTot := newTot + 1
     let blockBytes := blockBytes + tb
     let remaining := remaining - tb
@@ -1895,10 +1937,12 @@ def chooseSplitsHeuristicPArray (toks : Array UInt32) (totalBytes : Nat)
     (minBlockBytes : Nat := splitMinBlockBytes)
     (softMaxBlockBytes : Nat := splitSoftMaxBlockBytes)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
-  (chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens 0
-    0 0 0 0 0 0 0 0 0 0 0
-    0 0 0 0 0 0 0 0 0 0 0
-    0 totalBytes #[]).toList
+  if totalBytes < 2 * minBlockBytes then []
+  else
+    (chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 totalBytes #[]).toList
 
 /-- **Split-walker refinement (byte-identity of the cut points).** The packed
     `TokenArray` walk equals the `Array UInt32` reference walk over the `.toArray`
@@ -1950,8 +1994,360 @@ theorem chooseSplitsHeuristicP_toArray (toks : TokenArray) (totalBytes : Nat)
     chooseSplitsHeuristicP toks totalBytes minBlockBytes softMaxBlockBytes checkTokens
       = chooseSplitsHeuristicPArray toks.toArray totalBytes minBlockBytes softMaxBlockBytes checkTokens := by
   unfold chooseSplitsHeuristicP chooseSplitsHeuristicPArray
-  rw [chooseSplitsHeuristicP.go_toArray toks minBlockBytes softMaxBlockBytes checkTokens
-    (toks.size + 1) 0 (by omega)]
+  by_cases hsmall : totalBytes < 2 * minBlockBytes
+  · simp only [hsmall, if_true]
+  · simp only [hsmall, if_false]
+    rw [chooseSplitsHeuristicP.go_toArray toks minBlockBytes softMaxBlockBytes checkTokens
+      (toks.size + 1) 0 (by omega)]
+
+/-! ## USize-native split walker
+
+The reference walker above deliberately stays in `Nat` so its `TokenArray`
+refinement proof is nearly definitional.  Its generated code nevertheless
+pays several costs per token: recomputing `TokenArray.size`, rechecking the
+backing byte array's addressability in `TokenArray.get`, converting the index
+for the wide load, and updating boxed `Nat` loop state.  At each 512-token
+divergence check it also materializes two ten-element arrays only so
+`splitEndBlockCheck` can read their scalar values back.
+
+The scalar native-word walker below hoists the addressability checks once,
+walks the token bytes and all accumulators in `USize`, and evaluates the
+divergence expression directly from scalar arguments. The packed-counter
+production walker later in this section refines this scalar bridge, which is
+retained as its fallback and proof reference. -/
+
+@[inline] def splitAbsDiffN (a b : Nat) : Nat :=
+  if a ≥ b then a - b else b - a
+
+/-- Scalar `Nat` form of `splitEndBlockCheck`; unlike the reference helper it
+    does not allocate two ten-element arrays. -/
+@[inline] def splitEndBlockCheckN
+    (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : Nat)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : Nat)
+    (blockBytes : Nat) : Bool :=
+  let delta :=
+    splitAbsDiffN (n0 * oldTot) (o0 * newTot) +
+    splitAbsDiffN (n1 * oldTot) (o1 * newTot) +
+    splitAbsDiffN (n2 * oldTot) (o2 * newTot) +
+    splitAbsDiffN (n3 * oldTot) (o3 * newTot) +
+    splitAbsDiffN (n4 * oldTot) (o4 * newTot) +
+    splitAbsDiffN (n5 * oldTot) (o5 * newTot) +
+    splitAbsDiffN (n6 * oldTot) (o6 * newTot) +
+    splitAbsDiffN (n7 * oldTot) (o7 * newTot) +
+    splitAbsDiffN (n8 * oldTot) (o8 * newTot) +
+    splitAbsDiffN (n9 * oldTot) (o9 * newTot)
+  let cutoff := newTot * splitCutoffNum / splitCutoffDen * oldTot
+  delta + (blockBytes / splitBiasBytes) * oldTot ≥ cutoff
+
+/-- Scalar, native-word twin of `splitEndBlockCheck` for the production split
+    constants.  Under the walker's block/check bounds all intermediates fit
+    even a 32-bit `USize`; unlike the reference it allocates no counter arrays. -/
+@[inline] def splitEndBlockCheckU
+    (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : USize)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : USize)
+    (blockBytes : USize) : Bool :=
+  splitEndBlockCheckN
+    o0.toNat o1.toNat o2.toNat o3.toNat o4.toNat o5.toNat o6.toNat o7.toNat o8.toNat o9.toNat
+    oldTot.toNat
+    n0.toNat n1.toNat n2.toNat n3.toNat n4.toNat n5.toNat n6.toNat n7.toNat n8.toNat n9.toNat
+    newTot.toNat blockBytes.toNat
+
+@[inline] def splitTokenClassPU (w : UInt32) : USize :=
+  if w &&& ((1 : UInt32) <<< 31) = 0 then
+    (((w >>> 5) &&& 6) ||| (w &&& 1)).toUSize
+  else
+    if ((w >>> 16) &&& 0x7FFF) ≥ 9 then 9 else 8
+
+@[inline] def splitTokenBytesPU (w : UInt32) : USize :=
+  if w &&& ((1 : UInt32) <<< 31) = 0 then 1
+  else ((w >>> 16) &&& 0x7FFF).toUSize
+
+/-- Native-word counter update corresponding to `splitBumpN`. -/
+@[inline] def splitBumpU (c : USize)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 : USize) :
+    USize × USize × USize × USize × USize × USize × USize × USize × USize × USize :=
+  if c == 0 then (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
+  else if c == 1 then (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
+  else if c == 2 then (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
+  else if c == 3 then (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
+  else if c == 4 then (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
+  else if c == 5 then (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
+  else if c == 6 then (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
+  else if c == 7 then (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
+  else if c == 8 then (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
+  else (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+
+set_option maxHeartbeats 10000000 in
+/-- Fully native-word implementation of the default split policy.  The token
+    end and byte-addressability witness are loop invariants, so each iteration
+    is one direct `ugetUInt32LE` plus scalar arithmetic. -/
+def chooseSplitsHeuristicPU.go (toks : TokenArray) (endU : USize)
+    (hend : endU.toNat = toks.size) (hbytes : toks.bytes.size < USize.size)
+    (checkTokens i : USize)
+    (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : USize)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : USize)
+    (blockBytes remaining : USize) (cuts : Array Nat) : Array Nat :=
+  if hi : i < endU then
+    have hiNat : i.toNat < toks.size := by
+      rw [← hend]
+      exact USize.lt_iff_toNat_lt.mp hi
+    have hbytesMul : toks.bytes.size = 4 * (toks.bytes.size / 4) := by
+      have hm := Nat.mod_add_div toks.bytes.size 4
+      rw [toks.aligned] at hm
+      omega
+    have hoff : ((4 : USize) * i).toNat = 4 * i.toNat := by
+      rw [USize.toNat_mul]
+      have h4 : (4 : USize).toNat = 4 := by
+        exact USize.toNat_ofNat_of_lt
+          (Nat.lt_of_lt_of_le (show 4 < 2 ^ 32 by omega) USize.le_size)
+      rw [h4]
+      apply Nat.mod_eq_of_lt
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      rw [← hUS]
+      simp only [TokenArray.size] at hiNat
+      rw [hbytesMul] at hbytes
+      omega
+    let t := toks.bytes.ugetUInt32LE ((4 : USize) * i) (by
+      rw [hoff]
+      simp only [TokenArray.size] at hiNat
+      rw [hbytesMul]
+      omega)
+    let c := splitTokenClassPU t
+    let tb := splitTokenBytesPU t
+    let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
+      splitBumpU c n0 n1 n2 n3 n4 n5 n6 n7 n8 n9
+    let newTot := newTot + 1
+    let blockBytes := blockBytes + tb
+    -- `Nat.sub` in the reference saturates.  Production streams never
+    -- underflow (`totalBytes = data.size`), but retain the same behavior here.
+    let remaining := if tb ≤ remaining then remaining - tb else 0
+    have hstep : (i + 1).toNat = i.toNat + 1 := by
+      rw [USize.toNat_add, USize.toNat_one]
+      apply Nat.mod_eq_of_lt
+      have hiEnd : i.toNat < endU.toNat := USize.lt_iff_toNat_lt.mp hi
+      have hEnd := USize.toNat_lt_two_pow_numBits endU
+      omega
+    if remaining < splitMinBlockBytes.toUSize then cuts
+    else if blockBytes ≥ splitMinBlockBytes.toUSize then
+      let cut :=
+        blockBytes ≥ splitSoftMaxBlockBytes.toUSize ||
+        (newTot ≥ checkTokens && oldTot > 0 &&
+          splitEndBlockCheckU
+            o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+            n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes)
+      if cut then
+        chooseSplitsHeuristicPU.go toks endU hend hbytes checkTokens (i + 1)
+          0 0 0 0 0 0 0 0 0 0 0
+          0 0 0 0 0 0 0 0 0 0 0
+          0 remaining (cuts.push (i + 1).toNat)
+      else if newTot ≥ checkTokens then
+        chooseSplitsHeuristicPU.go toks endU hend hbytes checkTokens (i + 1)
+          (o0 + n0) (o1 + n1) (o2 + n2) (o3 + n3) (o4 + n4)
+          (o5 + n5) (o6 + n6) (o7 + n7) (o8 + n8) (o9 + n9)
+          (oldTot + newTot)
+          0 0 0 0 0 0 0 0 0 0 0
+          blockBytes remaining cuts
+      else
+        chooseSplitsHeuristicPU.go toks endU hend hbytes checkTokens (i + 1)
+          o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+          n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot
+          blockBytes remaining cuts
+    else
+      chooseSplitsHeuristicPU.go toks endU hend hbytes checkTokens (i + 1)
+        o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+        n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot
+        blockBytes remaining cuts
+  else cuts
+termination_by endU.toNat - i.toNat
+decreasing_by all_goals rw [hstep]; omega
+
+/-- Guarded entry for the scalar native-word split walker. This is the direct
+    production route for small L5 and L6–L8, and the fallback/proof bridge for
+    the packed-counter large-L5 entry below. -/
+@[inline] def chooseSplitsHeuristicPU (toks : TokenArray) (totalBytes : Nat)
+    (checkTokens : Nat := splitCheckTokens) : List Nat :=
+  if totalBytes < 2 * splitMinBlockBytes then []
+  else
+    if hg : toks.bytes.size.toUSize.toNat = toks.bytes.size ∧
+        toks.size.toUSize.toNat = toks.size ∧
+        totalBytes.toUSize.toNat = totalBytes ∧
+        checkTokens.toUSize.toNat = checkTokens then
+      have hbytes : toks.bytes.size < USize.size := by
+        rw [← hg.1]
+        exact USize.toNat_lt_two_pow_numBits _
+      (chooseSplitsHeuristicPU.go toks toks.size.toUSize hg.2.1 hbytes
+        checkTokens.toUSize 0
+        0 0 0 0 0 0 0 0 0 0 0
+        0 0 0 0 0 0 0 0 0 0 0
+        0 totalBytes.toUSize #[]).toList
+    else chooseSplitsHeuristicP toks totalBytes splitMinBlockBytes
+      splitSoftMaxBlockBytes checkTokens
+
+/-- Extract one 15-bit recent-window counter from a packed `UInt64`. -/
+@[inline] def splitField15 (w shift : UInt64) : UInt64 :=
+  (w >>> shift) &&& 0x7FFF
+
+/-- Extract one 20-bit block-so-far counter from a packed `UInt64`. -/
+@[inline] def splitField20 (w shift : UInt64) : UInt64 :=
+  (w >>> shift) &&& 0xFFFFF
+
+/-- Decode the ten 15-bit recent-window counters. -/
+@[inline] def splitUnpack15 (a b c : UInt64) :
+    USize × USize × USize × USize × USize × USize × USize × USize × USize × USize :=
+  ((splitField15 a 0).toUSize, (splitField15 a 15).toUSize,
+    (splitField15 a 30).toUSize, (splitField15 a 45).toUSize,
+    (splitField15 b 0).toUSize, (splitField15 b 15).toUSize,
+    (splitField15 b 30).toUSize, (splitField15 b 45).toUSize,
+    (splitField15 c 0).toUSize, (splitField15 c 15).toUSize)
+
+/-- Decode the ten 20-bit block-so-far counters. -/
+@[inline] def splitUnpack20 (a b c d : UInt64) :
+    USize × USize × USize × USize × USize × USize × USize × USize × USize × USize :=
+  ((splitField20 a 0).toUSize, (splitField20 a 20).toUSize,
+    (splitField20 a 40).toUSize, (splitField20 b 0).toUSize,
+    (splitField20 b 20).toUSize, (splitField20 b 40).toUSize,
+    (splitField20 c 0).toUSize, (splitField20 c 20).toUSize,
+    (splitField20 c 40).toUSize, (splitField20 d 0).toUSize)
+
+/-- Increment one packed 15-bit recent-window counter. -/
+@[inline] def splitBumpPacked15 (cls a b c : UInt64) : UInt64 × UInt64 × UInt64 :=
+  if cls < 4 then (a + ((1 : UInt64) <<< (cls * 15)), b, c)
+  else if cls < 8 then (a, b + ((1 : UInt64) <<< ((cls - 4) * 15)), c)
+  else (a, b, c + ((1 : UInt64) <<< ((cls - 8) * 15)))
+
+/-- Merge packed 15-bit recent counters into packed 20-bit block counters. -/
+@[inline] def splitMergePacked20 (oA oB oC oD nA nB nC : UInt64) :
+    UInt64 × UInt64 × UInt64 × UInt64 :=
+  let q0 := splitField15 nA 0
+  let q1 := splitField15 nA 15
+  let q2 := splitField15 nA 30
+  let q3 := splitField15 nA 45
+  let q4 := splitField15 nB 0
+  let q5 := splitField15 nB 15
+  let q6 := splitField15 nB 30
+  let q7 := splitField15 nB 45
+  let q8 := splitField15 nC 0
+  let q9 := splitField15 nC 15
+  (oA + q0 + (q1 <<< 20) + (q2 <<< 40),
+    oB + q3 + (q4 <<< 20) + (q5 <<< 40),
+    oC + q6 + (q7 <<< 20) + (q8 <<< 40),
+    oD + q9)
+
+/-- Packed-counter twin of `splitEndBlockCheckU`. Recent counters are grouped
+    4+4+2 in 15-bit fields; block-so-far counters are grouped 3+3+3+1 in
+    20-bit fields. -/
+@[inline] def splitEndBlockCheckPackedU
+    (oA oB oC oD : UInt64) (oldTot : USize)
+    (nA nB nC : UInt64) (newTot blockBytes : USize) : Bool :=
+  let (o0, o1, o2, o3, o4, o5, o6, o7, o8, o9) := splitUnpack20 oA oB oC oD
+  let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) := splitUnpack15 nA nB nC
+  splitEndBlockCheckU
+    o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+    n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes
+
+set_option maxHeartbeats 2000000 in
+/-- Compact native split walker. The 20 observation counters occupy seven
+    `UInt64` words, reducing loop-carried register pressure and replacing the
+    per-token class branch chain with two range checks and one variable shift.
+    This loop requires every token to contribute at least one output byte and
+    `0 < checkTokens ≤ 32767`. Under those preconditions each recent field is
+    below 32767 before increment, while merged old fields stay below the
+    300K-byte forced-cut ceiling. The production `lzMatchP` call satisfies the
+    token precondition; `chooseSplitsHeuristicPUPacked_lzMatchP_eq` proves the
+    resulting cuts equal the reference walker. -/
+def chooseSplitsHeuristicPUPacked.go (toks : TokenArray) (endU : USize)
+    (hend : endU.toNat = toks.size) (hbytes : toks.bytes.size < USize.size)
+    (checkTokens i : USize)
+    (oA oB oC oD : UInt64) (oldTot : USize)
+    (nA nB nC : UInt64) (newTot blockBytes remaining : USize)
+    (cuts : Array Nat) : Array Nat :=
+  if hi : i < endU then
+    have hiNat : i.toNat < toks.size := by
+      rw [← hend]
+      exact USize.lt_iff_toNat_lt.mp hi
+    have hbytesMul : toks.bytes.size = 4 * (toks.bytes.size / 4) := by
+      have hm := Nat.mod_add_div toks.bytes.size 4
+      rw [toks.aligned] at hm
+      omega
+    have hoff : ((4 : USize) * i).toNat = 4 * i.toNat := by
+      rw [USize.toNat_mul]
+      have h4 : (4 : USize).toNat = 4 := by
+        exact USize.toNat_ofNat_of_lt
+          (Nat.lt_of_lt_of_le (show 4 < 2 ^ 32 by omega) USize.le_size)
+      rw [h4]
+      apply Nat.mod_eq_of_lt
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      rw [← hUS]
+      simp only [TokenArray.size] at hiNat
+      rw [hbytesMul] at hbytes
+      omega
+    let t := toks.bytes.ugetUInt32LE ((4 : USize) * i) (by
+      rw [hoff]
+      simp only [TokenArray.size] at hiNat
+      rw [hbytesMul]
+      omega)
+    let isLit := t &&& ((1 : UInt32) <<< 31) = 0
+    let tb : USize :=
+      if isLit then 1 else ((t >>> 16) &&& 0x7FFF).toUSize
+    let c : UInt64 :=
+      if isLit then (((t >>> 5) &&& 6) ||| (t &&& 1)).toUInt64
+      else if ((t >>> 16) &&& 0x7FFF) ≥ 9 then 9 else 8
+    let (nA, nB, nC) := splitBumpPacked15 c nA nB nC
+    let newTot := newTot + 1
+    let blockBytes := blockBytes + tb
+    let remaining := if tb ≤ remaining then remaining - tb else 0
+    have hstep : (i + 1).toNat = i.toNat + 1 := by
+      rw [USize.toNat_add, USize.toNat_one]
+      apply Nat.mod_eq_of_lt
+      have hiEnd : i.toNat < endU.toNat := USize.lt_iff_toNat_lt.mp hi
+      have hEnd := USize.toNat_lt_two_pow_numBits endU
+      omega
+    if remaining < splitMinBlockBytes.toUSize then cuts
+    else if blockBytes ≥ splitMinBlockBytes.toUSize then
+      let cut :=
+        blockBytes ≥ splitSoftMaxBlockBytes.toUSize ||
+        (newTot ≥ checkTokens && oldTot > 0 &&
+          splitEndBlockCheckPackedU oA oB oC oD oldTot nA nB nC newTot blockBytes)
+      if cut then
+        chooseSplitsHeuristicPUPacked.go toks endU hend hbytes checkTokens (i + 1)
+          0 0 0 0 0 0 0 0 0 0 remaining (cuts.push (i + 1).toNat)
+      else if newTot ≥ checkTokens then
+        let (oA, oB, oC, oD) := splitMergePacked20 oA oB oC oD nA nB nC
+        chooseSplitsHeuristicPUPacked.go toks endU hend hbytes checkTokens (i + 1)
+          oA oB oC oD (oldTot + newTot)
+          0 0 0 0 blockBytes remaining cuts
+      else
+        chooseSplitsHeuristicPUPacked.go toks endU hend hbytes checkTokens (i + 1)
+          oA oB oC oD oldTot nA nB nC newTot blockBytes remaining cuts
+    else
+      chooseSplitsHeuristicPUPacked.go toks endU hend hbytes checkTokens (i + 1)
+        oA oB oC oD oldTot nA nB nC newTot blockBytes remaining cuts
+  else cuts
+termination_by endU.toNat - i.toNat
+decreasing_by all_goals rw [hstep]; omega
+
+/-- Internal packed-counter entry for positive-length token streams. The
+    positivity precondition is semantic and deliberately not rescanned here;
+    cadence and native-word representability are checked, with the scalar
+    walker used outside those bounds. Generic `TokenArray` callers should use
+    `chooseSplitsHeuristicPU`; production calls this only on `lzMatchP`. -/
+@[noinline] def chooseSplitsHeuristicPUPacked (toks : TokenArray)
+    (totalBytes : Nat) (checkTokens : Nat := splitCheckTokens) : List Nat :=
+  if totalBytes < 2 * splitMinBlockBytes then
+    []
+  else if hc : 0 < checkTokens ∧ checkTokens ≤ 32767 then
+    if hg : toks.bytes.size.toUSize.toNat = toks.bytes.size ∧
+        toks.size.toUSize.toNat = toks.size ∧
+        totalBytes.toUSize.toNat = totalBytes ∧
+        checkTokens.toUSize.toNat = checkTokens then
+      have hbytes : toks.bytes.size < USize.size := by
+        rw [← hg.1]
+        exact USize.toNat_lt_two_pow_numBits _
+      (chooseSplitsHeuristicPUPacked.go toks toks.size.toUSize hg.2.1 hbytes
+        checkTokens.toUSize 0
+        0 0 0 0 0 0 0 0 0 0 totalBytes.toUSize #[]).toList
+    else chooseSplitsHeuristicPU toks totalBytes checkTokens
+  else chooseSplitsHeuristicPU toks totalBytes checkTokens
 
 /-- Packed twin of `emitDynBlock`: one dynamic Huffman block from a packed
     token group onto a running writer, with `emitTokensWithCodesP` in place of
@@ -2000,8 +2396,9 @@ def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : TokenArray)
     partition and the boundary heuristic stays proof-free. The clamping makes
     arbitrary cuts correctness-safe, not performance-safe: a pathological list
     (non-monotone, dense) degrades to one-token blocks, each paying a full tree
-    header. `deflateRaw` only ever feeds it `chooseSplitsHeuristicP`'s strictly
-    increasing, byte-floored cuts. -/
+    header. `deflateRaw` feeds it the scalar native-word walker's cuts, or the
+    packed-counter walker's cuts on large L5; both are proved equal to the
+    reference `chooseSplitsHeuristicP` cuts on the production token stream. -/
 def emitSharedBlocksAtP (data : ByteArray) (toks : TokenArray) (cuts : List Nat)
     (pos : Nat) (bw : BitWriter) : BitWriter :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
@@ -2016,8 +2413,8 @@ decreasing_by
 
 /-- The packed observation-divergence shared-window split candidate: emit the
     packed token stream as shared-window dynamic blocks at the given cut points
-    (in `deflateRaw`, the `chooseSplitsHeuristicP` boundaries). Byte-identical
-    to the boxed reference
+    (in `deflateRaw`, scalar-native or large-L5 packed-counter boundaries, both
+    proved equal to `chooseSplitsHeuristicP`). Byte-identical to the boxed reference
     `deflateDynamicBlocksSharedAtTokens data (toks.map unpackTok) (fun _ => cuts)`
     (`deflateDynamicBlocksSharedAtP_eq`), through which the roundtrip and
     padding theorems transfer for **any** cut list. -/
@@ -2662,8 +3059,10 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     (`deflateRawBase`); levels 5–8 (#2737, L5 since the L5 re-grid) additionally try the cross-block
     (shared-window) split candidate — one whole-file match pass, token stream
     partitioned per block, references cross block boundaries — with the
-    partition chosen by the packed observation-divergence heuristic
-    (`chooseSplitsHeuristicP`, libdeflate's streaming boundary check): each
+    partition chosen by the scalar-native observation-divergence heuristic,
+    using its packed-counter refinement on large L5
+    (`chooseSplitsHeuristicPU` / `chooseSplitsHeuristicPUPacked`, both refining
+    libdeflate's streaming boundary check): each
     block gets its own frequency-fit Huffman trees, recovering most of the
     ratio a single whole-file tree leaves on large or heterogeneous inputs
     (zlib refits trees every ~16K symbols; the whole-file tree was why the
@@ -2756,6 +3155,8 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     inside the L4↔L6 mixing line, and a shallow split point (chain 24, gate
     64, probe /4, no singleton) matches its speed at −0.53pp weighted-Silesia
     ratio — the split's per-block trees buy more than the deep chain did.
+    Inputs of at least 4 MiB subsequently move to chain 22 and a 2016-token
+    split cadence; smaller L5 inputs retain the chain-24/512-token point.
     Levels 1–3 (`deflate_fast`, emit-bound) stay single-block greedy.
 
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
@@ -2836,7 +3237,17 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- frequencies (EOB-corrected, `tokenFreqsP_append`) and the base candidate
       -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
       -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
-      let cuts := chooseSplitsHeuristicP ptokens data.size
+      -- The packed-counter walker pays only on the large-L5 point it was tuned
+      -- for. L6–L8 and small L5 inputs retain the established scalar walker:
+      -- their shorter observation windows do not amortize packing, and keeping
+      -- that route also preserves their existing code shape/frontier points.
+      let cuts :=
+        if useL5LargeInputPolicy data level then
+          chooseSplitsHeuristicPUPacked ptokens data.size
+            (splitCheckTokensFor data level)
+        else
+          chooseSplitsHeuristicPU ptokens data.size
+            (splitCheckTokensFor data level)
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
       -- the split, matching `pickSmaller`), so the loser's captured per-block
