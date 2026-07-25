@@ -191,7 +191,7 @@ protected theorem nextCodes_eq_ncRec (blCount : Array Nat) (maxBits b : Nat)
     (nextCodes blCount maxBits)[b]! = Huffman.Spec.ncRec blCount b := by
   simp only [nextCodes]
   exact nextCodes_go_eq_ncRec blCount maxBits _ 1 0
-    (Array.size_replicate ..) (by omega) (by omega) (by simp only [Spec.ncRec])
+    (Array.size_replicate ..) (by omega) (by omega) rfl
     (fun b' hb' hlt => by omega) b (by omega) hbM
 
 /-- Incrementing one count at index `l` adds `2^(maxBits-l)` to the Kraft sum
