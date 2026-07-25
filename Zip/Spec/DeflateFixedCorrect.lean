@@ -270,7 +270,7 @@ theorem deflateFixedBlock_spec (data : ByteArray) (tokens : Array LZ77Token)
               (BitWriter.empty.writeBits 1 1 |>.writeBits 2 1) := by
             simp only [emitTokens, List.size_toArray, List.length_nil, Nat.lt_irrefl,
               ↓reduceDIte]
-          rw [htokens, hempty_emit]; rfl
+          rw [htokens, hempty_emit]
         · rfl
       rw [hdef]
       have hflush := BitWriter.flush_toBits _ hwf4
@@ -394,7 +394,7 @@ private theorem inflate_of_encodeFixed_spec (compressed data : ByteArray)
         henc_syms hresolve hvalid
     have hinf := inflate_complete compressed data.data.toList maxOutputSize
       (by simp only [Array.length_toList, ByteArray.size_data]; omega) hdec
-    simp only at hinf ⊢; exact hinf
+    exact hinf
 
 /-- Native Level 1 roundtrip: compressing with fixed Huffman codes then
     decompressing recovers the original data. Generalized to any

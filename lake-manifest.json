@@ -1,15 +1,16 @@
-{"version": "1.1.0",
+{"version": "1.2.0",
  "packagesDir": ".lake/packages",
  "packages":
  [{"url": "https://github.com/kim-em/lean-zip-common",
    "type": "git",
    "subDir": null,
    "scope": "",
-   "rev": "89204d61227069f5c5d19dc69418ab57f96fe61c",
+   "rev": "4425bab1f9522307d77e8d485bc536149ba31c36",
    "name": "zipCommon",
    "manifestFile": "lake-manifest.json",
-   "inputRev": "89204d61227069f5c5d19dc69418ab57f96fe61c",
+   "inputRev": "4425bab1f9522307d77e8d485bc536149ba31c36",
    "inherited": false,
    "configFile": "lakefile.lean"}],
  "name": "«lean-zip»",
- "lakeDir": ".lake"}
+ "lakeDir": ".lake",
+ "fixedToolchain": false}

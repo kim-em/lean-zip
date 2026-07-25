@@ -73,7 +73,7 @@ private theorem readCLLengths_writeCLLengths_go
       rw [show codeLengthOrder[idx] =
           codeLengthOrder.toList[idx]'(by
             rw [codeLengthOrder_toList_eq_clPermutation]; omega) from
-        (Array.getElem_toList (h := by omega)).symm]
+        (Array.getElem_toList (h := by simp only [Array.length_toList]; omega)).symm]
       exact List.getElem_of_eq codeLengthOrder_toList_eq_clPermutation _
     -- readBitsLSB 3 recovers the value
     have hval : clLens.getD Deflate.Spec.clPermutation[idx] 0 < 2 ^ 3 := by

@@ -450,6 +450,19 @@ through `unpackTok`. -/
   else
     .reference ((w >>> 16) &&& 0x7FFF).toNat (w &&& 0xFFFF).toNat
 
+/-- Reference case of `unpackTok_packTok`, over `UInt32` variables: `bv_decide`
+    sees variables rather than `Nat → UInt32` casts, and the `if` rewrites
+    against a variable-headed condition. Stating it separately is what lets the
+    caller skip `generalize`, which does not terminate on the packed goal. -/
+private theorem unpackTok_pack_reference (l d : UInt32) (hlu : l ≤ 258) (hdu : d ≤ 32768) :
+    unpackTok (((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) = .reference l.toNat d.toNat := by
+  have hcond : ¬((((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) &&& ((1 : UInt32) <<< 31)) = 0 := by
+    bv_decide
+  have hlen : ((((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) >>> 16) &&& 0x7FFF = l := by bv_decide
+  have hdist : (((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) &&& 0xFFFF = d := by bv_decide
+  simp only [unpackTok]
+  rw [if_neg hcond, hlen, hdist]
+
 /-- `unpackTok` recovers every token within the encoder bounds (literals
     unconditionally; references with `3 ≤ len ≤ 258`, `1 ≤ dist ≤ 32768` —
     exactly the `Enc` predicate of the matcher encodability theorems). The
@@ -469,16 +482,12 @@ theorem unpackTok_packTok (t : LZ77Token)
     obtain ⟨_, h258, h1d, h32768⟩ := h
     have hl : len.toUInt32.toNat = len := by simp [Nat.toUInt32]; omega
     have hd : dist.toUInt32.toNat = dist := by simp [Nat.toUInt32]; omega
-    simp only [packTok, unpackTok]
-    generalize len.toUInt32 = l at hl
-    generalize dist.toUInt32 = d at hd
-    have hlu : l ≤ 258 := by rw [UInt32.le_iff_toNat_le]; show l.toNat ≤ 258; omega
-    have hdu : d ≤ 32768 := by rw [UInt32.le_iff_toNat_le]; show d.toNat ≤ 32768; omega
-    have hcond : ¬((((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) &&& ((1 : UInt32) <<< 31)) = 0 := by
-      bv_decide
-    have hlen : ((((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) >>> 16) &&& 0x7FFF = l := by bv_decide
-    have hdist : (((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) &&& 0xFFFF = d := by bv_decide
-    rw [if_neg hcond, hlen, hdist, hl, hd]
+    have hlu : len.toUInt32 ≤ 258 := by
+      rw [UInt32.le_iff_toNat_le]; show len.toUInt32.toNat ≤ 258; omega
+    have hdu : dist.toUInt32 ≤ 32768 := by
+      rw [UInt32.le_iff_toNat_le]; show dist.toUInt32.toNat ≤ 32768; omega
+    simp only [packTok]
+    rw [unpackTok_pack_reference _ _ hlu hdu, hl, hd]
 
 /-- Simple hash-based greedy LZ77 matcher.
     Scans input left-to-right, emitting literals or back-references. -/

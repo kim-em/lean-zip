@@ -78,7 +78,6 @@ private theorem emitRefFixedP_distOob (bw : BitWriter) (w : UInt32) (idx en : Na
   have hcv := codeVal_lenCodeWord _ _ _ _ (lenField_lt w) hflc
   have hdi := codeIdx_distCodeWord _ _ _ _ hfdc
   simp only [emitRefFixedP, hei, hee, hcv, hdi, hl, hd, ↓reduceDIte]
-  rfl
 
 /-- `emitRefFixedP` on the full path: length code + extra bits, then distance
     code + extra bits. -/
@@ -99,7 +98,6 @@ private theorem emitRefFixedP_distSome (bw : BitWriter) (w : UInt32) (idx en : N
   have hde := codeExtra_distCodeWord _ _ _ _ hfdc
   have hdv := codeVal_distCodeWord _ _ _ _ (distField_lt w) hfdc
   simp only [emitRefFixedP, hei, hee, hcv, hdi, hde, hdv, hl, hd, ↓reduceDIte]
-  rfl
 
 /-! ## The packed fixed-code emitter equals the boxed one -/
 
@@ -209,7 +207,6 @@ private theorem emitRefWithCodesP_distOob (bw : BitWriter)
   have hcv := codeVal_lenCodeWord _ _ _ _ (lenField_lt w) hflc
   have hdi := codeIdx_distCodeWord _ _ _ _ hfdc
   simp only [emitRefWithCodesP, hei, hee, hcv, hdi, hl, hd, ↓reduceDIte]
-  rfl
 
 /-- `emitRefWithCodesP` on the full path: length code + extra bits, then
     distance code + extra bits. -/
@@ -230,7 +227,6 @@ private theorem emitRefWithCodesP_distSome (bw : BitWriter)
   have hde := codeExtra_distCodeWord _ _ _ _ hfdc
   have hdv := codeVal_distCodeWord _ _ _ _ (distField_lt w) hfdc
   simp only [emitRefWithCodesP, hei, hee, hcv, hdi, hde, hdv, hl, hd, ↓reduceDIte]
-  rfl
 
 /-! ## The packed dynamic-code emitter equals the boxed one -/
 
@@ -318,7 +314,6 @@ private theorem emitRefWithCodesPT_eq (bw : BitWriter)
   unfold emitRefWithCodesPT emitRefWithCodesP
   simp only [packCodeTab, Array.size_map, Array.getElem_map, packCodeEntry_write,
     BitWriter.writeRevCodeExtra_eq, codeExtra_lt_256]
-  rfl
 
 /-- The packed-table emit loop is the pair-table one over `packCodeTab`, for
     every word array — the lockstep induction of `emitTokensWithCodesP_eq`

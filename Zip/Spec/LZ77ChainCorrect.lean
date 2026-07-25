@@ -872,7 +872,7 @@ theorem chainWalkPackedUUChecked_toNat (data : ByteArray) (prev : Array Nat)
       (0 : Nat).toUSize.toNat = 0 ∧ (0 : Nat).toUSize.toNat = 0 :=
     ⟨hg.2.1, hg.2.2.2.2.1, rfl, rfl⟩
   rw [dif_pos hg.1, dif_pos hold]
-  simpa only [hg.2.2.2.1] using heq
+  simpa only [hg.2.2.2.1, show ((0 : Nat).toUSize) = 0 from rfl] using heq
 
 /-- The seeded checked entry is the existing guarded packed walk. -/
 theorem chainWalkPackedUUSeededChecked_toNat (data : ByteArray) (prev : Array Nat)

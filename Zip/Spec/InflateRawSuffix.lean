@@ -246,7 +246,6 @@ private theorem decodeCLSymbols_append (clTree : HuffTree) (br : BitReader) (suf
           by_cases hidx0 : (idx == 0) = true
           · rw [if_pos hidx0] at h ⊢; exact nomatch h
           · rw [if_neg hidx0] at h ⊢
-            simp only [pure, Except.pure] at h ⊢
             split at h
             · rename_i h_cl
               simp only [dif_pos h_cl] at ⊢
@@ -271,7 +270,6 @@ private theorem decodeCLSymbols_append (clTree : HuffTree) (br : BitReader) (suf
               by_cases hgt : idx + (rep.toNat + 3) > totalCodes
               · rw [if_pos hgt] at h ⊢; exact nomatch h
               · rw [if_neg hgt] at h ⊢
-                simp only [pure, Except.pure] at h ⊢
                 exact hrec _ br₂ _ (by omega) h
           · rw [if_neg hs17] at h ⊢
             by_cases hs18 : (sym == 18) = true
@@ -379,7 +377,6 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
       split at h
       · exact nomatch h
       · rename_i hout; rw [if_neg hout]
-        simp only [pure, Except.pure] at h ⊢
         split at h
         · exact nomatch h
         · rename_i h₁

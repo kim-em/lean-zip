@@ -276,7 +276,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
           have h16_false : (sym.toUInt16 == 16) = false := by
             cases h : sym.toUInt16 == 16
             · rfl
-            · exact absurd (beq_iff_eq.mpr (by rw [beq_iff_eq] at h; simpa only [hsym_toNat] using congrArg UInt16.toNat h)) hsym_ne16
+            · exact absurd (beq_iff_eq.mpr (by rw [beq_iff_eq] at h; simpa only [hsym_toNat, UInt16.toNat_ofNat] using congrArg UInt16.toNat h)) hsym_ne16
           split at hspec
           · -- sym == 17: zero fill short
             rename_i hsym17
@@ -331,7 +331,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
             have h17_false : (sym.toUInt16 == 17) = false := by
               cases h : sym.toUInt16 == 17
               · rfl
-              · exact absurd (beq_iff_eq.mpr (by rw [beq_iff_eq] at h; simpa only [hsym_toNat] using congrArg UInt16.toNat h)) hsym_ne17
+              · exact absurd (beq_iff_eq.mpr (by rw [beq_iff_eq] at h; simpa only [hsym_toNat, UInt16.toNat_ofNat] using congrArg UInt16.toNat h)) hsym_ne17
             split at hspec
             · -- sym == 18: zero fill long
               rename_i hsym18
@@ -460,7 +460,7 @@ protected theorem decodeDynamicTrees_complete (br : ZipCommon.BitReader)
             Correctness.readCLCodeLengths_complete br₃ (.replicate 19 0) 0
               (hclen_v + 4) clLengths bits₄ hwf₃ hpos₃ hsize_repl hnum hrcl_rewrite
           have hcl_sz : clArr.size = 19 := by
-            simpa only [] using Correctness.readCLCodeLengths_size br₃ _ 0 _ clArr br₄ hrcl_nat
+            simpa only [Array.size_replicate] using Correctness.readCLCodeLengths_size br₃ _ 0 _ clArr br₄ hrcl_nat
           -- Step 5: ValidLengths guard for CL tree
           have hcl_valid : Huffman.Spec.ValidLengths clLengths 7 := by
             by_cases h : Huffman.Spec.ValidLengths clLengths 7

@@ -921,12 +921,15 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
           rw [if_pos hlt, if_pos hlt, hkey]
           by_cases hmax : output.size ≥ maxOut
           · rw [if_pos hmax, if_pos hmax]
+            rfl
           · rw [if_neg hmax, if_neg hmax]
             by_cases hp1 : br₁.bitPos ≤ br.bitPos
             · rw [dif_pos hp1, dif_pos hp1]
+              rfl
             · rw [dif_neg hp1, dif_neg hp1]
               by_cases hp2 : dataSize * 8 < br₁.bitPos
               · rw [dif_pos hp2, dif_pos hp2]
+                rfl
               · rw [dif_neg hp2, dif_neg hp2]
                 exact ih_lit sym br₁ hp1 hp2 pos1 bb c hbc2 hbo2 hbd2
         · by_cases hs256 : (sym == 256) = true
@@ -940,6 +943,7 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
               rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
               dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
               rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_pos hidx, dif_pos hidx]
+              rfl
             · -- valid length/distance back-reference
               have hN1 : sym.toNat - 257 < Inflate.lengthExtra.size := by
                 rw [Inflate.lengthExtra_size]; simp only [Inflate.lengthBase_size] at hidx; omega
@@ -999,6 +1003,7 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
                         readBitsFast_eq br₁, hXe, hYe]
                       dsimp only [bind, Except.bind]; rw [hXd, hYd]; dsimp only [bind, Except.bind]
                       rw [dif_pos hdidx, dif_pos hdidx]
+                      rfl
                     · -- valid distance: read distance-extra bits
                       have hdN3 : distSym.toNat < Inflate.distExtra.size := by
                         rw [Inflate.distExtra_size]; simp only [Inflate.distBase_size] at hdidx; omega
@@ -1038,22 +1043,27 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
                         -- distance/length now share the same expression on both sides
                         by_cases hd0 : (Inflate.distBase[distSym.toNat]'(Nat.not_le.mp hdidx)).toNat + dExtraBits.toNat = 0
                         · rw [dif_pos hd0, dif_pos hd0]
+                          rfl
                         · rw [dif_neg hd0, dif_neg hd0]
                           by_cases hds : (Inflate.distBase[distSym.toNat]'(Nat.not_le.mp hdidx)).toNat + dExtraBits.toNat > output.size
                           · rw [dif_pos hds, dif_pos hds]
+                            rfl
                           · rw [dif_neg hds, dif_neg hds]
                             by_cases hmax2 : output.size + ((Inflate.lengthBase[sym.toNat - 257]'(Nat.not_le.mp hidx)).toNat + extraBits.toNat) > maxOut
                             · rw [if_pos hmax2, if_pos hmax2]
+                              rfl
                             · rw [if_neg hmax2, if_neg hmax2]
                               -- progress guards: A uses br₄.bitPos, B uses the tracked bitpos (= it by hkey4)
                               by_cases hp1 : br₄.bitPos ≤ br.bitPos
                               · rw [dif_pos hp1,
                                   dif_pos (show br.bitPos + (cnt1 - c4) ≤ br.bitPos from by rw [hkey4]; exact hp1)]
+                                rfl
                               · rw [dif_neg hp1,
                                   dif_neg (show ¬ br.bitPos + (cnt1 - c4) ≤ br.bitPos from by rw [hkey4]; exact hp1)]
                                 by_cases hp2 : dataSize * 8 < br₄.bitPos
                                 · rw [dif_pos hp2,
                                     dif_pos (show dataSize * 8 < br.bitPos + (cnt1 - c4) from by rw [hkey4]; exact hp2)]
+                                  rfl
                                 · rw [dif_neg hp2,
                                     dif_neg (show ¬ dataSize * 8 < br.bitPos + (cnt1 - c4) from by rw [hkey4]; exact hp2)]
                                   simp only [hkey4]
@@ -1845,7 +1855,7 @@ theorem decodeCLSymbols_bitOff_pres (clTree : HuffTree) (totalCodes : Nat) :
         · rw [if_pos he16] at h
           by_cases hi0 : (idx == 0) = true
           · rw [if_pos hi0] at h; simp [bind, Except.bind] at h
-          · rw [if_neg hi0] at h; simp only [bind, Except.bind, pure, Except.pure] at h
+          · rw [if_neg hi0] at h
             by_cases hcl : idx - 1 < cl.size
             · rw [dif_pos hcl] at h
               cases hrb : br1.readBits 2 with
@@ -2062,6 +2072,7 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
           obtain ⟨hd', hp', hl'⟩ := Zip.Native.decodeHuffman_inv l d br₃ br' output o' maxOut hhf' hp3 hl3
           simp only [hhf]; exact tail o' br' hp' hl' (by rw [hd', hd3]; exact hdata₂)
     · simp only [bind, Except.bind]
+      rfl
 
 /-- **`InflateBuf.inflate` equals the verified `Inflate.inflateReference`.** The wide-buffer
     decoder is a drop-in replacement with no trust gap. -/

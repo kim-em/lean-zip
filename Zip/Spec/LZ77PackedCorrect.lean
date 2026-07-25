@@ -423,7 +423,8 @@ private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ta : TokenA
       rw [hsnd]
       conv => lhs; unfold emitSharedBlocksAtSizedP
       conv => rhs; unfold emitSharedBlocksAtP
-      simp only [if_pos hend, List.headD_cons, emitSharedBlockP, sizedTrees]
+      simp only [if_pos hend, emitSharedBlockP, sizedTrees]
+      rfl
     · have hsnd : (sharedPartitionSizedP ta cuts pos).2 =
           sizedTrees (tokenFreqsPTA (ta.extract pos
             (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).1

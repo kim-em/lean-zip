@@ -14,10 +14,12 @@
 #                read-file → compress → report. This IS the end-to-end wall Kim
 #                benchmarks with `hyperfine zip silesia.tar`, and it includes
 #                each language's own file-read/alloc path (which the codec
-#                section cancels out). Report it honestly: rust is currently
-#                marginally ahead on wall because lean's compression CPU is
-#                faster (lower user time) but its file-read/alloc system time is
-#                higher — the gap is entirely the lean CLI's I/O path.
+#                section cancels out). Report it honestly, and read the recorded
+#                `wall_ratio_median` rather than trusting this comment: lean was
+#                once wall-behind here on a higher file-read/alloc system time,
+#                but that gap has since been closed (#2870 flipped `wall_ratio_median` from
+#                1.010 to 0.973, and #2877 took it to 0.911; the two sides' `sys_ms`
+#                are now level).
 #
 #   bench/whole_tar_l6.sh <corpusDir> [N=9] [outJson=bench/results/whole_tar_l6.json]
 #
@@ -361,7 +363,7 @@ DATE_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 MACHINE="$(uname -mns)"
 GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 CODEC_NOTE="CODEC comparison, measured THROUGH the lean bench harness so both sides pay the same readBinFile + 202 MB ByteArray-alloc I/O and it CANCELS: native (bench csize) vs miniz_oxide (bench compress-miniz) on the whole silesia.tar (${TAR_BYTES} B), cold best-of-${N}. ms are wall-clock of fresh bench subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native codec-CPU faster). This guards a ratio-tuning codec regression; it is NOT the end-to-end zip wall (see end_to_end)."
-E2E_NOTE="END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-${N}, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead). Rust is currently marginally wall-ahead: lean's compression CPU is faster (lower user_ms) but its file-read/alloc system time (sys_ms) is higher, so the gap is entirely the lean CLI I/O path. wall/user/sys captured via the bash time builtin. PEAK RSS (maxrss_kb) is the whole-tar memory footprint of each CLI, captured with GNU time -v (Maximum resident set size); it is deterministic so one measured run per side suffices. rss_ratio is lean_maxrss_kb/rust_maxrss_kb: lean holds its whole DEFLATE token stream in memory while rust's miniz keeps only a bounded window, so this ratio is the memory cost of the token pipeline (the target of the token-unboxing work)."
+E2E_NOTE="END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-${N}, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead, <1.0 = lean wall-ahead); read it rather than any prose here. wall/user/sys captured via the bash time builtin. PEAK RSS (maxrss_kb) is the whole-tar memory footprint of each CLI, captured with GNU time -v (Maximum resident set size); it is deterministic so one measured run per side suffices. rss_ratio is lean_maxrss_kb/rust_maxrss_kb: lean holds its whole DEFLATE token stream in memory while rust's miniz keeps only a bounded window, so this ratio is the memory cost of the token pipeline (the target of the token-unboxing work)."
 META_NOTE="Whole-tar L6 comparison: codec-CPU (native vs miniz through the bench harness) plus end-to-end wall of the real lean/rust CLIs. Peak RSS (end_to_end.{lean,rust}.maxrss_kb + rss_ratio) is now tracked too — the whole-tar memory footprint, so a compress PR can be reviewed on memory as well as speed/ratio."
 
 mkdir -p "$(dirname "$OUT")"

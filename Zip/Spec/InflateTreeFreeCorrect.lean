@@ -2553,7 +2553,7 @@ theorem long_of_guard (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBits â
     have hge : tableEntry.go (fromLengthsTree lengths maxBits) (buf &&& 0x7FF).toNat 0
         = (s.toUInt16, (0 + used).toUInt8) :=
       tableEntry_go_of_hasLeaf (fromLengthsTree lengths maxBits) (buf &&& 0x7FF).toNat 0 used
-        s.toUInt16 hleaf (by simpa using hle11)
+        s.toUInt16 hleaf (by simpa [Zip.Native.HuffTree.fastBits] using hle11)
     have hlenAt : ((fromLengthsTree lengths maxBits).buildTable.lenAt
         (buf &&& 0x7FF).toNat).toNat = used := by
       rw [buildTable_lenAt _ _ (InflateBuf.buf_idx_lt buf), tableEntry, hge]

@@ -956,7 +956,6 @@ private theorem assertSpanInFile_eq_pure_of_spanInFile
   obtain ⟨h1, h2⟩ := h
   unfold assertSpanInFile
   rw [if_neg (UInt64.not_lt.mpr h1), if_neg (UInt64.not_lt.mpr h2)]
-  rfl
 
 /-- Backward reduction: success of `assertSpanInFile` implies the pure
     predicate `SpanInFile` holds. For each guard, contraposition reduces
