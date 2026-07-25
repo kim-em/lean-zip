@@ -613,6 +613,96 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
         exact hstep
     · rw [dif_neg hc, dif_neg hc, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
 
+private theorem usize_one_ne_zero : (1 : USize) ≠ 0 := by
+  intro h
+  have h' := congrArg USize.toNat h
+  simp at h'
+
+private theorem usize_sub_one_ne_zero {u : USize} (h0 : u ≠ 0) (h1 : u ≠ 1) :
+    u - 1 ≠ 0 := by
+  have hn0 : u.toNat ≠ 0 := by
+    intro h
+    apply h0
+    exact USize.toNat_inj.mp (by rw [h, USize.toNat_zero])
+  have hn1 : u.toNat ≠ 1 := by
+    intro h
+    apply h1
+    exact USize.toNat_inj.mp (by rw [h, USize.toNat_one])
+  have htwo : 2 ≤ u.toNat := by omega
+  have hle : (1 : USize) ≤ u := by
+    rw [USize.le_iff_toNat_le, USize.toNat_one]
+    omega
+  have hsub : (u - 1).toNat = u.toNat - 1 := by
+    rw [USize.toNat_sub_of_le _ _ hle, USize.toNat_one]
+  intro h
+  have hz := congrArg USize.toNat h
+  rw [hsub, USize.toNat_zero] at hz
+  omega
+
+private theorem usize_not_le_of_lt {a b : USize} (h : a < b) : ¬b ≤ a := by
+  intro hle
+  have hlt' := USize.lt_iff_toNat_lt.mp h
+  have hle' := USize.le_iff_toNat_le.mp hle
+  omega
+
+private theorem usize_roundtrip_contra {n : Nat}
+    (hmod : n % 2 ^ System.Platform.numBits = n)
+    (hne : ¬n.toUSize.toNat = n) : False := by
+  apply hne
+  simpa [Nat.toUSize] using hmod
+
+private theorem usize_roundtrip_contra_of_eq {n m : Nat}
+    (hmod : m % 2 ^ System.Platform.numBits = m)
+    (hne : ¬n.toUSize.toNat = n) (hnm : n = m) : False := by
+  subst m
+  exact usize_roundtrip_contra hmod hne
+
+private theorem usize_window_contra {cand pos window : USize}
+    (hvalid : cand < pos ∧ pos - cand ≤ window)
+    (hout : cand < pos → window < pos - cand) : False :=
+  usize_not_le_of_lt (hout hvalid.1) hvalid.2
+
+private theorem chainWalkPackedUU_invalid (data : ByteArray) (prev : Array Nat)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsz : data.size < USize.size)
+    (windowSizeU posU maxLenU cutoffU candU fuelU bestLenU bestPosU : USize)
+    (hpm : posU.toNat + maxLenU.toNat ≤ data.size)
+    (hc : ¬(candU < posU ∧ posU - candU ≤ windowSizeU)) :
+    chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU
+        candU fuelU bestLenU bestPosU hpm =
+      bestPosU * 512 + bestLenU := by
+  rw [chainWalkPackedUU]
+  by_cases hf : fuelU = 0
+  · simp [hf]
+  · simp [hf, hc]
+
+set_option maxHeartbeats 1000000 in
+/-- The two-candidate native loop is exactly two unfoldings of the established
+    one-candidate loop. -/
+theorem chainWalkPackedUU2_eq (data : ByteArray) (prev : Array Nat)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsz : data.size < USize.size)
+    (windowSizeU posU maxLenU cutoffU candU fuelU bestLenU bestPosU : USize)
+    (hpm : posU.toNat + maxLenU.toNat ≤ data.size) :
+    chainWalkPackedUU2 data prev hps hsz windowSizeU posU maxLenU cutoffU
+        candU fuelU bestLenU bestPosU hpm =
+      chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU
+        candU fuelU bestLenU bestPosU hpm := by
+  fun_induction chainWalkPackedUU2 data prev hps hsz windowSizeU posU maxLenU
+      cutoffU candU fuelU bestLenU bestPosU hpm <;>
+    rw [chainWalkPackedUU] <;>
+    simp_all (config := { zetaDelta := true })
+      [usize_one_ne_zero, usize_not_le_of_lt, chainWalkPackedUU_invalid] <;>
+    try (conv => rhs; rw [chainWalkPackedUU]) <;>
+    simp_all (config := { zetaDelta := true })
+      [usize_one_ne_zero, usize_sub_one_ne_zero, usize_not_le_of_lt]
+  all_goals
+    intros
+    first
+    | exfalso
+      refine usize_roundtrip_contra_of_eq (by assumption) (by assumption) ?_
+      simp_all
+    | exfalso
+      exact usize_window_contra (by assumption) (by assumption)
+
 /-- Packing a bounded position and length in `USize` agrees with the `Nat`
     spelling when the packed value fits in one machine word. -/
 theorem packMatchU_toNat (bestPosU bestLenU : USize) (dataSize : Nat)
@@ -906,6 +996,7 @@ theorem chainWalkPackedUUSeededChecked_toNat (data : ByteArray) (prev : Array Na
       bestLen.toUSize.toNat = bestLen ∧ bestPos.toUSize.toNat = bestPos :=
     ⟨hg.1.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1⟩
   rw [dif_pos hg.1.1, dif_pos hold]
+  rw [chainWalkPackedUU2_eq]
   simpa only [hg.1.2.2.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1] using heq
 
 /-- The fully-native-word guarded wrapper is observationally identical to the
