@@ -238,6 +238,33 @@ decreasing_by all_goals (rw [hstep]; omega)
     complete pending bytes are drained first; production callers always enter
     with fewer than 32 pending bits, so this leaves fewer than 8 bits and the
     at-most-48-bit reference field then fits without overflow. -/
+@[inline] def emitRefWithCodesPTFlat (bw : BitWriter)
+    (litT distT : Array UInt32) (w : UInt32) : BitWriter :=
+  let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
+  let idx := codeIdx lw
+  if hlitlt : idx + 257 < litT.size then
+    let e := litT[idx + 257]
+    let lenN : UInt32 := (e >>> 16) &&& 0xFF
+    let lenExtraN : UInt32 := (lw >>> 8) &&& 0xFF
+    let lenMask : UInt64 := (1 <<< lenExtraN.toUInt64) - 1
+    let lenBits : UInt64 := e.toUInt16.toUInt64 |||
+      (((codeVal lw).toUInt64 &&& lenMask) <<< lenN.toUInt64)
+    let lenTotal := lenN + lenExtraN
+    let dw := distCodeWord ((w &&& 0xFFFF).toNat)
+    let dIdx := codeIdx dw
+    if hdistlt : dIdx < distT.size then
+      let de := distT[dIdx]
+      let distN : UInt32 := (de >>> 16) &&& 0xFF
+      let distExtraN : UInt32 := (dw >>> 8) &&& 0xFF
+      let distMask : UInt64 := (1 <<< distExtraN.toUInt64) - 1
+      let distBits : UInt64 := de.toUInt16.toUInt64 |||
+        (((codeVal dw).toUInt64 &&& distMask) <<< distN.toUInt64)
+      let bits : UInt64 := lenBits ||| (distBits <<< lenTotal.toUInt64)
+      bw.writeBits64 (lenTotal + distN + distExtraN) bits
+    else
+      bw.writeBits64 lenTotal lenBits
+  else bw
+
 def emitTokensWithCodesTAPTFlatLoop (data : ByteArray) (acc : UInt64) (bc : UInt32)
     (tokens : TokenArray) (litT distT : Array UInt32)
     (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
@@ -250,88 +277,13 @@ def emitTokensWithCodesTAPTFlatLoop (data : ByteArray) (acc : UInt64) (bc : UInt
         omega
       let e := litT[w.toUInt8.toNat]
       let n : UInt32 := (e >>> 16) &&& 0xFF
-      let acc' := acc ||| (e.toUInt16.toUInt64 <<< bc.toUInt64)
-      let total := bc + n
-      if total ≥ 32 then
-        let k := total >>> 3
-        emitTokensWithCodesTAPTFlatLoop
-          (BitWriter.flushBytesWideU data acc' k)
-          (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7)
-          tokens litT distT hlit hdist (i + 1)
-      else
-        emitTokensWithCodesTAPTFlatLoop data acc' total
-          tokens litT distT hlit hdist (i + 1)
+      let bw' := BitWriter.writeBits64 ⟨data, acc, bc.toUInt8⟩ n e.toUInt16.toUInt64
+      emitTokensWithCodesTAPTFlatLoop bw'.data bw'.bitBuf bw'.bitCount.toUInt32
+        tokens litT distT hlit hdist (i + 1)
     else
-      let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
-      let idx := codeIdx lw
-      if hlitlt : idx + 257 < litT.size then
-        let e := litT[idx + 257]
-        let lenN : UInt32 := (e >>> 16) &&& 0xFF
-        let lenExtraN : UInt32 := ((lw >>> 8) &&& 0xFF)
-        let lenMask : UInt64 := (1 <<< lenExtraN.toUInt64) - 1
-        let lenBits : UInt64 :=
-          e.toUInt16.toUInt64 |||
-            ((codeVal lw).toUInt64 &&& lenMask) <<< lenN.toUInt64
-        let lenTotal := lenN + lenExtraN
-        let dw := distCodeWord ((w &&& 0xFFFF).toNat)
-        let dIdx := codeIdx dw
-        if hdistlt : dIdx < distT.size then
-          let de := distT[dIdx]
-          let distN : UInt32 := (de >>> 16) &&& 0xFF
-          let distExtraN : UInt32 := ((dw >>> 8) &&& 0xFF)
-          let distMask : UInt64 := (1 <<< distExtraN.toUInt64) - 1
-          let distOff := lenTotal
-          let bits : UInt64 :=
-            lenBits ||| (de.toUInt16.toUInt64 <<< distOff.toUInt64) |||
-              (((codeVal dw).toUInt64 &&& distMask) <<<
-                (distOff.toUInt64 + distN.toUInt64))
-          let n := lenTotal + distN + distExtraN
-          -- A pending count below 32 plus a reference field can exceed the
-          -- 64-bit accumulator.  Drain its complete bytes before the merge in
-          -- that case; the remainder is below 8 bits and `n ≤ 48`.
-          if bc + n ≥ 64 then
-            let k0 := bc >>> 3
-            let data0 := BitWriter.flushBytesWideU data acc k0
-            let acc0 := acc >>> (k0.toUInt64 <<< 3)
-            let bc0 := bc &&& 7
-            let acc' := acc0 ||| (bits <<< bc0.toUInt64)
-            let total := bc0 + n
-            if total ≥ 32 then
-              let k := total >>> 3
-              emitTokensWithCodesTAPTFlatLoop
-                (BitWriter.flushBytesWideU data0 acc' k)
-                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7)
-                tokens litT distT hlit hdist (i + 1)
-            else
-              emitTokensWithCodesTAPTFlatLoop data0 acc' total
-                tokens litT distT hlit hdist (i + 1)
-          else
-            let acc' := acc ||| (bits <<< bc.toUInt64)
-            let total := bc + n
-            if total ≥ 32 then
-              let k := total >>> 3
-              emitTokensWithCodesTAPTFlatLoop
-                (BitWriter.flushBytesWideU data acc' k)
-                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7)
-                tokens litT distT hlit hdist (i + 1)
-            else
-              emitTokensWithCodesTAPTFlatLoop data acc' total
-                tokens litT distT hlit hdist (i + 1)
-        else
-          let acc' := acc ||| (lenBits <<< bc.toUInt64)
-          let total := bc + lenTotal
-          if total ≥ 32 then
-            let k := total >>> 3
-            emitTokensWithCodesTAPTFlatLoop
-              (BitWriter.flushBytesWideU data acc' k)
-              (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7)
-              tokens litT distT hlit hdist (i + 1)
-          else
-            emitTokensWithCodesTAPTFlatLoop data acc' total
-              tokens litT distT hlit hdist (i + 1)
-      else
-        emitTokensWithCodesTAPTFlatLoop data acc bc
-          tokens litT distT hlit hdist (i + 1)
+      let bw' := emitRefWithCodesPTFlat ⟨data, acc, bc.toUInt8⟩ litT distT w
+      emitTokensWithCodesTAPTFlatLoop bw'.data bw'.bitBuf bw'.bitCount.toUInt32
+        tokens litT distT hlit hdist (i + 1)
   else
     ⟨data, acc, bc.toUInt8⟩
 termination_by tokens.size - i
