@@ -93,6 +93,12 @@ stays current.
 
 ## Whole-tar L6 (compress PRs — check this too)
 
+`whole_tar_l6.json` is deliberately outside the routine median-of-5 / frozen
+single-rep timing schema enforced by `bench/benchmark_json.py`. Its timing
+series use `meta.reps` (normally 9), while peak RSS is one fresh measurement per
+implementation. Do not add `timing_aggregation` / `timing_reps` to it or pass it
+through either timing-protocol loader; read its experiment-specific fields.
+
 The per-file Pareto above tracks WARM per-file throughput, so it amortizes
 native's page-fault / CAF-build tax and measures small files where the
 split/probe economics differ. It therefore **misses** the `zip silesia.tar`
@@ -265,15 +271,25 @@ artifacts move into `$W`.
    ```
 
    **Protocol guard (the second command above): it must pass.** A missing or
-   non-median-of-5 timing field means this is a legacy snapshot. Never add the
-   fields by hand: legacy Silesia rows may be genuine one-shot measurements, so
-   relabelling them recreates the exact false-provenance bug this guard prevents.
-   For that exceptional transition, make a throwaway merge-base worktree,
-   backport only the current median-of-5 report-harness policy (no production
-   `Zip/Native` / `ZipCommon` changes), measure the full needed base matrix, and
-   validate the emitted JSON with the command above. Verify the worktree's
-   production paths still match the merge-base before trusting it. Once the
-   median-of-5 schema is on master, ordinary snapshots take the fast path.
+   non-median-of-5 timing field means this is a legacy snapshot. Never relabel a
+   legacy routine `latest.json`: its Silesia rows may be genuine one-shot
+   measurements, so adding fields recreates the exact false-provenance bug this
+   guard prevents. For that exceptional transition, make a throwaway merge-base
+   worktree, backport only the current median-of-5 report-harness policy (no
+   production `Zip/Native` / `ZipCommon` changes), measure the full needed base
+   matrix, and validate the emitted JSON with the command above. Verify the
+   worktree's production paths still match the merge-base before trusting it.
+   Once the median-of-5 schema is on master, ordinary snapshots take the fast
+   path.
+
+   A metadata-only schema backfill is permissible for a separately scoped
+   historical artifact only when the producer at its recorded revision proves
+   the exact aggregation and repetition count for **every** row (including any
+   externally merged rows), no measurement value changes, and the artifact
+   records that proof in `meta.timing_provenance`. The 2026-07-25 backfills of
+   `decode_density.json` and the frozen `zopfli-ceiling.json` meet that narrow
+   rule. This exception never applies to an unverified routine baseline and is
+   not a way around the guard above.
 
    **The invariant that makes this valid: `latest.json` must always reflect the
    current native path on master — and the way it stays current is that every

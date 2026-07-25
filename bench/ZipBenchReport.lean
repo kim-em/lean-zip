@@ -286,9 +286,10 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, native levels {nlvls}, {timing.aggregation}-of-{timing.repetitions})…"
     let cn ← runWorkloads timing "native"      files nativeCompress     (some nativeDecompress)     (theLevels := nlvls)
     -- `--native-only`: skip the reference compressors. Their ratios are
-    -- deterministic and their MB/s drift <~3% run-to-run (measured), so a Lean-only
-    -- change reuses the prior dashboard's reference rows (spliced in post-hoc by
-    -- bench/run.sh) instead of paying to re-measure them.
+    -- deterministic, so a Lean-only change may reuse the prior dashboard's
+    -- reference rows (spliced in post-hoc by bench/run.sh) instead of paying to
+    -- re-measure them. Their MB/s remains tied to its original session;
+    -- mixed-session speed gaps are not matched comparisons.
     if nativeOnly then
       rows := rows ++ cn
     else

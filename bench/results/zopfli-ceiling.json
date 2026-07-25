@@ -7,6 +7,7 @@
     "timing_aggregation": "single",
     "timing_reps": 1,
     "frozen": true,
+    "timing_provenance": "Schema backfill only; measurement rows are unchanged. At the recorded producer revision, runZopfliCeiling explicitly called runWorkloads with theReps=1.",
     "note": "FROZEN zopfli ratio ceiling — do NOT regenerate. zopfli is compress-only, level-less and ~100x slower than zlib; level=6 is nominal and compress_mbps is a single-rep artifact, not a benchmark. ratio/out_size are deterministic. Regenerate only if the corpora change: lake env .lake/build/bin/bench-report --zopfli-ceiling bench/results/zopfli-ceiling.json"
   },
   "results": [

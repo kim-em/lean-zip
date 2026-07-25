@@ -13,7 +13,9 @@
 #
 # Note: throughput numbers are a median-of-5 snapshot of THIS machine for every
 # corpus; commit the regenerated JSON + SVGs together. Machine-readable timing
-# metadata is validated before routine snapshots can be merged or plotted.
+# metadata is validated before routine snapshots can be merged or plotted. The
+# whole-tar experiment is separate: its timing uses meta.reps (normally 9), and
+# its peak-RSS fields come from one fresh process per implementation.
 #
 # Every *measurement* step below runs through bench/pin_core.sh, which pins the
 # command (and its children) to the idlest single core — unpinned runs wander
@@ -60,12 +62,14 @@ refresh_whole_tar() {
 
 # Fast path for Lean-only changes: refresh ONLY the native rows and splice them
 # back over the existing dashboard, then re-plot. The reference compressors are
-# not re-measured — their ratio is deterministic and their MB/s drifts <~3%
-# run-to-run (verified across regens) — so this skips the ~2 h external-comparator
-# rebuild entirely. The dominant remaining cost is native's own optimal-parse at
-# levels 9 (L9-fast) and 10 (exact crown, ~1 MB/s); pass a level list to skip
-# them when the Lean change does not touch that path (the prior rows are kept by
-# the upsert merge).
+# not re-measured: their ratio is deterministic, while their recorded MB/s stays
+# tied to its original measurement session and may differ from a fresh run due
+# to host drift. Do not treat a small native-vs-reference speed gap from this
+# mixed-session fast path as a matched comparison. Reusing those rows skips the
+# ~2 h external-comparator rebuild entirely. The dominant remaining cost is
+# native's own optimal-parse at levels 9 (L9-fast) and 10 (exact crown, ~1 MB/s);
+# pass a level list to skip them when the Lean change does not touch that path
+# (the prior rows are kept by the upsert merge).
 #   bench/run.sh --native-only                  # all 10 native levels, incl. the L10 crown (~19 min)
 #   bench/run.sh --native-only 1,2,3,4,5,6,7,8  # skip the slow L9/L10 (~8 min)
 if [ "${1:-}" = "--native-only" ]; then

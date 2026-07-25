@@ -1,9 +1,11 @@
 """Strict timing-protocol validators and loaders for benchmark JSON.
 
 Routine dashboard documents and external comparator records are median-of-5.
-The frozen zopfli ratio ceiling is the only single-repetition artifact, and it
-has a separate loader so routine call sites cannot accidentally opt out of
-validation.
+The frozen zopfli ratio ceiling is the only artifact governed by the flat
+``timing_aggregation="single"`` / ``timing_reps=1`` schema, and it has a
+separate loader so routine call sites cannot accidentally opt out of validation.
+``whole_tar_l6.json`` has its own median-of-``meta.reps`` timing plus single-run
+RSS protocol and is intentionally outside both loaders.
 """
 
 import json

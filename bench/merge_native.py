@@ -7,8 +7,9 @@ Rows are keyed by (compressor, pattern, level). Every row in <new.json>
 overrides the matching row in <old.json>; all other <old.json> rows are kept.
 This is how a `bench/run.sh --native-only` refresh splices fresh native rows
 back over the prior dashboard without re-measuring the reference compressors
-(their ratio is deterministic and their MB/s drifts <~3% run-to-run), and how
-a level-restricted native run (e.g. skipping the slow optimal-parse L9) keeps
+(their ratio is deterministic; their MB/s remains tied to its measurement
+session), and how a level-restricted native run (e.g. skipping the slow
+optimal-parse L9) keeps
 the prior rows for the levels it did not regenerate.
 
 The merged `meta` is taken from <new.json> so the dashboard records the fresh
