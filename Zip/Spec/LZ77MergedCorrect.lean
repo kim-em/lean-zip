@@ -3,7 +3,7 @@ import Zip.Spec.LZ77ChainCorrect
 /-!
 # Correctness of the merged-array matchers (#2767, greedy port)
 
-`lz77ChainLazyIterPMerged` (lazy tier, levels 4–8) and `lz77ChainIterPMerged`
+`lz77ChainLazyIterPMerged` (lazy tier, levels ≥ 4) and `lz77ChainIterPMerged`
 (greedy tier, levels 1–3) hold the chain state (`hashTable`, `prev`) in a
 single combined `Array Nat`, laid out as `prev ++ hashTable` — the `prev` ring
 at offset `[0, prevSize)`, the hash table at `[prevSize, prevSize + hashSize)`.
@@ -448,8 +448,9 @@ private theorem updateHashesMergedH3Guarded_eq (useH3 : Bool) (data : ByteArray)
     · rfl
   · rw [if_neg hu3, if_neg hu3, updateHashesMergedGuarded_eq]
 
-/-! The production L5 policy has neither the H3 side table nor rolling
-    multi-deferral.  Its specialized loop is therefore just the fresh-position
+/-! The common no-H3, single-deferral policy (including L4/L5 and any other
+    qualifying lazy level) has neither the H3 side table nor rolling
+    multi-deferral. Its specialized loop is therefore just the fresh-position
     arm of the general merged loop. -/
 set_option maxHeartbeats 2000000 in
 private theorem noH3SingleLoop_eq (data : ByteArray)

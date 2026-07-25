@@ -2906,8 +2906,9 @@ termination_by data.size - pos
 decreasing_by all_goals assumption
 
 /-- Merged-array entry mirroring `lz77ChainLazyIterP`: builds the combined
-    `prevSize + hashSize` array and runs `lz77LazyMergedLoop`. Threads the
-    rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
+    `prevSize + hashSize` array and selects the no-H3/single-deferral loop when
+    those properties hold, otherwise the general `lz77LazyMergedLoop`. Threads
+    the rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
     `lz77ChainLazyIterP` (`lz77ChainLazyIterPMerged_eq`). -/
 def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768)
     (insertCap : Nat := 1000000000) (goodMatch : Nat := 259) (niceLen : Nat := 258)

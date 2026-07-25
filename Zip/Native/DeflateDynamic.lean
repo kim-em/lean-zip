@@ -430,11 +430,11 @@ def emitTokensWithCodesTAPTFlatZero (bw : BitWriter) (tokens : TokenArray)
   emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf bw.bitCount.toUInt32
     tokens litT distT hlit hdist 0
 
-/-- Logical proof helper for the flat single-block route.  The proof-gated
-    production block calls `emitTokensWithCodesTAPTFlatZero` directly and uses
+/-- Logical proof helper for the flat emitter. The proof-gated single-block and
+    shared multi-block production routes call
+    `emitTokensWithCodesTAPTFlatZero` directly and use
     `emitTokensWithCodesTAPTFlatZero_eq_routed` to connect that implementation
-    to this body under its canonical code-table bounds.  The shared multi-block
-    emitter continues to call the reference `emitTokensWithCodesTAPT`. -/
+    to this body under its canonical code-table bounds. -/
 def emitTokensWithCodesTAPTFlatRouted (bw : BitWriter) (tokens : TokenArray)
     (litT distT : Array UInt32)
     (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
@@ -1847,7 +1847,8 @@ decreasing_by all_goals omega
     obligations; `ZipTest/PackedTokens.lean` pins it to the boxed heuristic
     over the `unpackTok` view. The block floor/ceiling and check cadence are
     defaulted parameters so the `mid-sweep` tuning tool can grid them without
-    touching the dispatch (which always calls with the tuned defaults).
+    touching the dispatch. Production normally uses those defaults; large L5
+    streams explicitly pass their coarser 2016-token cadence.
 
     `totalBytes` is the whole-stream output byte count `Σ splitTokenBytesP t`.
     The boxed reference computes it with a leading pass over `toks`; the packed
@@ -2831,6 +2832,8 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     inside the L4↔L6 mixing line, and a shallow split point (chain 24, gate
     64, probe /4, no singleton) matches its speed at −0.53pp weighted-Silesia
     ratio — the split's per-block trees buy more than the deep chain did.
+    Inputs of at least 4 MiB subsequently move to chain 22 and a 2016-token
+    split cadence; smaller L5 inputs retain the chain-24/512-token point.
     Levels 1–3 (`deflate_fast`, emit-bound) stay single-block greedy.
 
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
