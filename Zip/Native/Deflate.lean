@@ -314,8 +314,9 @@ private theorem packCodeBytes_size (xs : Array UInt32) :
   simp
 
 /-- Runtime distance-code table packed into four bytes per entry instead of the
-    generic array's eight-byte tagged slots.  Build it directly so the boxed
-    proof-facing table does not have to stay resident on the native path. -/
+    generic array's eight-byte tagged slots.  This coexists with the persistent
+    proof-facing `distCodeWordTab`; native `distCodeWord` lookups route to this
+    byte table through `distCodeWordBytesImpl`. -/
 def distCodeWordBytes : ByteArray :=
   let tab := (Array.range 32769).map (fun dist => packCode (findDistCode dist))
   tab.foldl (fun b w => b.pushUInt32LE w) ByteArray.empty

@@ -30,7 +30,7 @@ the loop induction only has to discharge the freq hypotheses at each recursion.
 The wide-counter L1 path is refined separately: aligned `UInt64` stores update
 exactly one logical bin, the token-count invariant rules out modular wrap under
 the production addressability guard, and the wide matcher follows the same
-token control flow.  `lz77ChainIterPMergedFU64Level1_eq` is the resulting entry
+token control flow.  `lz77ChainIterPMergedF1U64_eq` is the resulting entry
 theorem used by the production dispatch.
 -/
 
@@ -1100,96 +1100,6 @@ theorem trailingPFU64_spec (data : ByteArray) (pos : Nat) (acc : TokenArray)
       exact ih (data.size - (pos + 1)) (by omega) (pos + 1) _ _ hsize' hrep' rfl
     · simp only [h, ↓reduceDIte]
       exact ⟨trivial, hrep⟩
-
-/-- The wide-counter greedy loop follows the exact plain matcher control flow,
-    returns the same packed tokens, and refines their mathematical histogram. -/
-theorem lz77GreedyMergedLoopFU64_spec (data : ByteArray)
-    (windowSize hashSize prevSize maxChain insertCap niceLen : Nat)
-    (c : Array Nat) (pos : Nat) (acc : TokenArray) (freqs : FusedFreqBytes)
-    (haddr : data.size.toUSize.toNat = data.size)
-    (hsize : acc.toArray.size ≤ pos) (hrep : FusedFreqBytesRep freqs acc.toArray) :
-    (lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen
-      c pos acc freqs).1 =
-      lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen
-        c pos acc ∧
-    FusedFreqBytesRep
-      (lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen
-        c pos acc freqs).2
-      (lz77GreedyMergedLoop data windowSize hashSize prevSize maxChain insertCap niceLen
-        c pos acc).toArray := by
-  induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc freqs c with
-  | _ n ih =>
-    unfold lz77GreedyMergedLoopFU64 lz77GreedyMergedLoop
-    by_cases hlt : pos + 2 < data.size
-    · simp only [hlt, ↓reduceDIte]
-      have hcap : acc.toArray.size + 1 < UInt64.size := by
-        have hdata := byteArray_size_lt_uint64 data haddr
-        omega
-      simp only [chainWalkPackedUUChecked_low, chainWalkPackedUUChecked_high]
-      split
-      all_goals
-        split
-        · split
-          · refine ih _ (by omega) _ _ _ _ ?_ ?_ rfl
-            · rw [TokenArray.push_toArray, Array.size_push]
-              omega
-            · rw [TokenArray.push_toArray]
-              exact bumpRefFreqU64_rep freqs acc.toArray _
-                (packTok_reference_tag _ _) hrep hcap
-          · refine ih _ (by omega) _ _ _ _ ?_ ?_ rfl
-            · rw [TokenArray.push_toArray, Array.size_push]
-              omega
-            · rw [TokenArray.push_toArray]
-              exact bumpLitFreqU64_rep freqs acc.toArray _
-                (packTok_literal_tag _) hrep hcap
-        · refine ih _ (by omega) _ _ _ _ ?_ ?_ rfl
-          · rw [TokenArray.push_toArray, Array.size_push]
-            omega
-          · rw [TokenArray.push_toArray]
-            exact bumpLitFreqU64_rep freqs acc.toArray _
-              (packTok_literal_tag _) hrep hcap
-    · simp only [hlt, ↓reduceDIte]
-      exact trailingPFU64_spec data pos acc freqs haddr hsize hrep
-
-/-- Under the production addressability guard, the wide L1 entry returns the
-    exact plain L1 token stream and its conventional `tokenFreqsP` arrays. -/
-theorem lz77ChainIterPMergedFU64Level1_eq (data : ByteArray)
-    (haddr : data.size.toUSize.toNat = data.size) :
-    lz77ChainIterPMergedFU64Level1 data =
-      let tokens := lz77ChainIterPMerged data 4 32768 2 258
-      (tokens, (tokenFreqsP tokens.toArray).1, (tokenFreqsP tokens.toArray).2) := by
-  unfold lz77ChainIterPMergedFU64Level1 lz77ChainIterPMerged
-  by_cases hsmall : data.size < 3
-  · simp only [hsmall, if_pos]
-    generalize hr : trailingPFU64 data 0 TokenArray.empty initFusedFreqBytes = r
-    rcases r with ⟨tokens, freqs⟩
-    have hs := trailingPFU64_spec data 0 TokenArray.empty initFusedFreqBytes haddr
-      (by rw [TokenArray.empty_toArray]; simp) (by
-        rw [TokenArray.empty_toArray]
-        exact initFusedFreqBytes_rep)
-    rw [hr] at hs
-    have hf := fusedFreqBytesToNat_eq freqs
-      (trailingPT data 0 TokenArray.empty).toArray hs.2
-    rw [hf, hs.1]
-  · simp only [hsmall, if_false]
-    generalize hr : lz77GreedyMergedLoopFU64 data 32768 65536
-      (min chainWinSize data.size) 4 2 258
-      (.replicate (min chainWinSize data.size + 65536) data.size) 0
-      (TokenArray.emptyWithCapacity data.size) initFusedFreqBytes = r
-    rcases r with ⟨tokens, freqs⟩
-    have hs := lz77GreedyMergedLoopFU64_spec data 32768 65536
-      (min chainWinSize data.size) 4 2 258
-      (.replicate (min chainWinSize data.size + 65536) data.size) 0
-      (TokenArray.emptyWithCapacity data.size) initFusedFreqBytes haddr
-      (by rw [TokenArray.emptyWithCapacity_toArray]; simp) (by
-        rw [TokenArray.emptyWithCapacity_toArray]
-        exact initFusedFreqBytes_rep)
-    rw [hr] at hs
-    have hf := fusedFreqBytesToNat_eq freqs
-      (lz77GreedyMergedLoop data 32768 65536 (min chainWinSize data.size)
-        4 2 258 (.replicate (min chainWinSize data.size + 65536) data.size) 0
-        (TokenArray.emptyWithCapacity data.size)).toArray hs.2
-    rw [hf, hs.1]
 
 /-- **Push-literal correspondence (lit/len).** For a literal word, bumping the
     running lit/len histogram equals `tokenFreqsP` of the extended stream. -/
