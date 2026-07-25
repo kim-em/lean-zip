@@ -20,8 +20,10 @@ side is bridged by two write lemmas:
 
 * `set!` at the cursor, then extract, equals extract then `push` (a literal)
   — `set!_extract_eq_push` below;
-* `copyWithinAt` at the cursor, then extract, equals `copyLoop` on the logical
-  prefix (a back-reference) — `copyWithinAt_extract_eq_copyLoop` below.
+* the inline short-match copy equals `copyWithinAt`, and `copyWithinAt` at the
+  cursor, then extract, equals `copyLoop` on the logical prefix (a
+  back-reference) — `copyWithinAtShort_eq` and
+  `copyWithinAt_extract_eq_copyLoop` below.
 
 Both need a **big-enough buffer** (`buf.size ≥ final reference size`), which is
 carried through the induction and discharged at each step by the reference's
@@ -53,7 +55,9 @@ dependency order:
 On top of the `set!` cursor, the same file proves the **branch-free `uset`
 fastloop** `goCurU` — a per-symbol margin guard `outPos + 299 ≤ output.size`
 gates a hot body that writes literals with proven-bounds `uset` (no per-literal
-bounds check), drops the per-symbol max-size check, and swaps `goCur`'s
+bounds check), copies non-overlapping matches of at most eight bytes with one
+masked `ugetUInt64LE`/`usetUInt64LE` pair, drops the per-symbol max-size check,
+and swaps `goCur`'s
 `outPos + length > maxOut` guard for the cheaper `length > 258` — equal to
 `goCur`. The centrepiece **`goCurU_eq`** is a 9-case functional induction over
 `goCurU.induct` under the invariant `output.size ≤ maxOut`: the margin makes
@@ -189,6 +193,96 @@ theorem copyWithinAt_size (a : ByteArray) (destOff distance len : Nat) :
   · rfl
   · exact copyWithinAtGo_size a destOff distance 0 len
 
+theorem ByteArray.getElem!_set (a : ByteArray) (i : Nat) (v : UInt8) (hi : i < a.size)
+    (j : Nat) : (a.set i v hi)[j]! = if j = i then v else a[j]! := by
+  by_cases hj : j < a.size
+  · rw [getElem!_pos (a.set i v hi) j (by rw [ByteArray.size_set]; exact hj),
+      getElem!_pos a j hj]
+    by_cases hji : j = i
+    · subst j
+      simp only [ByteArray.getElem_eq_getElem_data, ByteArray.data_set,
+        Array.getElem_set_self, ↓reduceIte]
+    · simp only [ByteArray.getElem_eq_getElem_data, ByteArray.data_set,
+        Array.getElem_set_ne hi hj (Ne.symm hji), hji, ↓reduceIte]
+  · rw [getElem!_neg (a.set i v hi) j (by rw [ByteArray.size_set]; exact hj),
+      getElem!_neg a j hj]
+    simp only [if_neg (show j ≠ i by rintro rfl; exact hj hi)]
+
+@[simp] theorem ByteArray.size_usetUInt64LE (a : ByteArray) (off : USize) (v : UInt64)
+    (h : off.toNat + 8 ≤ a.size) : (a.usetUInt64LE off v h).size = a.size := by
+  simp only [ByteArray.usetUInt64LE, ByteArray.size_set]
+
+theorem ByteArray.getElem!_usetUInt64LE (a : ByteArray) (off : USize) (v : UInt64)
+    (h : off.toNat + 8 ≤ a.size) (i : Nat) :
+    (a.usetUInt64LE off v h)[i]! =
+      if i = off.toNat + 7 then (v >>> 56).toUInt8
+      else if i = off.toNat + 6 then (v >>> 48).toUInt8
+      else if i = off.toNat + 5 then (v >>> 40).toUInt8
+      else if i = off.toNat + 4 then (v >>> 32).toUInt8
+      else if i = off.toNat + 3 then (v >>> 24).toUInt8
+      else if i = off.toNat + 2 then (v >>> 16).toUInt8
+      else if i = off.toNat + 1 then (v >>> 8).toUInt8
+      else if i = off.toNat then v.toUInt8
+      else a[i]! := by
+  simp only [ByteArray.usetUInt64LE, ByteArray.getElem!_set]
+
+theorem ByteArray.getElem!_usetUInt64LE_at (a : ByteArray) (off : USize) (v : UInt64)
+    (h : off.toNat + 8 ≤ a.size) (k : Nat) (hk : k < 8) :
+    (a.usetUInt64LE off v h)[off.toNat + k]! = (v >>> (k.toUInt64 <<< 3)).toUInt8 := by
+  rw [ByteArray.getElem!_usetUInt64LE]
+  have hcases : k = 0 ∨ k = 1 ∨ k = 2 ∨ k = 3 ∨ k = 4 ∨ k = 5 ∨
+      k = 6 ∨ k = 7 := by omega
+  rcases hcases with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+    simp [Nat.toUInt64] <;> bv_decide
+
+/-- Extracting each byte from an eight-byte little-endian recombination returns
+    the corresponding input byte. -/
+theorem UInt64.recomb8LE_bytes (a0 a1 a2 a3 a4 a5 a6 a7 : UInt8) :
+    let w := a0.toUInt64 ||| (a1.toUInt64 <<< 8) ||| (a2.toUInt64 <<< 16) |||
+      (a3.toUInt64 <<< 24) ||| (a4.toUInt64 <<< 32) ||| (a5.toUInt64 <<< 40) |||
+      (a6.toUInt64 <<< 48) ||| (a7.toUInt64 <<< 56)
+    w.toUInt8 = a0 ∧ (w >>> 8).toUInt8 = a1 ∧ (w >>> 16).toUInt8 = a2 ∧
+      (w >>> 24).toUInt8 = a3 ∧ (w >>> 32).toUInt8 = a4 ∧
+      (w >>> 40).toUInt8 = a5 ∧ (w >>> 48).toUInt8 = a6 ∧
+      (w >>> 56).toUInt8 = a7 := by
+  dsimp only
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;> bv_decide
+
+theorem ByteArray.ugetUInt64LE_byte (a : ByteArray) (off : USize)
+    (h : off.toNat + 8 ≤ a.size) (k : Nat) (hk : k < 8) :
+    (a.ugetUInt64LE off h >>> (k.toUInt64 <<< 3)).toUInt8 = a[off.toNat + k]! := by
+  rw [getElem!_pos a (off.toNat + k) (by omega)]
+  have hcases : k = 0 ∨ k = 1 ∨ k = 2 ∨ k = 3 ∨ k = 4 ∨ k = 5 ∨
+      k = 6 ∨ k = 7 := by omega
+  have hb := UInt64.recomb8LE_bytes
+    a[off.toNat] a[off.toNat + 1] a[off.toNat + 2] a[off.toNat + 3]
+    a[off.toNat + 4] a[off.toNat + 5] a[off.toNat + 6] a[off.toNat + 7]
+  obtain ⟨h0, h1, h2, h3, h4, h5, h6, h7⟩ := hb
+  rcases hcases with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h0
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h1
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h2
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h3
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h4
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h5
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h6
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h7
+
+theorem UInt64.blendLE_byte (src dst : UInt64) (len k : Nat)
+    (hlenpos : 0 < len) (hlen : len ≤ 8) (hk : k < 8) :
+    let mask := (0xffffffffffffffff : UInt64) >>> ((8 - len).toUInt64 <<< 3)
+    (((src &&& mask) ||| (dst &&& ~~~mask)) >>> (k.toUInt64 <<< 3)).toUInt8 =
+      if k < len then (src >>> (k.toUInt64 <<< 3)).toUInt8
+      else (dst >>> (k.toUInt64 <<< 3)).toUInt8 := by
+  dsimp only
+  have hlcases : len = 1 ∨ len = 2 ∨ len = 3 ∨ len = 4 ∨ len = 5 ∨ len = 6 ∨
+      len = 7 ∨ len = 8 := by omega
+  have hkcases : k = 0 ∨ k = 1 ∨ k = 2 ∨ k = 3 ∨ k = 4 ∨ k = 5 ∨
+      k = 6 ∨ k = 7 := by omega
+  rcases hlcases with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+    rcases hkcases with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
+      simp [Nat.toUInt64] <;> bv_decide
+
 /-- Content preservation below the cursor: `copyWithinAtGo` starting at counter
     `k` only writes positions `≥ destOff + k`, so positions `< destOff + k`
     (in particular the whole `[0, destOff)` window) are unchanged. -/
@@ -237,6 +331,20 @@ theorem copyWithinAtGo_getElem!_written (a : ByteArray) (destOff distance k len 
       ByteArray.getElem!_set!, if_neg (by rintro ⟨h1, -⟩; omega)]
   termination_by len - k
   decreasing_by omega
+
+/-- Positions at or above the end of the copy are unchanged. -/
+theorem copyWithinAtGo_getElem!_ge (a : ByteArray) (destOff distance k len i : Nat)
+    (hi : destOff + len ≤ i) :
+    (copyWithinAtGo a destOff distance k len)[i]! = a[i]! := by
+  rw [copyWithinAtGo]
+  split
+  · rename_i hk
+    rw [copyWithinAtGo_getElem!_ge (a.set! (destOff + k) _) destOff distance (k + 1) len i hi,
+      ByteArray.getElem!_set!]
+    simp only [if_neg (show ¬(i = destOff + k ∧ destOff + k < a.size) from fun hh => by omega)]
+  · rfl
+  termination_by len - k
+  decreasing_by rename_i hk; omega
 
 /-- `copyLoop` (the reference back-reference append) grows the buffer by exactly
     `length`, derived from the `copyLoop_eq_ofFn` content characterisation. -/
@@ -331,6 +439,72 @@ theorem ByteArray.ext_getElem! {a b : ByteArray} (h₀ : a.size = b.size)
   intro i hi hi'
   have := h i hi
   rwa [getElem!_pos a i hi, getElem!_pos b i hi'] at this
+
+set_option maxHeartbeats 1000000 in
+theorem ByteArray.copyWithinAtShort_eq (a : ByteArray) (destOff : USize)
+    (distance len : Nat) (hdistance : 8 ≤ distance) (hlenpos : 0 < len) (hlen : len ≤ 8)
+    (hwindow : distance ≤ destOff.toNat) (hroom : destOff.toNat + 8 ≤ a.size) :
+    a.copyWithinAtShort destOff distance len hdistance hlenpos hlen hwindow hroom =
+      a.copyWithinAt destOff.toNat distance len := by
+  have hsrc : (destOff.toNat - distance).toUSize.toNat = destOff.toNat - distance :=
+    InflateBuf.toUSize_toNat_of_lt
+      (Nat.lt_of_le_of_lt (Nat.sub_le ..) destOff.toNat_lt_two_pow_numBits)
+  rw [ByteArray.copyWithinAt, if_neg (by omega)]
+  apply ByteArray.ext_getElem!
+  · simp only [ByteArray.copyWithinAtShort, ByteArray.size_usetUInt64LE,
+      copyWithinAtGo_size]
+  · intro i hi
+    simp only [ByteArray.copyWithinAtShort]
+    by_cases hin : destOff.toNat ≤ i ∧ i < destOff.toNat + 8
+    · let k := i - destOff.toNat
+      have hk : k < 8 := by omega
+      have hi' : i = destOff.toNat + k := by omega
+      rw [hi', ByteArray.getElem!_usetUInt64LE_at _ _ _ _ k hk,
+        UInt64.blendLE_byte _ _ len k hlenpos hlen hk]
+      by_cases hkl : k < len
+      · rw [if_pos hkl,
+          copyWithinAtGo_getElem!_written a destOff.toNat distance 0 len (destOff.toNat + k)
+            (by omega) hwindow (by omega) (by omega) (by omega)]
+        rw [show (destOff.toNat + k - destOff.toNat) % distance = k by
+          have : k < distance := by omega
+          rw [show destOff.toNat + k - destOff.toNat = k by omega, Nat.mod_eq_of_lt this]]
+        have hu := ByteArray.ugetUInt64LE_byte a (destOff.toNat - distance).toUSize
+          (by rw [hsrc]; omega) k hk
+        calc
+          _ = a[(destOff.toNat - distance).toUSize.toNat + k]! := hu
+          _ = a[destOff.toNat - distance + k]! := by rw [hsrc]
+      · rw [if_neg hkl, copyWithinAtGo_getElem!_ge _ _ _ 0 _ _ (by omega)]
+        exact ByteArray.ugetUInt64LE_byte a destOff hroom k hk
+    · have hout : i < destOff.toNat ∨ destOff.toNat + 8 ≤ i := by omega
+      rcases hout with hbelow | habove
+      · rw [copyWithinAtGo_getElem!_lt _ _ _ 0 _ _ (by omega),
+          ByteArray.getElem!_usetUInt64LE]
+        have hne : ∀ k, k < 8 → i ≠ destOff.toNat + k := by omega
+        simp only [if_neg (hne 7 (by omega)), if_neg (hne 6 (by omega)),
+          if_neg (hne 5 (by omega)), if_neg (hne 4 (by omega)), if_neg (hne 3 (by omega)),
+          if_neg (hne 2 (by omega)), if_neg (hne 1 (by omega)),
+          if_neg (by simpa using hne 0 (by omega))]
+      · rw [copyWithinAtGo_getElem!_ge _ _ _ 0 _ _ (by omega),
+          ByteArray.getElem!_usetUInt64LE]
+        have hne : ∀ k, k < 8 → i ≠ destOff.toNat + k := by omega
+        simp only [if_neg (hne 7 (by omega)), if_neg (hne 6 (by omega)),
+          if_neg (hne 5 (by omega)), if_neg (hne 4 (by omega)), if_neg (hne 3 (by omega)),
+          if_neg (hne 2 (by omega)), if_neg (hne 1 (by omega)),
+          if_neg (by simpa using hne 0 (by omega))]
+
+/-- The short-match dispatch is extensionally just `copyWithinAt`; this packages
+    the dependent branch proofs so callers can normalize the whole dispatch in
+    one rewrite. -/
+theorem ByteArray.copyWithinAtShort_if_eq (a : ByteArray) (destOff : USize)
+    (distance len : Nat) (hlenpos : 0 < len) (hwindow : distance ≤ destOff.toNat)
+    (hroom : destOff.toNat + 8 ≤ a.size) :
+    (if hshort : 8 ≤ distance ∧ len ≤ 8 then
+      a.copyWithinAtShort destOff distance len hshort.1 hlenpos hshort.2 hwindow hroom
+    else a.copyWithinAt destOff.toNat distance len) =
+      a.copyWithinAt destOff.toNat distance len := by
+  split
+  · apply ByteArray.copyWithinAtShort_eq
+  · rfl
 
 /-- `getElem!` of an extract prefix. -/
 theorem ByteArray.getElem!_extract (x : ByteArray) (start stop i : Nat)
@@ -2395,6 +2569,7 @@ theorem goCurU_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : Hu
     rw [if_neg hnlt, if_neg hneob, dif_pos hidx']
   | case8 pos bitBuf cnt output outPos hrc hm ent hlit cnt0 sym bb c' used hde hsym hneob idx hh base ih =>
     intro hsize
+    dsimp only [base, idx] at ih
     have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
     have hhc29 : sym.toNat - 257 < 29 := by
       have := hhc; rw [Inflate.lengthBase_size] at this; omega
@@ -2442,7 +2617,11 @@ theorem goCurU_eq (litTable distTable : HuffTree.DecodeTable) (litLD distLD : Hu
                 by_cases hnp : cnt.toNat ≤ c4
                 · simp only [dif_pos hnp]
                 · rw [dif_neg hnp, dif_neg hnp]
-                  exact ih eb dsym hdidx deb bb4 c4 hnp (by rw [copyWithinAt_size]; exact hsize)
+                  rw [ByteArray.copyWithinAtShort_if_eq]
+                  have hrec := ih eb dsym hdidx deb bb4 c4 hds hnp (by
+                    rw [ByteArray.copyWithinAtShort_if_eq, copyWithinAt_size]
+                    exact hsize)
+                  simpa only [ByteArray.copyWithinAtShort_if_eq] using hrec
   | case9 pos bitBuf cnt output outPos hrc hm =>
     intro hsize
     rw [InflateBuf.goCurU, dif_neg hrc, dif_neg hm]

@@ -1,4 +1,5 @@
 import Zip.Native.InflateTreeFree
+import Zip.Native.Wide
 
 /-!
 # Write-once cursor decode (fastloop spike — issue #2799)
@@ -13,8 +14,9 @@ pre-extends the output buffer to its final size **once** and writes each literal
 `goCur` is byte-for-byte `InflateBuf.goTreeFreeU` with the output side swapped:
 
   * literal write `output.push b` → `output.set!` at the `outPos` cursor,
-  * back-reference `Inflate.copyLoop` (append) → `ByteArray.copyWithinAt` at the
-    cursor (in-place, no realloc),
+  * back-reference `Inflate.copyLoop` (append) → an inline wide copy for
+    non-overlapping matches up to eight bytes, with `ByteArray.copyWithinAt` as
+    the general fallback (in-place, no realloc),
 
 and the logical output length `output.size` (used by the distance / max-size
 checks) → the `outPos` cursor. Everything on the **input** side — the `uget`
@@ -83,6 +85,22 @@ def copyWithinAt (a : ByteArray) (destOff distance len : Nat) : ByteArray :=
   if distance = 0 ∨ distance > destOff ∨ destOff + len > a.size then a
   else copyWithinAtGo a destOff distance 0 len
 
+/-- Copy a non-overlapping match of at most eight bytes with one wide load/store.
+    The destination word is blended into the bytes above `len`, so the wide
+    store changes exactly the logical match bytes. -/
+@[inline] def copyWithinAtShort (a : ByteArray) (destOff : USize)
+    (distance len : Nat) (hdistance : 8 ≤ distance) (_hlenpos : 0 < len) (_hlen : len ≤ 8)
+    (_hwindow : distance ≤ destOff.toNat) (hroom : destOff.toNat + 8 ≤ a.size) : ByteArray :=
+  let srcOff := (destOff.toNat - distance).toUSize
+  let src := a.ugetUInt64LE srcOff (by
+    rw [Zip.Native.InflateBuf.toUSize_toNat_of_lt
+      (show destOff.toNat - distance < USize.size by
+      exact Nat.lt_of_le_of_lt (Nat.sub_le ..) destOff.toNat_lt_two_pow_numBits)]
+    omega)
+  let dst := a.ugetUInt64LE destOff hroom
+  let mask := (0xffffffffffffffff : UInt64) >>> ((8 - len).toUInt64 <<< 3)
+  a.usetUInt64LE destOff ((src &&& mask) ||| (dst &&& ~~~mask)) hroom
+
 end ByteArray
 
 namespace Zip.Native
@@ -90,6 +108,13 @@ open ZipCommon (BitReader)
 
 namespace InflateBuf
 open Zip.Native.HuffTree (DecodeTable LongDecode decodeSymCanon)
+
+private theorem lengthBase_pos (idx : Nat) (h : idx < Inflate.lengthBase.size) :
+    0 < Inflate.lengthBase[idx].toNat := by
+  have hkey : ∀ k : Fin Inflate.lengthBase.size, 0 < Inflate.lengthBase[k.val]!.toNat := by
+    decide
+  have hk := hkey ⟨idx, h⟩
+  rwa [getElem!_pos Inflate.lengthBase idx h] at hk
 
 set_option maxRecDepth 4096 in
 /-- Write-once cursor copy of `goTreeFreeU` (issue #2799 spike). Identical input
@@ -271,7 +296,12 @@ def goCurU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
               else if hlen : length > 258 then throw "Inflate: length exceeds 258"
               else if hnp : cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
               else
-                let out := output.copyWithinAt outPos.toNat distance length
+                let out := if hshort : 8 ≤ distance ∧ length ≤ 8 then
+                  output.copyWithinAtShort outPos distance length hshort.1
+                    (by exact Nat.lt_of_lt_of_le (lengthBase_pos idx (by omega)) (Nat.le_add_right ..)) hshort.2
+                    (by omega) (by omega)
+                else
+                  output.copyWithinAt outPos.toNat distance length
                 goCurU litTable distTable litLD distLD maxBits data maxOut pos bitBuf
                   cnt4.toUSize hsz hlp out (outPos + length.toUSize)
   else
