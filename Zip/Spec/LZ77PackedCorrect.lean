@@ -395,58 +395,95 @@ theorem deflateDynamicBlocksSharedAtP_eq (data : ByteArray) (ta : TokenArray)
 /-! ## The packed sized-tree split candidate reuses trees (Wave 5 → #2753)
 
 `emitSharedBlocksAtSizedP`, fed the trees `sharedPartitionSizedP` builds while
-sizing, emits byte-for-byte what `emitSharedBlocksAtP` emits recomputing them —
-the packed twin of `emitSharedBlocksAtSized_eq`. Each block's trees are
-`sizedTrees (tokenFreqsP group) = dynamicCodeLengths (tokenFreqsP group)`, which
-is exactly what `emitSharedBlockP` recomputes; the `emitDynBlockP` calls then
-coincide (the alphabet-size proofs are proof-irrelevant). -/
+sizing, emits the same logical bitstream as `emitSharedBlocksAtP` recomputing
+them — the packed twin of `emitSharedBlocksAtSized_eq`. Each sized tree also
+carries `dynamicCodeLengths_bounded`, so the production fold can use the
+proved flat token loop. Flat and reference loops may drain whole bytes at
+different token boundaries; the induction therefore carries equality of
+`BitWriter.toBits` plus well-formedness rather than structural writer equality.
+-/
 
-/-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
-    reference packed emitter (fuel-quantified form for the induction). -/
-private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ta : TokenArray) :
-    ∀ (fuel pos : Nat), ta.size - pos < fuel → ∀ (cuts : List Nat) (bw : BitWriter),
-      emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts pos).2 pos bw
-        = emitSharedBlocksAtP data ta cuts pos bw := by
+/-- Fed the sizing pass's trees, the flat tree-taking packed emitter is
+    observationally equal to the reference packed emitter (fuel form). -/
+private theorem emitSharedBlocksAtSizedP_spec_fuel (data : ByteArray) (ta : TokenArray) :
+    ∀ (fuel pos : Nat), ta.size - pos < fuel → ∀ (cuts : List Nat)
+      (fbw rbw : BitWriter), fbw.toBits = rbw.toBits → fbw.wf → rbw.wf →
+      let fw :=
+        emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts pos).2 pos fbw
+      let rw := emitSharedBlocksAtP data ta cuts pos rbw
+      fw.toBits = rw.toBits ∧ fw.wf ∧ rw.wf := by
   intro fuel
   induction fuel with
   | zero => intro pos hf; omega
   | succ fuel ih =>
-    intro pos hf cuts bw
+    intro pos hf cuts fbw rbw hbits hfwf hrwf
+    let j := min (max (cuts.headD ta.size) (pos + 1)) ta.size
+    let f := tokenFreqsPTA (ta.extract pos j)
+    let lens := dynamicCodeLengths f.1 f.2
+    let fw' := emitDynBlockPFlat fbw data (ta.extract pos j) lens.1 lens.2
+      (dynamicCodeLengths_length f.1 f.2).1
+      (dynamicCodeLengths_length f.1 f.2).2
+      (dynamicCodeLengths_bounded f.1 f.2).1
+      (dynamicCodeLengths_bounded f.1 f.2).2
+      (decide (j ≥ ta.size))
+    let rw' := emitDynBlockP rbw data (ta.extract pos j) lens.1 lens.2
+      (dynamicCodeLengths_length f.1 f.2).1
+      (dynamicCodeLengths_length f.1 f.2).2
+      (decide (j ≥ ta.size))
+    have hblk : fw'.toBits = rw'.toBits ∧ fw'.wf ∧ rw'.wf :=
+      emitDynBlockPFlat_spec fbw rbw data (ta.extract pos j) lens.1 lens.2
+        (dynamicCodeLengths_length f.1 f.2).1
+        (dynamicCodeLengths_length f.1 f.2).2
+        (dynamicCodeLengths_bounded f.1 f.2).1
+        (dynamicCodeLengths_bounded f.1 f.2).2
+        (decide (j ≥ ta.size)) hbits hfwf hrwf
     by_cases hend : min (max (cuts.headD ta.size) (pos + 1)) ta.size ≥ ta.size
     · have hsnd : (sharedPartitionSizedP ta cuts pos).2 =
-          [sizedTrees (tokenFreqsPTA (ta.extract pos
-            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).1
-            (tokenFreqsPTA (ta.extract pos
-            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).2] := by
+          [sizedTrees f.1 f.2] := by
         conv => lhs; unfold sharedPartitionSizedP
-        simp only [if_pos hend]
+        simp only [if_pos hend, f, j]
       rw [hsnd]
-      conv => lhs; unfold emitSharedBlocksAtSizedP
-      conv => rhs; unfold emitSharedBlocksAtP
-      simp only [if_pos hend, emitSharedBlockP, sizedTrees]
-      rfl
+      have hflat :
+          emitSharedBlocksAtSizedP data ta cuts [sizedTrees f.1 f.2] pos fbw = fw' := by
+        conv => lhs; unfold emitSharedBlocksAtSizedP
+        simp only [if_pos hend, sizedTrees, f, lens, fw', j] <;> rfl
+      have href : emitSharedBlocksAtP data ta cuts pos rbw = rw' := by
+        conv => lhs; unfold emitSharedBlocksAtP
+        simp only [if_pos hend, emitSharedBlockP, f, lens, rw', j] <;> rfl
+      rw [hflat, href]
+      exact hblk
     · have hsnd : (sharedPartitionSizedP ta cuts pos).2 =
-          sizedTrees (tokenFreqsPTA (ta.extract pos
-            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).1
-            (tokenFreqsPTA (ta.extract pos
-            (min (max (cuts.headD ta.size) (pos + 1)) ta.size))).2 ::
-          (sharedPartitionSizedP ta cuts.tail
-            (min (max (cuts.headD ta.size) (pos + 1)) ta.size)).2 := by
+          sizedTrees f.1 f.2 :: (sharedPartitionSizedP ta cuts.tail j).2 := by
         conv => lhs; unfold sharedPartitionSizedP
-        simp only [if_neg hend]
+        simp only [if_neg hend, f, j]
       rw [hsnd]
-      conv => lhs; unfold emitSharedBlocksAtSizedP
-      conv => rhs; unfold emitSharedBlocksAtP
-      simp only [if_neg hend, List.headD_cons, List.tail_cons, emitSharedBlockP, sizedTrees]
-      exact ih (min (max (cuts.headD ta.size) (pos + 1)) ta.size) (by omega) cuts.tail _
+      have hflat :
+          emitSharedBlocksAtSizedP data ta cuts
+              (sizedTrees f.1 f.2 :: (sharedPartitionSizedP ta cuts.tail j).2)
+              pos fbw =
+            emitSharedBlocksAtSizedP data ta cuts.tail
+              (sharedPartitionSizedP ta cuts.tail j).2 j fw' := by
+        conv => lhs; unfold emitSharedBlocksAtSizedP
+        simp only [if_neg hend, sizedTrees, f, lens, fw', j] <;> rfl
+      have href : emitSharedBlocksAtP data ta cuts pos rbw =
+          emitSharedBlocksAtP data ta cuts.tail j rw' := by
+        conv => lhs; unfold emitSharedBlocksAtP
+        simp only [if_neg hend, emitSharedBlockP, f, lens, rw', j] <;> rfl
+      rw [hflat, href]
+      exact ih j (by simp only [j]; omega) cuts.tail fw' rw'
+        hblk.1 hblk.2.1 hblk.2.2
 
-/-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
-    reference packed emitter, for any cut list and start position. -/
-theorem emitSharedBlocksAtSizedP_eq (data : ByteArray) (ta : TokenArray)
-    (cuts : List Nat) (pos : Nat) (bw : BitWriter) :
-    emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts pos).2 pos bw
-      = emitSharedBlocksAtP data ta cuts pos bw :=
-  emitSharedBlocksAtSizedP_eq_fuel data ta (ta.size - pos + 1) pos (by omega) cuts bw
+/-- Fed the sizing pass's trees, the flat tree-taking packed emitter denotes
+    the same bits as the reference emitter and preserves writer invariants. -/
+theorem emitSharedBlocksAtSizedP_spec (data : ByteArray) (ta : TokenArray)
+    (cuts : List Nat) (pos : Nat) (fbw rbw : BitWriter)
+    (hbits : fbw.toBits = rbw.toBits) (hfwf : fbw.wf) (hrwf : rbw.wf) :
+    let fw :=
+      emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts pos).2 pos fbw
+    let rw := emitSharedBlocksAtP data ta cuts pos rbw
+    fw.toBits = rw.toBits ∧ fw.wf ∧ rw.wf :=
+  emitSharedBlocksAtSizedP_spec_fuel data ta (ta.size - pos + 1) pos (by omega)
+    cuts fbw rbw hbits hfwf hrwf
 
 /-- The packed sized-tree split candidate's emit thunk is byte-identical to the
     reference `deflateDynamicBlocksSharedAtP`: the roundtrip and padding theorems
@@ -461,8 +498,11 @@ theorem deflateDynamicBlocksSharedAtSizedP_emit (data : ByteArray) (ta : TokenAr
   · rename_i h
     show (emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts 0).2 0
       BitWriter.empty).flush = deflateDynamicBlocksSharedAtP data ta cuts
-    rw [emitSharedBlocksAtSizedP_eq]
     unfold deflateDynamicBlocksSharedAtP
     rw [if_neg h]
+    have hemits := emitSharedBlocksAtSizedP_spec data ta cuts 0
+      BitWriter.empty BitWriter.empty rfl BitWriter.empty_wf BitWriter.empty_wf
+    exact BitWriter.flush_eq_of_toBits _ _
+      hemits.2.1 hemits.2.2 hemits.1
 
 end Zip.Native.Deflate
