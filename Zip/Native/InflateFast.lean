@@ -232,7 +232,9 @@ def goCur (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       rw [hb]; omega
 
 set_option maxRecDepth 4096 in
-/-- Branch-free fastloop variant of `goCur` (the actual #2799 shape). A single
+/-- Branch-free fastloop variant of `goCur` (the actual #2799 shape), retained
+    as the byte-refill reference twin used by the correctness proof for `goCurUW`.
+    A single
     per-symbol margin guard `outPos + 299 ≤ output.size` gates the hot body, in
     which literal writes are proven-bounds `uset` (bound discharged from the
     margin, no per-literal bounds check) and the per-literal max-size check is
@@ -351,6 +353,197 @@ def goCurU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
       have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
       rw [hb]; omega
 
+/-- Unboxed state produced by one input-margin refill probe. -/
+structure WideRefillState where
+  pos : USize
+  bitBuf : UInt64
+  cnt : USize
+  didWide : Bool
+
+/-- One libdeflate-style refill when eight bytes remain. The load deliberately
+    remains unmasked: bits above `cnt` are genuine look-ahead bits and overlapping
+    future loads OR the same stream bits back into the same positions. -/
+@[inline] def wideRefillU (data : ByteArray) (pos : USize) (bitBuf : UInt64) (cnt : USize)
+    (hsz : data.size < USize.size) : WideRefillState :=
+  if hrcw : cnt ≤ 56 ∧ (8 : USize) ≤ data.size.toUSize ∧ pos ≤ data.size.toUSize - 8 then
+    let k := (64 - cnt) >>> 3
+    { pos := pos + k
+      bitBuf := bitBuf ||| (data.ugetUInt64LE pos
+        ((refillGuardWide_usize data pos cnt hsz).mp hrcw).2 <<< cnt.toUInt64)
+      cnt := 64 - ((64 - cnt) &&& 7)
+      didWide := true }
+  else
+    { pos := pos, bitBuf := bitBuf, cnt := cnt, didWide := false }
+
+/-- A wide refill does not increase `goCurUW`'s termination measure. It advances
+    `k` bytes and adds exactly `8k` counted bits, changing the measure by `-k`. -/
+theorem wideRefillU_measure_le (data : ByteArray) (pos : USize) (bitBuf : UInt64) (cnt : USize)
+    (hsz : data.size < USize.size) :
+    let r := wideRefillU data pos bitBuf cnt hsz
+    (data.size - r.pos.toNat) * 9 + r.cnt.toNat ≤
+      (data.size - pos.toNat) * 9 + cnt.toNat := by
+  simp only [wideRefillU]
+  split
+  · rename_i hrcw
+    have hg := (refillGuardWide_usize data pos cnt hsz).mp hrcw
+    have hcnt : cnt.toNat ≤ 56 := hg.1
+    have hpos : pos.toNat + 8 ≤ data.size := hg.2
+    have hk := wideRefillK_toNat cnt hcnt
+    have hc := wideRefillCnt_toNat cnt hcnt
+    have hpa : (pos + ((64 - cnt) >>> 3)).toNat = pos.toNat + (64 - cnt.toNat) / 8 := by
+      rw [USize.toNat_add, hk]
+      apply Nat.mod_eq_of_lt
+      rw [← USize.size_eq_two_pow]
+      omega
+    simp only [hpa, hc]
+    omega
+  · simp
+
+/-- Drop speculative look-ahead bits before handing the cold output-margin tail
+    to the byte-at-a-time loop. The hot wide loop deliberately retains them. -/
+@[inline] def trimBitBufU (bitBuf : UInt64) (cnt : USize) : UInt64 :=
+  if cnt == 64 then bitBuf else bitBuf &&& ((1 <<< cnt.toUInt64) - 1)
+
+set_option maxRecDepth 4096 in
+/-- Word-at-a-time input-refill twin of `goCurU`. -/
+def goCurUW (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
+    (maxBits : Nat) (data : ByteArray) (maxOut : Nat)
+    (pos : USize) (bitBuf : UInt64) (cnt : USize)
+    (hsz : data.size < USize.size)
+    (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits)
+    (output : ByteArray) (outPos : USize) :
+    Except String (ByteArray × USize × USize × UInt64 × USize) := do
+  if hmt : outPos.toNat + 299 ≤ output.size then
+  let r := wideRefillU data pos bitBuf cnt hsz
+  have hwm := wideRefillU_measure_le data pos bitBuf cnt hsz
+  let pos := r.pos
+  let bitBuf := r.bitBuf
+  let cnt := r.cnt
+  let didWide := r.didWide
+  if hrc : didWide = false ∧ cnt ≤ 56 ∧ pos < data.size.toUSize then
+    goCurUW litTable distTable litLD distLD maxBits data maxOut
+      (pos + 1)
+      (bitBuf ||| ((data.uget pos (by
+          have h := USize.lt_iff_toNat_lt.mp hrc.2.2
+          rwa [toUSize_toNat_of_lt hsz] at h)).toUInt64 <<< cnt.toUInt64))
+      (cnt + 8) hsz hlp output outPos
+  else
+    let e := litTable.entryAtU (bitBuf.toUSize &&& 0x7FF)
+      (by rw [hlp]; exact HuffTree.toUSize_and_0x7FF_toNat_lt bitBuf)
+    if hlit : HuffTree.unpackLen e ≠ 0
+        ∧ (HuffTree.unpackLen e).toUSize ≤ cnt
+        ∧ HuffTree.unpackSym e < 256 then
+      goCurUW litTable distTable litLD distLD maxBits data maxOut pos
+        (bitBuf >>> (HuffTree.unpackLen e).toUInt64)
+        (cnt - (HuffTree.unpackLen e).toUSize)
+        hsz hlp
+        (output.uset outPos (HuffTree.unpackSym e).toUInt8 (by omega)) (outPos + 1)
+    else
+    let cnt0 := cnt.toNat
+    match decodeSymCanon litLD litTable maxBits bitBuf cnt.toNat with
+    | .error e => .error e
+    | .ok (sym, bitBuf, cnt', _used) =>
+      if sym < 256 then
+        if hnp : cnt0 ≤ cnt' then throw "Inflate: no progress in Huffman decode"
+        else
+          goCurUW litTable distTable litLD distLD maxBits data maxOut pos bitBuf
+            cnt'.toUSize hsz hlp
+            (output.uset outPos sym.toUInt8 (by omega)) (outPos + 1)
+      else if sym == 256 then
+        .ok (output, outPos, pos, trimBitBufU bitBuf cnt'.toUSize, cnt'.toUSize)
+      else
+        let idx := sym.toNat - 257
+        if h : idx ≥ Inflate.lengthBase.size then throw s!"Inflate: invalid length code {sym}"
+        else
+          let base := Inflate.lengthBase[idx]
+          let extra := Inflate.lengthExtra[idx]'(by simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at h ⊢; omega)
+          let (extraBits, bitBuf, cnt'') ← takeBits bitBuf cnt' extra.toNat
+          let length := base.toNat + extraBits
+          match decodeSymCanon distLD distTable maxBits bitBuf cnt'' with
+          | .error e => .error e
+          | .ok (distSym, bitBuf, cnt3, _dused) =>
+            let dIdx := distSym.toNat
+            if h : dIdx ≥ Inflate.distBase.size then throw s!"Inflate: invalid distance code {distSym}"
+            else
+              let dBase := Inflate.distBase[dIdx]
+              let dExtra := Inflate.distExtra[dIdx]'(by simp [Inflate.distExtra_size, Inflate.distBase_size] at h ⊢; omega)
+              let (dExtraBits, bitBuf, cnt4) ← takeBits bitBuf cnt3 dExtra.toNat
+              let distance := dBase.toNat + dExtraBits
+              if hz : distance = 0 then throw s!"Inflate: zero back-reference distance"
+              else if hds : distance > outPos.toNat then
+                throw s!"Inflate: distance {distance} exceeds output size {outPos.toNat}"
+              else if hlen : length > 258 then throw "Inflate: length exceeds 258"
+              else if hnp : cnt0 ≤ cnt4 then throw "Inflate: no progress in Huffman decode"
+              else
+                let out := if hshort : 8 ≤ distance ∧ length ≤ 8 then
+                  output.copyWithinAtShort outPos distance length hshort.1
+                    (by exact Nat.lt_of_lt_of_le (lengthBase_pos idx (by omega)) (Nat.le_add_right ..)) hshort.2
+                    (by omega) (by omega)
+                else
+                  output.copyWithinAt outPos.toNat distance length
+                goCurUW litTable distTable litLD distLD maxBits data maxOut pos bitBuf
+                  cnt4.toUSize hsz hlp out (outPos + length.toUSize)
+  else
+    goCur litTable distTable litLD distLD maxBits data maxOut pos (trimBitBufU bitBuf cnt) cnt
+      hsz hlp output outPos
+  termination_by (data.size - pos.toNat) * 9 + cnt.toNat
+  decreasing_by
+    all_goals
+      simp_wf
+      subst r
+      subst pos
+      subst cnt
+      try subst bitBuf
+      try subst didWide
+      dsimp only at hwm
+    · obtain ⟨_, hc, hp⟩ := hrc
+      have hbig : (64 : Nat) < 2 ^ System.Platform.numBits :=
+        USize.size_eq_two_pow ▸ Nat.lt_of_lt_of_le (by decide) USize.le_size
+      have hpn : (wideRefillU data pos bitBuf cnt hsz).pos.toNat < data.size := by
+        have h := USize.lt_iff_toNat_lt.mp hp; rwa [toUSize_toNat_of_lt hsz] at h
+      have hcn : (wideRefillU data pos bitBuf cnt hsz).cnt.toNat ≤ 56 := by
+        have h := USize.le_iff_toNat_le.mp hc
+        rwa [USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)] at h
+      have hpa : ((wideRefillU data pos bitBuf cnt hsz).pos.toNat + 1) %
+          2 ^ System.Platform.numBits =
+          (wideRefillU data pos bitBuf cnt hsz).pos.toNat + 1 := by
+        apply Nat.mod_eq_of_lt
+        rw [← USize.size_eq_two_pow]
+        omega
+      have hca : ((wideRefillU data pos bitBuf cnt hsz).cnt.toNat + 8) %
+          2 ^ System.Platform.numBits =
+          (wideRefillU data pos bitBuf cnt hsz).cnt.toNat + 8 := by
+        apply Nat.mod_eq_of_lt
+        rw [← USize.size_eq_two_pow]
+        have hbig' : (64 : Nat) < USize.size := USize.size_eq_two_pow ▸ hbig
+        omega
+      rw [hpa, hca]; omega
+    · obtain ⟨hne, hle, _⟩ := hlit
+      have hne' : (HuffTree.unpackLen e).toNat ≠ 0 := (uint8_ne_zero_iff_toNat _).mp hne
+      have hlen : ((HuffTree.unpackLen e).toUSize).toNat = (HuffTree.unpackLen e).toNat :=
+        UInt8.toNat_toUSize _
+      have hsub : ((wideRefillU data pos bitBuf cnt hsz).cnt -
+          (HuffTree.unpackLen e).toUSize).toNat =
+          (wideRefillU data pos bitBuf cnt hsz).cnt.toNat -
+            (HuffTree.unpackLen e).toNat := by
+        rw [USize.toNat_sub_of_le _ _ hle, hlen]
+      have hlecnt : (HuffTree.unpackLen e).toNat ≤
+          (wideRefillU data pos bitBuf cnt hsz).cnt.toNat :=
+        hlen ▸ USize.le_iff_toNat_le.mp hle
+      rw [hsub]; omega
+    · have hcsz : cnt0 < USize.size := by
+        dsimp only [cnt0]
+        exact USize.toNat_lt_two_pow_numBits _
+      have hb : cnt'.toUSize.toNat = cnt' := toUSize_toNat_of_lt (by omega)
+      rw [Nat.mod_eq_of_lt (by rw [← USize.size_eq_two_pow]; omega)]
+      omega
+    · have hcsz : cnt0 < USize.size := by
+        dsimp only [cnt0]
+        exact USize.toNat_lt_two_pow_numBits _
+      have hb : cnt4.toUSize.toNat = cnt4 := toUSize_toNat_of_lt (by omega)
+      rw [Nat.mod_eq_of_lt (by rw [← USize.size_eq_two_pow]; omega)]
+      omega
+
 /-- Write `bytes[i]` at `output[outPos + i]` for `i ∈ [start, len)` via `set!`,
     by well-founded recursion. A `for i in [:len]` loop would compile to an opaque
     `forIn` that cannot be unfolded in proofs; this WF form lets the stored-block
@@ -400,7 +593,8 @@ def decodeHuffmanCurTables (br : BitReader) (output : ByteArray) (outPos : Nat)
   else
     throw "Inflate: input too large for cursor decode"
 
-/-- `decodeHuffmanCurTables` through the branch-free `uset` fastloop `goCurU`. -/
+/-- `decodeHuffmanCurTables` through the branch-free `uset` fastloop `goCurUW`,
+    with word-at-a-time input refill behind an eight-byte margin. -/
 def decodeHuffmanCurTablesU (br : BitReader) (output : ByteArray) (outPos : Nat)
     (litTable distTable : DecodeTable) (litLD distLD : LongDecode) (maxOut : Nat)
     (hlp : litTable.packed.size = 2 ^ HuffTree.fastBits) :
@@ -411,7 +605,7 @@ def decodeHuffmanCurTablesU (br : BitReader) (output : ByteArray) (outPos : Nat)
   if hsz : br.data.size.toUSize.toNat = br.data.size then
     let hlt : br.data.size < USize.size := by rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
     let (out, outPos', pos', bitBuf', cnt') ←
-      goCurU litTable distTable litLD distLD 15 br.data maxOut
+      goCurUW litTable distTable litLD distLD 15 br.data maxOut
         pos.toUSize bitBuf cnt.toUSize hlt hlp output outPos.toUSize
     let _ := bitBuf'
     let endbit := pos'.toNat * 8 - cnt'.toNat
@@ -458,7 +652,7 @@ def inflateLoopCur (br : BitReader) (output : ByteArray) (outPos : Nat)
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 2000000 in
-/-- `inflateLoopCur` through the branch-free `uset` fastloop `goCurU`. -/
+/-- `inflateLoopCur` through the branch-free `uset` fastloop `goCurUW`. -/
 def inflateLoopCurU (br : BitReader) (output : ByteArray) (outPos : Nat)
     (maxOut dataSize : Nat) : Except String (ByteArray × Nat × Nat) := do
   let (bfinal, br₁) ← br.readBits 1

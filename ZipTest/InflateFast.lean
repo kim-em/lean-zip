@@ -135,6 +135,17 @@ def ZipTest.InflateFast.checkOne (label : String) (data : ByteArray) (level : UI
     | .ok b => assert! b == refOut
     | .error e => throw (IO.userError s!"inflateSized {tag} failed on {label} (level {level}): {e}")
 
+/-- Check an already-encoded raw stream. Used for exact input-margin fixtures
+    whose compressed byte length must not depend on the compressor. -/
+def ZipTest.InflateFast.checkPayload (label : String) (compressed expected : ByteArray) : IO Unit := do
+  let refOut ← match Inflate.inflate compressed with
+    | .ok b => pure b
+    | .error e => throw (IO.userError s!"reference inflate failed on {label}: {e}")
+  assert! refOut == expected
+  match Inflate.inflateFastU compressed (sizeHint := expected.size) with
+  | .ok b => assert! b == refOut
+  | .error e => throw (IO.userError s!"inflateFastU failed on {label}: {e}")
+
 def ZipTest.InflateFast.tests : IO Unit := do
   IO.println "  InflateFast (write-once cursor spike, #2799) tests..."
   ZipTest.InflateFast.ffiConformance
@@ -144,6 +155,16 @@ def ZipTest.InflateFast.tests : IO Unit := do
   ZipTest.InflateFast.checkOne "empty" ByteArray.empty
   ZipTest.InflateFast.checkOne "single" (ByteArray.mk #[42])
   ZipTest.InflateFast.checkOne "hello" hello
+  -- Fixed-Huffman empty block (`BFINAL=1`, `BTYPE=01`, EOB=256): two input
+  -- bytes exercise the byte tail, and the eight-byte spelling checks ignored
+  -- trailing input. These intentionally stay on the cold output tail.
+  ZipTest.InflateFast.checkPayload "fixed-input<8" (ByteArray.mk #[0x03, 0x00]) ByteArray.empty
+  ZipTest.InflateFast.checkPayload "fixed-input=8"
+    (ByteArray.mk #[0x03, 0x00, 0, 0, 0, 0, 0, 0]) ByteArray.empty
+  -- Two empty fixed blocks packed without byte alignment (first non-final,
+  -- second final) cover cold-tail block-to-block cursor reconstruction.
+  ZipTest.InflateFast.checkPayload "fixed-multiblock"
+    (ByteArray.mk #[0x02, 0x0C, 0x00]) ByteArray.empty
   -- Block types across levels: stored (0), fixed/dynamic (1, 6, 9).
   for lvl in [0, 1, 6, 9] do
     ZipTest.InflateFast.checkOne s!"hello@L{lvl}" hello lvl.toUInt8
@@ -155,6 +176,22 @@ def ZipTest.InflateFast.tests : IO Unit := do
   -- Longer varied buffer (multiple dynamic blocks, long matches).
   let varied := ByteArray.mk (Array.ofFn (n := 40000) (fun i => (i.val % 251).toUInt8))
   ZipTest.InflateFast.checkOne "varied" varied
+  -- Force two dynamic Huffman blocks at an explicit token-stream midpoint.
+  -- Both sides produce far more than the 299-byte output margin, so the first
+  -- EOB returns directly from `goCurUW` after trimming speculative wide-load
+  -- bits and the block loop reconstructs the next block cursor from that state.
+  let variedTokens := Zip.Native.Deflate.lzMatch varied 6
+  assert! 2 ≤ variedTokens.size
+  let variedMulti := (Zip.Native.Deflate.emitSharedBlocksAt varied variedTokens
+    [variedTokens.size / 2] 0 Zip.Native.BitWriter.empty).flush
+  ZipTest.InflateFast.checkPayload "wide-multiblock" variedMulti varied
+  -- Sweep the input-margin transition independently of compressor output. The
+  -- larger payload takes the wide path; ignored trailing bytes move the final
+  -- `pos + 8 ≤ size` cutoff through every residue and back to the byte tail.
+  let variedCompressed ← RawDeflate.compress varied 6
+  for pad in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16] do
+    let padded := (List.range pad).foldl (fun a _ => a.push 0) variedCompressed
+    ZipTest.InflateFast.checkPayload s!"input-margin+{pad}" padded varied
   -- Margin-boundary sizes: the `uset` fastloop's per-symbol `outPos + 299 ≤
   -- output.size` guard transitions here between the hot margin body and the
   -- `< 299`-byte tail delegation to `goCur`. Sweep both sides across levels.

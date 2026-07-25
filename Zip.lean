@@ -55,6 +55,7 @@ import Zip.Spec.EmitPackedCorrect
 import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.InflateBufCorrect
 import Zip.Spec.InflateTreeFreeCorrect
+import Zip.Spec.InflateFastCorrect
 import Zip.Spec.InflateBufRoundtrip
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.DeflateDynamicEmit
