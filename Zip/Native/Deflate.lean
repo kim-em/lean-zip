@@ -3124,4 +3124,84 @@ def deflateLazy (data : ByteArray) : ByteArray :=
 def deflateLazyIter (data : ByteArray) : ByteArray :=
   deflateFixedBlock data (lz77LazyIter data)
 
+/-! ## Packed distance-table implementation correctness -/
+
+private theorem packCodeBytesList_get_lt (xs : List UInt32) (acc : ByteArray)
+    (j : Nat) (hj : j < acc.size)
+    (hfold : j < (xs.foldl (fun b w => b.pushUInt32LE w) acc).size) :
+    (xs.foldl (fun b w => b.pushUInt32LE w) acc)[j]'hfold = acc[j]'hj := by
+  induction xs generalizing acc with
+  | nil => rfl
+  | cons x xs ih =>
+    simp only [List.foldl_cons]
+    have hfold' : j < (xs.foldl (fun b w => b.pushUInt32LE w)
+        (acc.pushUInt32LE x)).size := by
+      simpa only [List.foldl_cons] using hfold
+    calc
+      (xs.foldl (fun b w => b.pushUInt32LE w) (acc.pushUInt32LE x))[j]'hfold' =
+          (acc.pushUInt32LE x)[j]'(by rw [ByteArray.size_pushUInt32LE]; omega) :=
+        ih (acc := acc.pushUInt32LE x) (by rw [ByteArray.size_pushUInt32LE]; omega) hfold'
+      _ = acc[j]'hj := ByteArray.getElem_pushUInt32LE_lt acc x hj _
+
+private theorem packCodeBytesList_get_word (xs : List UInt32) (acc : ByteArray)
+    (i : Nat) (hi : i < xs.length) :
+    let b := xs.foldl (fun b w => b.pushUInt32LE w) acc
+    (b[acc.size + 4 * i]'(by rw [packCodeBytesList_size]; omega)).toUInt32 |||
+      ((b[acc.size + 4 * i + 1]'(by rw [packCodeBytesList_size]; omega)).toUInt32 <<< 8) |||
+      ((b[acc.size + 4 * i + 2]'(by rw [packCodeBytesList_size]; omega)).toUInt32 <<< 16) |||
+      ((b[acc.size + 4 * i + 3]'(by rw [packCodeBytesList_size]; omega)).toUInt32 <<< 24) =
+        xs[i] := by
+  induction xs generalizing acc i with
+  | nil => simp at hi
+  | cons x xs ih =>
+    cases i with
+    | zero =>
+      simp only [List.foldl_cons, Nat.mul_zero, Nat.add_zero, List.getElem_cons_zero]
+      rw [packCodeBytesList_get_lt xs (acc.pushUInt32LE x) acc.size
+            (by rw [ByteArray.size_pushUInt32LE]; omega),
+          packCodeBytesList_get_lt xs (acc.pushUInt32LE x) (acc.size + 1)
+            (by rw [ByteArray.size_pushUInt32LE]; omega),
+          packCodeBytesList_get_lt xs (acc.pushUInt32LE x) (acc.size + 2)
+            (by rw [ByteArray.size_pushUInt32LE]; omega),
+          packCodeBytesList_get_lt xs (acc.pushUInt32LE x) (acc.size + 3)
+            (by rw [ByteArray.size_pushUInt32LE]; omega),
+          ByteArray.getElem_pushUInt32LE_size,
+          ByteArray.getElem_pushUInt32LE_offset (k := 1),
+          ByteArray.getElem_pushUInt32LE_offset (k := 2),
+          ByteArray.getElem_pushUInt32LE_offset (k := 3)]
+      exact ByteArray.uint32_le_roundtrip x
+      all_goals omega
+    | succ i =>
+      have hi' : i < xs.length := by simpa using hi
+      have h := ih (acc := acc.pushUInt32LE x) i hi'
+      simp only [List.foldl_cons, List.getElem_cons_succ] at ⊢
+      simpa only [ByteArray.size_pushUInt32LE, Nat.mul_succ, Nat.add_assoc,
+        Nat.add_left_comm, Nat.add_comm] using h
+
+private theorem packCodeBytes_ugetUInt32LE (xs : Array UInt32) (i : Nat)
+    (hi : i < xs.size) (hoff : (4 * i).toUSize.toNat = 4 * i) :
+    (xs.foldl (fun b w => b.pushUInt32LE w) ByteArray.empty).ugetUInt32LE
+        (4 * i).toUSize (by rw [hoff, packCodeBytes_size]; omega) = xs[i] := by
+  simp only [ByteArray.ugetUInt32LE, hoff]
+  have hiL : i < xs.toList.length := by simpa using hi
+  have h := packCodeBytesList_get_word xs.toList ByteArray.empty i hiL
+  simpa only [Array.foldl_toList, Array.getElem_toList, ByteArray.size_empty,
+    Nat.zero_add] using h
+
+/-- The packed `ByteArray` implementation used by native code is extensionally
+    equal to the proof-facing `Array UInt32` lookup. -/
+theorem distCodeWordBytesImpl_eq_distCodeWord (dist : Nat) :
+    distCodeWordBytesImpl dist = distCodeWord dist := by
+  by_cases h : dist < 32769
+  · simp only [distCodeWordBytesImpl, distCodeWord, h, ↓reduceDIte]
+    have hoff : (4 * dist).toUSize.toNat = 4 * dist := by
+      simp only [Nat.toUSize]
+      apply Nat.mod_eq_of_lt
+      exact Nat.lt_of_lt_of_le (by omega) USize.le_size
+    let tab := (Array.range 32769).map (fun d => packCode (findDistCode d))
+    have htab : dist < tab.size := by simp only [tab, Array.size_map, Array.size_range]; exact h
+    simpa only [distCodeWordBytes, distCodeWordTab, tab] using
+      packCodeBytes_ugetUInt32LE tab dist htab hoff
+  · simp only [distCodeWordBytesImpl, distCodeWord, h, ↓reduceDIte]
+
 end Zip.Native.Deflate
