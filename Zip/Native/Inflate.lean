@@ -307,6 +307,29 @@ theorem and_0x7FF_toUSize_toNat_eq (bitBuf : UInt64) :
   have h2 : (2047 : Nat) < USize.size := Nat.lt_of_lt_of_le (by decide) USize.le_size
   omega
 
+/-- The native-word spelling of the 11-bit fast-table window is in bounds. -/
+theorem toUSize_and_0x7FF_toNat_lt (bitBuf : UInt64) :
+    (bitBuf.toUSize &&& 0x7FF).toNat < 2 ^ fastBits := by
+  rw [USize.toNat_and]
+  apply Nat.and_lt_two_pow
+  rw [USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+  decide
+
+theorem and_0x7FF_toUSize_eq_toUSize_and (bitBuf : UInt64) :
+    (bitBuf &&& 0x7FF).toUSize = bitBuf.toUSize &&& 0x7FF := by
+  apply USize.toNat_inj.mp
+  rw [and_0x7FF_toUSize_toNat_eq, USize.toNat_and,
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+  rw [UInt64.toNat_and]
+  have hm64 : (0x7FF : UInt64).toNat = 2047 := rfl
+  rw [hm64]
+  have hm : (2047 : Nat) = 2 ^ 11 - 1 := by decide
+  rw [hm, Nat.and_two_pow_sub_one_eq_mod]
+  rw [UInt64.toNat_toUSize]
+  change bitBuf.toNat % 2 ^ 11 = (bitBuf.toNat % USize.size) &&& (2 ^ 11 - 1)
+  rw [Nat.and_two_pow_sub_one_eq_mod, USize.size_eq_two_pow, Nat.mod_mod_of_dvd]
+  exact Nat.pow_dvd_pow 2 (Nat.le_trans (by omega) System.Platform.le_numBits)
+
 /-- Reading the `fastBits`-bit window slot by `uget` on the `USize` index equals the
     guarded `entryAt` read on the `Nat` index — the bridge that carries the tree-free
     loop's `uget` optimization back to the boxed reference's `entryAt`/`lenAt`. -/
@@ -314,6 +337,14 @@ theorem and_0x7FF_toUSize_toNat_eq (bitBuf : UInt64) :
     (h : ((bitBuf &&& 0x7FF).toUSize).toNat < t.packed.size) :
     t.entryAtU (bitBuf &&& 0x7FF).toUSize h = t.entryAt (bitBuf &&& 0x7FF).toNat := by
   rw [entryAtU_eq_entryAt, and_0x7FF_toUSize_toNat_eq]
+
+theorem DecodeTable.entryAtU_native_window_eq (t : DecodeTable) (bitBuf : UInt64)
+    (h : (bitBuf.toUSize &&& 0x7FF).toNat < t.packed.size) :
+    t.entryAtU (bitBuf.toUSize &&& 0x7FF) h = t.entryAt (bitBuf &&& 0x7FF).toNat := by
+  rw [entryAtU_eq_entryAt]
+  congr 1
+  exact (congrArg USize.toNat (and_0x7FF_toUSize_eq_toUSize_and bitBuf).symm).trans
+    (and_0x7FF_toUSize_toNat_eq bitBuf)
 
 /-- Build the `2^fastBits`-entry decode table for `tree`: slot `i` holds
     `packEntry sym codeLen` for the `(sym, codeLen)` reached by walking `tree` on
@@ -1019,6 +1050,60 @@ theorem refillGuard_usize (data : ByteArray) (pos cnt : USize) (hsz : data.size 
       ↔ (cnt.toNat ≤ 56 ∧ pos.toNat < data.size) := by
   rw [USize.le_iff_toNat_le, USize.lt_iff_toNat_lt, toUSize_toNat_of_lt hsz,
       USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+
+/-- The input-margin guard in `USize`, written with guarded subtraction so the
+    addition cannot wrap at the top of the address space. -/
+theorem refillGuardWide_usize (data : ByteArray) (pos cnt : USize) (hsz : data.size < USize.size) :
+    (cnt ≤ (56 : USize) ∧ (8 : USize) ≤ data.size.toUSize ∧ pos ≤ data.size.toUSize - 8)
+      ↔ (cnt.toNat ≤ 56 ∧ pos.toNat + 8 ≤ data.size) := by
+  have h56 : (56 : USize).toNat = 56 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have h8 : (8 : USize).toNat = 8 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have hsize : data.size.toUSize.toNat = data.size := toUSize_toNat_of_lt hsz
+  rw [USize.le_iff_toNat_le, USize.le_iff_toNat_le, USize.le_iff_toNat_le, h56, h8, hsize]
+  constructor
+  · rintro ⟨hc, h8le, hp⟩
+    rw [USize.toNat_sub_of_le _ _ (USize.le_iff_toNat_le.mpr (by rw [h8, hsize]; omega)),
+        h8, hsize] at hp
+    exact ⟨hc, by omega⟩
+  · rintro ⟨hc, hp⟩
+    refine ⟨hc, by omega, ?_⟩
+    rw [USize.toNat_sub_of_le _ _ (USize.le_iff_toNat_le.mpr (by rw [h8, hsize]; omega)),
+        h8, hsize]
+    omega
+
+/-- The wide refill's byte advance, expressed in `USize`, round-trips to the
+    corresponding natural-number division while a top-up is required. -/
+theorem wideRefillK_toNat (cnt : USize) (hcnt : cnt.toNat ≤ 56) :
+    (((64 - cnt) >>> 3 : USize).toNat) = (64 - cnt.toNat) / 8 := by
+  have h64 : (64 : USize).toNat = 64 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have h3 : (3 : USize).toNat = 3 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  rw [USize.toNat_shiftRight, USize.toNat_sub_of_le _ _
+    (USize.le_iff_toNat_le.mpr (by rw [h64]; omega)), h64, h3]
+  simp only [Nat.shiftRight_eq_div_pow]
+  rcases System.Platform.numBits_eq with h | h <;> simp [h]
+
+/-- The exact counted-bit update adds eight bits per advanced byte. -/
+theorem wideRefillCnt_toNat (cnt : USize) (hcnt : cnt.toNat ≤ 56) :
+    (64 - ((64 - cnt) &&& 7) : USize).toNat =
+      cnt.toNat + 8 * ((64 - cnt.toNat) / 8) := by
+  have h64 : (64 : USize).toNat = 64 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have h7 : (7 : USize).toNat = 7 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have hsub : (64 - cnt : USize).toNat = 64 - cnt.toNat := by
+    rw [USize.toNat_sub_of_le _ _ (USize.le_iff_toNat_le.mpr (by rw [h64]; omega)), h64]
+  have hand : ((64 - cnt) &&& 7 : USize).toNat = (64 - cnt.toNat) % 8 := by
+    rw [USize.toNat_and, hsub, h7, show 7 = 2 ^ 3 - 1 by decide,
+      Nat.and_two_pow_sub_one_eq_mod]
+  rw [USize.toNat_sub_of_le _ _ (USize.le_iff_toNat_le.mpr (by
+    rw [h64, hand]
+    have := Nat.mod_lt (64 - cnt.toNat) (by decide : 0 < 8)
+    omega)), h64, hand]
+  omega
 
 /-- The inline-literal guard reads the packed entry **once** (`entryAt`) and tests
     `len`/`sym` in their native `UInt8`/`UInt16` widths; this matches the boxed
