@@ -260,14 +260,22 @@ theorem ByteArray.ugetUInt64LE_byte (a : ByteArray) (off : USize)
     a[off.toNat + 4] a[off.toNat + 5] a[off.toNat + 6] a[off.toNat + 7]
   obtain ⟨h0, h1, h2, h3, h4, h5, h6, h7⟩ := hb
   rcases hcases with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
-  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h0
-  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h1
-  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h2
-  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h3
-  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h4
-  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h5
-  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h6
-  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64] using h7
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64,
+      show ((0 : UInt64) <<< 3) = 0 from rfl] using h0
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64,
+      show ((1 : UInt64) <<< 3) = 8 from rfl] using h1
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64,
+      show ((2 : UInt64) <<< 3) = 16 from rfl] using h2
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64,
+      show ((3 : UInt64) <<< 3) = 24 from rfl] using h3
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64,
+      show ((4 : UInt64) <<< 3) = 32 from rfl] using h4
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64,
+      show ((5 : UInt64) <<< 3) = 40 from rfl] using h5
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64,
+      show ((6 : UInt64) <<< 3) = 48 from rfl] using h6
+  · simpa [ByteArray.ugetUInt64LE, Nat.toUInt64,
+      show ((7 : UInt64) <<< 3) = 56 from rfl] using h7
 
 theorem UInt64.blendLE_byte (src dst : UInt64) (len k : Nat)
     (hlenpos : 0 < len) (hlen : len ≤ 8) (hk : k < 8) :
@@ -3751,7 +3759,7 @@ theorem inflateLoopCurU_eq (maxOut dataSize : Nat) :
         have hflFast : ∀ b : UInt64,
             (Inflate.fixedLitTF.1.lenAt (b &&& 0x7FF).toNat).toNat ≤ HuffTree.fastBits := by
           intro b
-          simpa only [Inflate.fixedLitTF, Inflate.fixedLitCount] using
+          simpa only [Inflate.fixedLitTF, Inflate.fixedLitCount, HuffTree.fastBits] using
             treeFree_len_le Inflate.fixedLitLengths hflv (by decide) b
         have hflUsed : ∀ b n s bb c used,
             HuffTree.decodeSymCanon Inflate.fixedLitTF.2 Inflate.fixedLitTF.1 15 b n =
@@ -3800,8 +3808,20 @@ theorem inflateLoopCurU_eq (maxOut dataSize : Nat) :
             obtain ⟨o', p', b'⟩ := r
             simp only [hb, bind, Except.bind]
             exact htail o' p' b' (by rw [decodeStoredCur_size hb]; exact hsize)
-        · rw [decodeHuffmanCurTablesU_eq br₂ output outPos _ _ _ _ maxOut _
-              hflFast hflUsed hfdUsed hbo₂ hbp₂ hsize]
+        · -- Quantify over the `packed.size` proof: applied directly, its argument
+          -- elaborates to a term that no longer matches the `_proof_1` the goal
+          -- carries, and neither `rw` nor `simp only` finds the occurrence.
+          have key : ∀ hlp : (HuffTree.buildTreeFreeWithCount Inflate.fixedLitLengths
+                Inflate.fixedLitCount 15).1.packed.size = 2 ^ HuffTree.fastBits,
+              InflateBuf.decodeHuffmanCurTablesU br₂ output outPos
+              Inflate.fixedLitTF.1 Inflate.fixedDistTF.1 Inflate.fixedLitTF.2
+              Inflate.fixedDistTF.2 maxOut hlp
+              = InflateBuf.decodeHuffmanCurTables br₂ output outPos
+                  Inflate.fixedLitTF.1 Inflate.fixedDistTF.1 Inflate.fixedLitTF.2
+                  Inflate.fixedDistTF.2 maxOut hlp := fun hlp =>
+            decodeHuffmanCurTablesU_eq br₂ output outPos _ _ _ _ maxOut hlp
+              hflFast hflUsed hfdUsed hbo₂ hbp₂ hsize
+          rw [key]
           cases hb : InflateBuf.decodeHuffmanCurTables br₂ output outPos
               Inflate.fixedLitTF.1 Inflate.fixedDistTF.1 Inflate.fixedLitTF.2 Inflate.fixedDistTF.2 maxOut
               (HuffTree.buildTreeFreeWithCount_size Inflate.fixedLitLengths Inflate.fixedLitCount 15) with
@@ -3856,6 +3876,7 @@ theorem inflateRawFastU_eq (data : ByteArray) (startPos maxOutputSize sizeHint :
   unfold Inflate.inflateRawFastU Inflate.inflateRawFast
   by_cases hg : sizeHint > maxOutputSize
   · simp only [if_pos hg, bind, Except.bind]
+    rfl
   · have hpsz : (ByteArray.presize sizeHint).size = sizeHint := by
       simp only [ByteArray.presize, ByteArray.size, Array.size_replicate]
     simp only [if_neg hg, bind, Except.bind,

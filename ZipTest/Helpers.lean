@@ -4,9 +4,7 @@ import Zip
 
 set_option maxRecDepth 2048
 
-/-- Check that two byte arrays are equal. -/
-def ByteArray.beq (a b : ByteArray) : Bool :=
-  a.data == b.data
+-- `ByteArray.beq` is in core as of v4.33.0-rc1, with the same meaning.
 
 /-- Read a test fixture from testdata/ directory. -/
 def readFixture (path : String) : IO ByteArray :=

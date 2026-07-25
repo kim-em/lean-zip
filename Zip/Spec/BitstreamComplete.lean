@@ -113,7 +113,7 @@ protected theorem readBits_go_complete (br : ZipCommon.BitReader) (acc : UInt32)
         -- Bound on v
         have hv_bound : v < 2 ^ k := by
           have : (if b then 1 else 0) + v * 2 = specVal := hval
-          cases b <;> simp only [ite_true] at this <;> omega
+          cases b <;> simp at this <;> omega
         -- Apply IH
         rw [← hbr1_bits, hrst] at hk
         obtain ⟨result, br', hgo, hresult, hbr'_bits, hwf', hpos'⟩ := ih br₁

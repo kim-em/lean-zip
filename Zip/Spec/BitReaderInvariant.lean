@@ -165,7 +165,6 @@ theorem decodeHuffman_go_inv (litTree distTree : HuffTree)
   | error e => rw [hlit] at h; simp only [Bind.bind, Except.bind] at h; exact nomatch h
   | ok p =>
     obtain ⟨sym, br₁⟩ := p; rw [hlit] at h; dsimp only [Bind.bind, Except.bind] at h
-    simp only [pure, Except.pure] at h
     have ⟨hd₁, hpos₁, hple₁⟩ := decode_inv litTree br br₁ sym hlit hpos hple
     split at h
     · -- sym < 256: literal byte
@@ -310,7 +309,6 @@ theorem decodeCLSymbols_inv (clTree : HuffTree) (br br' : BitReader)
     split at h
     · exact nomatch h  -- decode error
     · rename_i v hdec_eq
-      simp only [pure, Except.pure] at h
       obtain ⟨sym, br₁⟩ := v; simp only [] at hdec_eq h
       have ⟨hd₁, hpos₁, hple₁⟩ := decode_inv clTree br br₁ sym hdec_eq hpos hple
       split at h

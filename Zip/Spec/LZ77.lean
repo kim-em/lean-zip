@@ -390,7 +390,6 @@ private theorem findLongestMatch.go_inv (data : List UInt8) (pos d maxDist : Nat
     apply findLongestMatch.go_inv data pos (d + 1) maxDist _ _ (by omega)
       _ _ hgo
     intro l d' hbd'
-    simp only at hbd'
     cases hm : best with
     | none =>
       simp only [hm, ge_iff_le, Option.ite_none_right_eq_some, Option.some.injEq,

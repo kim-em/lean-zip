@@ -335,19 +335,19 @@ protected theorem readBitsLSB_split (m n : Nat) (bits : List Bool) :
       -- Apply IH to readBitsLSB (k + n) rest in the LHS
       rw [ih rest]
       -- Both sides now match on readBitsLSB k rest
+      -- `simp only [bind, Option.bind]` no longer reduces these; the monad
+      -- lemmas do (and are what the theorem above already uses).
       cases hk : Deflate.Spec.readBitsLSB k rest with
-      | none => dsimp only [bind, Option.bind]
+      | none => simp only [Option.pure_def, Option.bind_eq_bind, Option.bind_none]
       | some p =>
         obtain ⟨v1, rest'⟩ := p
-        simp only [bind, Option.bind]
+        simp only [Option.pure_def, Option.bind_eq_bind, Option.bind_some]
         cases hn : Deflate.Spec.readBitsLSB n rest' with
-        | none => simp only []
+        | none => simp only [Option.bind_none]
         | some q =>
           obtain ⟨v2, rest''⟩ := q
-          simp only []
-          congr 1; ext1
-          · rw [Nat.pow_succ, ← Nat.mul_assoc, Nat.add_mul]; split <;> omega
-          · rfl
+          simp only [Option.bind_some, Option.some.injEq, Prod.mk.injEq, and_true]
+          rw [Nat.add_mul, Nat.pow_succ, ← Nat.mul_assoc, ← Nat.add_assoc]
 
 /-- Reading 8 bits from a byte's bit representation recovers the byte value. -/
 private theorem readBitsLSB_byteToBits (b : UInt8) (rest : List Bool) :
@@ -364,7 +364,7 @@ private theorem bytesToBits_getElem (data : ByteArray) (pos : Nat) (hpos : pos <
         (Deflate.Spec.bytesToBits data).drop ((pos + 1) * 8) := by
   simp only [Deflate.Spec.bytesToBits, ByteArray.size] at *
   have hlen := Deflate.Spec.bytesToBits.byteToBits_length
-  rw [List.flatMap_uniform_drop (fun b => hlen b) data.data.toList pos (by simpa only [Array.length_toList] using hpos)]
+  rw [List.flatMap_uniform_drop (fun b => hlen b) data.data.toList pos (by simp only [Array.length_toList]; exact hpos)]
   simp only [Array.getElem_toList]; rfl
 
 /-- From a byte-aligned reader, `readBitsLSB 8` produces the next byte value. -/

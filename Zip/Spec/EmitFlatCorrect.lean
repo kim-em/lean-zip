@@ -224,7 +224,6 @@ private theorem flat_emitRefWithCodesPT_eq (bw : BitWriter)
   simp only [packCodeTab, Array.size_map, Array.getElem_map,
     writeRevCode_packCodeEntry_eq, BitWriter.writeRevCodeExtra_eq,
     flat_codeExtra_lt_256]
-  rfl
 
 /-- A bounded shifted `UInt64` pair does not wrap, so its `toNat` view is the
     corresponding Nat shift/OR. -/
@@ -314,7 +313,6 @@ private theorem writeBits64_pair_spec (bw : BitWriter) (a b : UInt64)
     simp only [Nat.toUInt64, UInt64.toNat_ofNat']
     rw [Nat.mod_eq_of_lt]
     have := n.toNat_lt
-    simp only [UInt32.size] at this
     omega
   have hpacked : (a ||| (b <<< n.toUInt64)).toNat < 2 ^ (n + m).toNat := by
     rw [hadd, ← hcast]
@@ -490,7 +488,6 @@ private theorem emitRefWithCodesPTFlatStep_spec (fbw rbw : BitWriter)
     rw [flat_emitRefWithCodesPT_eq]
     unfold emitRefWithCodesP
     simp only [len, dist, hei, hee, hcv, hdi, hde, hdv, hl, hd, dif_pos, le, de]
-    congr
   have hw1 := BitWriter.writeHuffCode_wf rbw le.1 le.2 hrwf
     (by simpa only [le] using hllen)
   have hb1 := BitWriter.writeHuffCode_toBits rbw le.1 le.2 hrwf
