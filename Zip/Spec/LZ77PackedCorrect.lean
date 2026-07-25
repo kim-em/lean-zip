@@ -3,6 +3,7 @@ import Zip.Spec.LZ77ChainLazyCorrect
 import Zip.Spec.LZ77MergedCorrect
 import Zip.Spec.EmitFlatCorrect
 import Zip.Native.DeflateDynamic
+import Zip.Spec.LZ77L5Correct
 
 /-!
 # Correctness of the packed-token matcher twins (Wave 3b stage A)

@@ -3,6 +3,7 @@ import Zip.Native.DeflateFreqs
 import Zip.Native.DeflateFreqsFused
 import Zip.Spec.DeflateFreqsFusedCorrect
 import Zip.Native.DeflateParse
+import Zip.Native.DeflateL5
 import Zip.Spec.DeflateEncodeDynamic
 import Zip.Spec.DeflateStoredCorrect
 import Zip.Spec.EmitTokensCorrect
