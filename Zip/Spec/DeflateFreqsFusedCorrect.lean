@@ -1,5 +1,6 @@
 import Zip.Native.DeflateFreqsFused
 import Zip.Spec.DeflateFreqsAdditive
+import Zip.Spec.LZ77ChainCorrect
 
 /-!
 # Correctness of the fused greedy matcher
@@ -385,26 +386,29 @@ theorem lz77GreedyMergedLoopFU64_spec (data : ByteArray)
       have hcap : acc.toArray.size + 1 < UInt64.size := by
         have hdata := byteArray_size_lt_uint64 data haddr
         omega
+      simp only [chainWalkPackedUUChecked_low, chainWalkPackedUUChecked_high]
       split
-      · split
-        · refine ih _ (by omega) _ _ _ _ ?_ ?_ rfl
-          · rw [TokenArray.push_toArray, Array.size_push]
-            omega
-          · rw [TokenArray.push_toArray]
-            exact bumpRefFreqU64_rep freqs acc.toArray _
-              (packTok_reference_tag _ _) hrep hcap
+      all_goals
+        split
+        · split
+          · refine ih _ (by omega) _ _ _ _ ?_ ?_ rfl
+            · rw [TokenArray.push_toArray, Array.size_push]
+              omega
+            · rw [TokenArray.push_toArray]
+              exact bumpRefFreqU64_rep freqs acc.toArray _
+                (packTok_reference_tag _ _) hrep hcap
+          · refine ih _ (by omega) _ _ _ _ ?_ ?_ rfl
+            · rw [TokenArray.push_toArray, Array.size_push]
+              omega
+            · rw [TokenArray.push_toArray]
+              exact bumpLitFreqU64_rep freqs acc.toArray _
+                (packTok_literal_tag _) hrep hcap
         · refine ih _ (by omega) _ _ _ _ ?_ ?_ rfl
           · rw [TokenArray.push_toArray, Array.size_push]
             omega
           · rw [TokenArray.push_toArray]
             exact bumpLitFreqU64_rep freqs acc.toArray _
               (packTok_literal_tag _) hrep hcap
-      · refine ih _ (by omega) _ _ _ _ ?_ ?_ rfl
-        · rw [TokenArray.push_toArray, Array.size_push]
-          omega
-        · rw [TokenArray.push_toArray]
-          exact bumpLitFreqU64_rep freqs acc.toArray _
-            (packTok_literal_tag _) hrep hcap
     · simp only [hlt, ↓reduceDIte]
       exact trailingPFU64_spec data pos acc freqs haddr hsize hrep
 
@@ -579,8 +583,8 @@ theorem trailingPF_spec (data : ByteArray) (pos : Nat) (acc : TokenArray)
 
 /-- The `Array UInt32` view of the greedy `TokenArray` trailing loop is the
     boxed-model `trailingP` on the viewed accumulator (stage 2/7 bridge). Local
-    copy of `Zip.Spec.LZ77MergedCorrect.trailingPT_toArray` to avoid importing that
-    module's transitive `LZ77ChainCorrect` (a name-clash source) into this file. -/
+    copy of `Zip.Spec.LZ77MergedCorrect.trailingPT_toArray` to avoid importing the
+    broader merged-matcher correctness module solely for this bridge. -/
 private theorem trailingPT_toArray (data : ByteArray) (pos : Nat) (acc : TokenArray) :
     (trailingPT data pos acc).toArray = trailingP data pos acc.toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with

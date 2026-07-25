@@ -470,7 +470,7 @@ private theorem updateHashes_eq (data : ByteArray) (hashSize : Nat)
     · simp only [hj, ↓reduceIte]
 
 /-- The iterative `trailing` is the accumulator version of recursive `trailing`. -/
-private theorem trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
+private theorem fixed_trailing_eq (data : ByteArray) (pos : Nat) (acc : Array LZ77Token) :
     lz77GreedyIter.trailing data pos acc =
     acc ++ (lz77Greedy.trailing data pos).toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
@@ -583,7 +583,7 @@ private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
         rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl,
             List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
     · simp only [hlt, ↓reduceDIte]
-      exact trailing_eq data pos acc
+      exact fixed_trailing_eq data pos acc
 
 /-- The iterative LZ77 greedy matcher produces the same tokens as the
     recursive version. -/
@@ -591,7 +591,7 @@ theorem lz77GreedyIter_eq_lz77Greedy (data : ByteArray) (ws : Nat) :
     lz77GreedyIter data ws = lz77Greedy data ws := by
   unfold lz77GreedyIter lz77Greedy
   split
-  · rw [trailing_eq]
+  · rw [fixed_trailing_eq]
     simp only [List.append_toArray, List.nil_append]
   · rw [mainLoop_eq _ _ _ _ _ _ _ (by simp) (by simp) (by decide)]
     simp only [List.append_toArray, List.nil_append]

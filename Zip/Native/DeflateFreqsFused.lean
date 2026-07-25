@@ -237,25 +237,29 @@ def lz77GreedyMergedLoopFU64 (data : ByteArray)
     let c := guardedSet c (pos &&& 0x7FFF) head
     let maxLen := min 258 (data.size - pos)
     have hmaxLenP : pos + maxLen ≤ data.size := by omega
-    let r := chainWalkGuardedPackedU data c windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
-    let matchLen := r % 512
-    let matchPos := r / 512
-    if hge : matchLen ≥ 3 then
-      if hle : pos + matchLen ≤ data.size then
-        have : data.size - (pos + matchLen) < data.size - pos := by omega
-        let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
-        let w := packTok (.reference matchLen (pos - matchPos))
-        let freqs := bumpRefLitFreqU64 freqs w
-        lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen c
-          (pos + matchLen) (acc.push w) (bumpRefDistFreqU64 freqs w)
+    let next (matchLen matchPos : Nat) :=
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
+          let w := packTok (.reference matchLen (pos - matchPos))
+          let freqs := bumpRefLitFreqU64 freqs w
+          lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen c
+            (pos + matchLen) (acc.push w) (bumpRefDistFreqU64 freqs w)
+        else
+          let w := packTok (.literal (data[pos]'(by omega)))
+          lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen c
+            (pos + 1) (acc.push w) (bumpLitFreqU64 freqs w)
       else
         let w := packTok (.literal (data[pos]'(by omega)))
         lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen c
           (pos + 1) (acc.push w) (bumpLitFreqU64 freqs w)
+    if hg : chainWalkPackedUUSafe data c windowSize maxLen head maxChain then
+      let r := chainWalkPackedUUChecked data c windowSize pos maxLen niceLen hmaxLenP head maxChain hg
+      next (r &&& 0x1FF).toNat (r >>> 9).toNat
     else
-      let w := packTok (.literal (data[pos]'(by omega)))
-      lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen c
-        (pos + 1) (acc.push w) (bumpLitFreqU64 freqs w)
+      let r := chainWalkGuardedPackedU data c windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
+      next (r % 512) (r / 512)
   else
     trailingPFU64 data pos acc freqs
 termination_by data.size - pos
