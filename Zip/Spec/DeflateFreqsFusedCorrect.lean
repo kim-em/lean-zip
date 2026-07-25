@@ -1,6 +1,6 @@
 import Zip.Native.DeflateFreqsFused
 import Zip.Spec.DeflateFreqsAdditive
-import Zip.Spec.LZ77ChainCorrect
+import Zip.Spec.LZ77MergedCorrect
 
 /-!
 # Correctness of the fused greedy matcher
@@ -92,6 +92,189 @@ theorem getFusedFreqBytes_init (idx : Nat) (hidx : idx < fusedFreqBinCount) :
     getFusedFreqBytes initFusedFreqBytes idx hidx = 0 := by
   simp only [getFusedFreqBytes, initFusedFreqBytes, ByteArray.ugetUInt64LE]
   simp [ByteArray.getElem_eq_getElem_data, fusedFreqByteCount, fusedFreqBinCount]
+
+/-- The fixed level-one native hash is exactly the generic 65536-bucket hash.
+    Its omitted modulus is inert because the shifted `UInt32` already fits in
+    16 bits. -/
+private theorem hash3L1U_toNat_eq (data : ByteArray) (dataSizeU pU : USize)
+    (hds : dataSizeU.toNat = data.size)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (hp : pU.toNat + 2 < data.size) :
+    (hash3L1U data dataSizeU pU hds hfit hp).toNat =
+      lz77Greedy.hash3 data pU.toNat 65536 hp := by
+  have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+  have hsz : data.size < USize.size := by omega
+  have hround : data.size.toUSize.toNat = data.size := toUSize_toNat_of_lt hsz
+  have h4v : (4 : USize).toNat = 4 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have ep4 : (pU + 4).toNat = pU.toNat + 4 := by
+    rw [USize.toNat_add, h4v]
+    apply Nat.mod_eq_of_lt
+    omega
+  have h4iff : pU + 4 ≤ dataSizeU ↔ pU.toNat + 4 ≤ data.size := by
+    rw [USize.le_iff_toNat_le, ep4, hds]
+  have hpUeq : pU.toNat.toUSize = pU := USize.ofNat_toNat
+  have hhigh (word : UInt32) : ((word * 0x1E35A7BD) >>> 16).toNat < 65536 := by
+    rw [UInt32.toNat_shiftRight, show ((16 : UInt32).toNat % 32) = 16 from rfl]
+    have := UInt32.toNat_lt (word * 0x1E35A7BD)
+    omega
+  unfold hash3L1U lz77Greedy.hash3
+  by_cases h4 : pU.toNat + 4 ≤ data.size
+  · rw [dif_pos (h4iff.mpr h4), dif_pos h4, dif_pos hround]
+    simp only [hpUeq, UInt32.toNat_toUSize, Nat.mod_eq_of_lt (hhigh _)]
+  · rw [dif_neg (fun h => h4 (h4iff.mp h)), dif_neg h4,
+      UInt32.toNat_toUSize, Nat.mod_eq_of_lt (hhigh _)]
+
+/-- One native cap-2 insertion is the corresponding guarded `Nat` insertion
+    step, before the latter's recursive call. -/
+private theorem insertHashL1U_eq (data : ByteArray) (prevSize pos j : Nat)
+    (dataSizeU prevSizeU posU jU : USize) (c : Array Nat)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hposU : posU.toNat = pos) (hjU : jU.toNat = j)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (hprev : prevSize ≤ chainWinSize)
+    (hcs : prevSize + 65536 ≤ c.size) (hpos : posU.toNat ≤ data.size)
+    (hj : jU.toNat ≤ 2) :
+    (insertHashL1U data prevSize dataSizeU prevSizeU posU jU c
+      hds hpsU hfit hprev hcs hpos hj).val =
+      if h : pos + j + 2 < data.size then
+        let hsh := lz77Greedy.hash3 data (pos + j) 65536 h
+        let head := c[prevSize + hsh]!
+        (c.set! (prevSize + hsh) (pos + j)).set! ((pos + j) &&& 0x7FFF) head
+      else c := by
+  have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+  have h2 : (2 : USize).toNat = 2 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have epj : (posU + jU).toNat = pos + j := by
+    rw [USize.toNat_add, hposU, hjU]
+    apply Nat.mod_eq_of_lt
+    omega
+  have epj2 : (posU + jU + 2).toNat = pos + j + 2 := by
+    rw [USize.toNat_add, epj, h2]
+    apply Nat.mod_eq_of_lt
+    omega
+  have hcond : posU + jU + 2 < dataSizeU ↔ pos + j + 2 < data.size := by
+    rw [USize.lt_iff_toNat_lt, epj2, hds]
+  unfold insertHashL1U
+  by_cases hd : pos + j + 2 < data.size
+  · rw [dif_pos (hcond.mpr hd), dif_pos hd]
+    have hhash := hash3L1U_toNat_eq data dataSizeU (posU + jU) hds hfit (by rw [epj]; omega)
+    have hhash' :
+        (hash3L1U data dataSizeU (posU + jU) hds hfit (by rw [epj]; omega)).toNat =
+          lz77Greedy.hash3 data (pos + j) 65536 hd := by
+      simpa only [epj] using hhash
+    have eidx :
+        (prevSizeU + hash3L1U data dataSizeU (posU + jU) hds hfit (by rw [epj]; omega)).toNat =
+          prevSize + lz77Greedy.hash3 data (pos + j) 65536 hd := by
+      have hh := hash3L1U_toNat_lt data dataSizeU (posU + jU) hds hfit (by rw [epj]; omega)
+      simp only [chainWinSize] at hprev
+      have hsum : prevSize +
+          (hash3L1U data dataSizeU (posU + jU) hds hfit (by rw [epj]; omega)).toNat <
+          USize.size := Nat.lt_of_lt_of_le (by omega) USize.le_size
+      rw [USize.toNat_add, hpsU, Nat.mod_eq_of_lt hsum, hhash']
+    have emask : ((posU + jU) &&& 0x7FFF).toNat = (pos + j) &&& 0x7FFF := by
+      rw [USize.toNat_and,
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size), epj]
+    have eget : ∀ (a : Array Nat) (i : Nat) (h : i < a.size), a[i]'h = a[i]! :=
+      fun a i h => (getElem!_pos a i h).symm
+    have eset : ∀ (a : Array Nat) (i v : Nat) (h : i < a.size),
+        a.set i v h = a.set! i v := fun a i v h => by
+      rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos h]
+    simp only [Array.uget, Array.uset, eset, eget, eidx, emask, epj]
+  · rw [dif_neg (fun h => hd (hcond.mp h)), dif_neg hd]
+
+/-- For a reference (`matchLen ≥ 3`), the two fixed level-one insertions are
+    exactly the generic `j = 1`, cap-2 merged update. -/
+private theorem insertHashL1U_cap2_eq (data : ByteArray) (prevSize : Nat)
+    (dataSizeU prevSizeU posU : USize) (c : Array Nat)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (hprev : prevSize ≤ chainWinSize)
+    (hcs : prevSize + 65536 ≤ c.size) (hpos : posU.toNat ≤ data.size)
+    (matchLen : Nat) (hml : 3 ≤ matchLen) :
+    let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 c
+      hds hpsU hfit hprev hcs hpos (by rw [USize.toNat_one]; omega)
+    let hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcs
+    let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
+      hds hpsU hfit hprev hc1s hpos (by
+        rw [USize.toNat_ofNat]
+        exact Nat.le_of_eq (Nat.mod_eq_of_lt
+          (Nat.lt_of_lt_of_le (by decide) USize.le_size)))
+    c2.val = updateHashesMergedGuarded data 65536 prevSize c posU.toNat 1 matchLen 2 := by
+  let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 c
+    hds hpsU hfit hprev hcs hpos (by rw [USize.toNat_one]; omega)
+  have hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcs
+  let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
+    hds hpsU hfit hprev hc1s hpos (by
+      rw [USize.toNat_ofNat]
+      exact Nat.le_of_eq (Nat.mod_eq_of_lt
+        (Nat.lt_of_lt_of_le (by decide) USize.le_size)))
+  change c2.val = _
+  have hc1eq := insertHashL1U_eq data prevSize posU.toNat 1 dataSizeU prevSizeU posU 1 c
+    hds hpsU rfl USize.toNat_one hfit hprev hcs hpos (by rw [USize.toNat_one]; omega)
+  have h2nat : (2 : USize).toNat = 2 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have hc2eq := insertHashL1U_eq data prevSize posU.toNat 2 dataSizeU prevSizeU posU 2 c1.val
+    hds hpsU rfl h2nat hfit hprev hc1s hpos (by rw [h2nat]; omega)
+  rw [updateHashesMergedGuarded_eq]
+  rw [hc2eq, hc1eq]
+  by_cases h1 : posU.toNat + 1 + 2 < data.size <;>
+    by_cases h2 : posU.toNat + 2 + 2 < data.size <;>
+      simp only [h1, h2, ↓reduceDIte]
+  all_goals
+    rw [updateHashesMerged, if_pos (by omega)]
+    simp only [h1, ↓reduceDIte]
+    rw [updateHashesMerged, if_pos (by omega)]
+    simp only [h2, ↓reduceDIte]
+    rw [updateHashesMerged, if_neg (by omega)]
+  all_goals
+    simp only [headProbeGuarded_eq, guardedSet_eq, Nat.reduceAdd]
+
+/-- Updating an in-bounds array slot with a bounded value preserves a pointwise
+    bound on every slot. -/
+private theorem array_getElem_le_set! (a : Array Nat) (bound i v : Nat)
+    (ha : ∀ k, k < a.size → a[k]! ≤ bound) (hi : i < a.size) (hv : v ≤ bound) :
+    ∀ k, k < (a.set! i v).size → (a.set! i v)[k]! ≤ bound := by
+  intro k hk
+  have hk' : k < a.size := by rwa [Array.size_set!] at hk
+  by_cases hki : k = i
+  · subst k
+    rw [Array.getElem!_set!_self _ _ _ hi]
+    exact hv
+  · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hki)]
+    exact ha k hk'
+
+/-- One native interior insertion preserves the invariant that every stored
+    chain/hash position lies in the input. -/
+private theorem insertHashL1U_bounded (data : ByteArray) (prevSize : Nat)
+    (dataSizeU prevSizeU posU jU : USize) (c : Array Nat)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (hprev : prevSize ≤ chainWinSize)
+    (hcs : prevSize + 65536 ≤ c.size) (hpos : posU.toNat ≤ data.size)
+    (hj : jU.toNat ≤ 2)
+    (hc : ∀ i, i < c.size → c[i]! ≤ data.size) :
+    ∀ i, i < (insertHashL1U data prevSize dataSizeU prevSizeU posU jU c
+      hds hpsU hfit hprev hcs hpos hj).val.size →
+      (insertHashL1U data prevSize dataSizeU prevSizeU posU jU c
+        hds hpsU hfit hprev hcs hpos hj).val[i]! ≤ data.size := by
+  rw [insertHashL1U_eq data prevSize posU.toNat jU.toNat dataSizeU prevSizeU posU jU c
+    hds hpsU rfl rfl hfit hprev hcs hpos hj]
+  split
+  · rename_i hd
+    have hh : lz77Greedy.hash3 data (posU.toNat + jU.toNat) 65536 hd < 65536 :=
+      Nat.mod_lt _ (by omega)
+    have hidx : prevSize + lz77Greedy.hash3 data (posU.toNat + jU.toNat) 65536 hd < c.size :=
+      by omega
+    have hmask : (posU.toNat + jU.toNat) &&& 0x7FFF < c.size := by
+      have hm := winMask_lt (posU.toNat + jU.toNat)
+      simp only [chainWinSize] at hprev hm
+      omega
+    apply array_getElem_le_set! _ _ _ _
+    · exact array_getElem_le_set! c data.size _ _ hc hidx (by omega)
+    · rwa [Array.size_set!]
+    · exact hc _ hidx
+   · exact hc
 
 /-- A packed literal token has the tag bit clear. -/
 theorem packTok_literal_tag (b : UInt8) :
@@ -583,9 +766,9 @@ theorem trailingPF_spec (data : ByteArray) (pos : Nat) (acc : TokenArray)
 
 /-- The `Array UInt32` view of the greedy `TokenArray` trailing loop is the
     boxed-model `trailingP` on the viewed accumulator (stage 2/7 bridge). Local
-    copy of `Zip.Spec.LZ77MergedCorrect.trailingPT_toArray` to avoid importing the
-    broader merged-matcher correctness module solely for this bridge. -/
-private theorem trailingPT_toArray (data : ByteArray) (pos : Nat) (acc : TokenArray) :
+    copy of `Zip.Spec.LZ77MergedCorrect.trailingPT_toArray` to avoid importing that
+    module's transitive `LZ77ChainCorrect` (a name-clash source) into this file. -/
+private theorem trailingPT_toArrayF (data : ByteArray) (pos : Nat) (acc : TokenArray) :
     (trailingPT data pos acc).toArray = trailingP data pos acc.toArray := by
   induction h : data.size - pos using Nat.strongRecOn generalizing pos acc with
   | _ n ih =>

@@ -396,7 +396,7 @@ private theorem updateHashesMergedH3FastU_eq (data : ByteArray) (hashSize prevSi
     `USize` branch via `updateHashesMergedFastU_eq`, the proven-bounds `Nat`
     branch via `updateHashesMergedFast_eq`; the fallback branch is definitionally
     it). -/
-private theorem updateHashesMergedGuarded_eq (data : ByteArray) (hashSize prevSize : Nat)
+theorem updateHashesMergedGuarded_eq (data : ByteArray) (hashSize prevSize : Nat)
     (c : Array Nat) (pos j matchLen insertCap : Nat) :
     updateHashesMergedGuarded data hashSize prevSize c pos j matchLen insertCap =
       updateHashesMerged data hashSize prevSize c pos j matchLen insertCap := by

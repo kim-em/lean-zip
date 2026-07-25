@@ -93,6 +93,268 @@ def lz77GreedyMergedLoopF (data : ByteArray)
 termination_by data.size - pos
 decreasing_by all_goals omega
 
+/-! ## Level-one native-word outer loop
+
+The generic fused loop keeps its outer position in `Nat` and re-enters guarded
+wrappers at every byte.  Level one has fixed policy (`hashSize = 65536`, chain
+depth 4, insertion cap 2, nice length 258), so its hot loop can keep the data
+position, hash-table indices, match length, and chain result in `USize` after one
+entry guard.  The combined chain/hash state deliberately remains `Array Nat`;
+only its indices are native words.
+-/
+
+/-- Level-one four-byte hash.  The fixed 65536-bucket table means the high
+    16 bits of the multiplied word are already the exact bucket; unlike the
+    generic `hash3U`, no `% hashSizeU` remains in the hot path. -/
+@[inline] def hash3L1U (data : ByteArray) (dataSizeU pU : USize)
+    (hds : dataSizeU.toNat = data.size)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (hp : pU.toNat + 2 < data.size) : USize :=
+  let word :=
+    if h4 : pU + 4 ≤ dataSizeU then
+      ByteArray.ugetUInt32LE data pU (by
+        have h4v : (4 : USize).toNat = 4 :=
+          USize.toNat_ofNat_of_lt
+            (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+        have ep4 : (pU + 4).toNat = pU.toNat + 4 := by
+          have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+          rw [USize.toNat_add, h4v]
+          apply Nat.mod_eq_of_lt
+          omega
+        have hn := USize.le_iff_toNat_le.mp h4
+        rw [ep4, hds] at hn
+        exact hn)
+    else
+      let p := pU.toNat
+      let a := (data[p]'(by omega)).toUInt32
+      let b := (data[p + 1]'(by omega)).toUInt32
+      let c := (data[p + 2]'(by omega)).toUInt32
+      a ||| (b <<< 8) ||| (c <<< 16)
+  ((word * 0x1E35A7BD) >>> 16).toUSize
+
+theorem hash3L1U_toNat_lt (data : ByteArray) (dataSizeU pU : USize)
+    (hds : dataSizeU.toNat = data.size)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (hp : pU.toNat + 2 < data.size) :
+    (hash3L1U data dataSizeU pU hds hfit hp).toNat < 65536 := by
+  unfold hash3L1U
+  generalize (if h4 : pU + 4 ≤ dataSizeU then _ else _ : UInt32) = word
+  rw [UInt32.toNat_toUSize, UInt32.toNat_shiftRight,
+    show ((16 : UInt32).toNat % 32) = 16 from rfl]
+  have := UInt32.toNat_lt (word * 0x1E35A7BD)
+  omega
+
+/-- Insert one of level one's two interior positions.  Returning a subtype
+    records (proof-only) that the ordinary `Array Nat` state keeps its size. -/
+@[inline] def insertHashL1U (data : ByteArray) (prevSize : Nat)
+    (dataSizeU prevSizeU posU jU : USize) (c : Array Nat)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (hprev : prevSize ≤ chainWinSize)
+    (hcs : prevSize + 65536 ≤ c.size) (hpos : posU.toNat ≤ data.size)
+    (hj : jU.toNat ≤ 2) : {a : Array Nat // a.size = c.size} :=
+  if hd : posU + jU + 2 < dataSizeU then
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have hj2 : (2 : USize).toNat = 2 :=
+      USize.toNat_ofNat_of_lt
+        (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    have hpj : (posU + jU).toNat = posU.toNat + jU.toNat := by
+      rw [USize.toNat_add]
+      apply Nat.mod_eq_of_lt
+      omega
+    have hpj2 : (posU + jU + 2).toNat = posU.toNat + jU.toNat + 2 := by
+      rw [USize.toNat_add, hpj, hj2]
+      apply Nat.mod_eq_of_lt
+      omega
+    have hp2 : (posU + jU).toNat + 2 < data.size := by
+      have := USize.lt_iff_toNat_lt.mp hd
+      rw [hpj2, hds] at this
+      omega
+    let hshU := hash3L1U data dataSizeU (posU + jU) hds hfit hp2
+    have hshlt : hshU.toNat < 65536 :=
+      hash3L1U_toNat_lt data dataSizeU (posU + jU) hds hfit hp2
+    have hidx : (prevSizeU + hshU).toNat = prevSize + hshU.toNat := by
+      rw [USize.toNat_add, hpsU]
+      apply Nat.mod_eq_of_lt
+      simp only [chainWinSize] at hprev
+      exact Nat.lt_of_lt_of_le (by omega) USize.le_size
+    have hb : (prevSizeU + hshU).toNat < c.size := by rw [hidx]; omega
+    let head := c.uget (prevSizeU + hshU) hb
+    have hmaskb : ((posU + jU) &&& 0x7FFF).toNat < c.size := by
+      rw [USize.toNat_and,
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+      have hm := winMask_lt ((posU + jU).toNat)
+      exact Nat.lt_of_lt_of_le hm
+        (Nat.le_trans (by simp only [chainWinSize]; omega) hcs)
+    let c1 := c.uset (prevSizeU + hshU) ((posU + jU).toNat) hb
+    let c2 := c1.uset ((posU + jU) &&& 0x7FFF) head (by
+      rw [Array.size_uset]
+      exact hmaskb)
+    ⟨c2, by simp only [c2, c1, Array.size_uset]⟩
+  else ⟨c, rfl⟩
+
+/-- Fused level-one loop with native-word outer state. -/
+def lz77GreedyMergedLoopF1U (data : ByteArray) (prevSize : Nat)
+    (dataSizeU prevSizeU : USize)
+    (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
+    (hsz : data.size < USize.size) (hfit : data.size * 512 + 511 < USize.size)
+    (hpv : min chainWinSize data.size ≤ prevSize) (hprev : prevSize ≤ chainWinSize)
+    (c : Array Nat) (hcs : prevSize + 65536 ≤ c.size)
+    (posU : USize) (hpos : posU.toNat ≤ data.size)
+    (acc : TokenArray)
+    (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30}) :
+    TokenArray × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
+  if hlt : posU + 2 < dataSizeU then
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have h2v : (2 : USize).toNat = 2 :=
+      USize.toNat_ofNat_of_lt
+        (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    have ep2 : (posU + 2).toNat = posU.toNat + 2 := by
+      rw [USize.toNat_add, h2v]
+      apply Nat.mod_eq_of_lt
+      omega
+    have hltN : posU.toNat + 2 < data.size := by
+      have := USize.lt_iff_toNat_lt.mp hlt
+      rw [ep2, hds] at this
+      exact this
+    let hshU := hash3L1U data dataSizeU posU hds hfit hltN
+    have hshlt : hshU.toNat < 65536 :=
+      hash3L1U_toNat_lt data dataSizeU posU hds hfit hltN
+    have hidx : (prevSizeU + hshU).toNat = prevSize + hshU.toNat := by
+      rw [USize.toNat_add, hpsU]
+      apply Nat.mod_eq_of_lt
+      simp only [chainWinSize] at hprev
+      exact Nat.lt_of_lt_of_le (by omega) USize.le_size
+    have hb : (prevSizeU + hshU).toNat < c.size := by rw [hidx]; omega
+    let head := c.uget (prevSizeU + hshU) hb
+    let cHash := c.uset (prevSizeU + hshU) posU.toNat hb
+    have hmaskb : (posU &&& 0x7FFF).toNat < cHash.size := by
+      rw [Array.size_uset, USize.toNat_and,
+        USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+      have hm := winMask_lt posU.toNat
+      exact Nat.lt_of_lt_of_le hm
+        (Nat.le_trans (by simp only [chainWinSize]; omega) hcs)
+    let cRing := cHash.uset (posU &&& 0x7FFF) head hmaskb
+    have hcs' : prevSize + 65536 ≤ cRing.size := by
+      simp only [cRing, cHash, Array.size_uset]
+      exact hcs
+    have hposLe : posU ≤ dataSizeU := by
+      rw [USize.le_iff_toNat_le, hds]
+      exact hpos
+    let remU := dataSizeU - posU
+    let maxLenU := if remU < 258 then remU else 258
+    have hmaxRem : maxLenU ≤ remU := by
+      unfold maxLenU
+      split
+      · exact USize.le_refl _
+      · have hn : ¬ remU < (258 : USize) := by assumption
+        rw [USize.le_iff_toNat_le]
+        have h258 : (258 : USize).toNat = 258 :=
+          USize.toNat_ofNat_of_lt
+            (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+        rw [h258]
+        apply Nat.le_of_not_lt
+        intro hh
+        exact hn (USize.lt_iff_toNat_lt.mpr (by rwa [h258]))
+    have hmax258 : maxLenU.toNat ≤ 258 := by
+      unfold maxLenU
+      split
+      · have hh := USize.lt_iff_toNat_lt.mp (by assumption)
+        have h258 : (258 : USize).toNat = 258 :=
+          USize.toNat_ofNat_of_lt
+            (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+        rw [h258] at hh
+        omega
+      · have h258 : (258 : USize).toNat = 258 :=
+          USize.toNat_ofNat_of_lt
+            (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+        exact Nat.le_of_eq h258
+    have hremN : remU.toNat = data.size - posU.toNat := by
+      unfold remU
+      rw [USize.toNat_sub_of_le _ _ hposLe, hds]
+    have hpm : posU.toNat + maxLenU.toNat ≤ data.size := by
+      have hh := USize.le_iff_toNat_le.mp hmaxRem
+      rw [hremN] at hh
+      omega
+    have hwalkPrev : min chainWinSize data.size ≤ cRing.size := by omega
+    let headU := head.toUSize
+    let r := chainWalkPackedUU data cRing hwalkPrev hsz 32768 posU maxLenU maxLenU
+      headU 4 0 0 hpm
+    let matchLenU := r &&& 0x1FF
+    let matchPosU := r >>> 9
+    if hge : matchLenU ≥ 3 then
+      if hle : posU + matchLenU ≤ dataSizeU then
+        if hprogress : posU < posU + matchLenU then
+          have hnextPos : (posU + matchLenU).toNat ≤ data.size := by
+            have hh := USize.le_iff_toNat_le.mp hle
+            rw [hds] at hh
+            exact hh
+          have hdec : data.size - (posU + matchLenU).toNat < data.size - posU.toNat := by
+            have hh := USize.lt_iff_toNat_lt.mp hprogress
+            omega
+          let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 cRing
+            hds hpsU hfit hprev hcs' hpos (by rw [USize.toNat_one]; omega)
+          have hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcs'
+          let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
+            hds hpsU hfit hprev hc1s hpos (by rw [h2v]; omega)
+          have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
+          let w := packTok (.reference matchLenU.toNat (posU - matchPosU).toNat)
+          lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
+            c2.val hc2s (posU + matchLenU) hnextPos
+            (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w)
+        else
+          trailingPF data posU.toNat acc litF distF
+      else
+        let b := data.uget posU (by omega)
+        let w := packTok (.literal b)
+        have hnext : (posU + 1).toNat = posU.toNat + 1 := by
+          rw [USize.toNat_add, USize.toNat_one]
+          apply Nat.mod_eq_of_lt
+          omega
+        lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
+          cRing hcs' (posU + 1) (by rw [hnext]; omega)
+          (acc.push w) (bumpLitFreqP litF w) distF
+    else
+      let b := data.uget posU (by omega)
+      let w := packTok (.literal b)
+      have hnext : (posU + 1).toNat = posU.toNat + 1 := by
+        rw [USize.toNat_add, USize.toNat_one]
+        apply Nat.mod_eq_of_lt
+        omega
+      lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
+        cRing hcs' (posU + 1) (by rw [hnext]; omega)
+        (acc.push w) (bumpLitFreqP litF w) distF
+  else
+    trailingPF data posU.toNat acc litF distF
+termination_by data.size - posU.toNat
+decreasing_by all_goals omega
+
+/-- Level-one fused entry.  The sole native-word/packing guard covers the whole
+    outer loop; the fallback is the existing generic fused matcher. -/
+def lz77ChainIterPMergedF1U (data : ByteArray) :
+    TokenArray × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
+  if data.size < 3 then
+    trailingPF data 0 TokenArray.empty initLitFreqF initDistFreqF
+  else if hg : data.size.toUSize.toNat = data.size ∧
+      data.size.toUSize < ((~~~(0 : USize)) >>> 9) ∧
+      data.size * 512 + 511 < USize.size then
+    let prevSize := min chainWinSize data.size
+    let c := Array.replicate (prevSize + 65536) data.size
+    have hsz : data.size < USize.size := by
+      rw [← hg.1]
+      exact USize.toNat_lt_two_pow_numBits _
+    have hfit : data.size * 512 + 511 < USize.size := hg.2.2
+    lz77GreedyMergedLoopF1U data prevSize data.size.toUSize prevSize.toUSize hg.1
+      (toUSize_toNat_of_lt (by simp only [prevSize, chainWinSize]; omega)) hsz hfit
+      (Nat.le_refl _) (Nat.min_le_left _ _)
+      c (by simp only [c, Array.size_replicate]; omega) 0 (by simp)
+      (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
+  else
+    let prevSize := min chainWinSize data.size
+    lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+      (.replicate (prevSize + 65536) data.size) 0
+      (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
+
 /-- Fused entry mirroring `lz77ChainIterPMerged` (`Zip.Native.Deflate`): builds
     the combined `prevSize + hashSize` array and runs `lz77GreedyMergedLoopF`,
     returning the packed token stream and its `tokenFreqsP` histograms in one
