@@ -143,7 +143,8 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
     Zip.Native.Inflate.inflateReference (deflateRaw data level) maxOutputSize = .ok data := by
   unfold deflateRaw
   dsimp only []
-  simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+  simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq, chooseSplitsHeuristicPU_eq,
+    ite_self]
   -- The base and split candidates are *prepared* (sized-with-trees), and only the
   -- winner's emit thunk is forced. Each thunk decodes: the base thunk is
   -- `deflateRawBaseP` (`deflateRawBasePPrep_emit`), each split thunk is
@@ -287,7 +288,8 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       padding.length < 8 := by
   unfold deflateRaw
   dsimp only []
-  simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+  simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq, chooseSplitsHeuristicPU_eq,
+    ite_self]
   have hstored : ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data)
         = contentBits ++ padding ∧ padding.length < 8 :=
@@ -516,7 +518,8 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
         = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
   unfold deflateRaw
   dsimp only []
-  simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+  simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq, chooseSplitsHeuristicPU_eq,
+    ite_self]
   have hstored : ∃ remaining,
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits (Zip.Spec.DeflateStoredCorrect.deflateStoredPure data)) []

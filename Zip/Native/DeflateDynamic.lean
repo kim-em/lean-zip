@@ -2332,7 +2332,7 @@ decreasing_by all_goals rw [hstep]; omega
     cadence and native-word representability are checked, with the scalar
     walker used outside those bounds. Generic `TokenArray` callers should use
     `chooseSplitsHeuristicPU`; production calls this only on `lzMatchP`. -/
-@[inline] def chooseSplitsHeuristicPUPacked (toks : TokenArray)
+@[noinline] def chooseSplitsHeuristicPUPacked (toks : TokenArray)
     (totalBytes : Nat) (checkTokens : Nat := splitCheckTokens) : List Nat :=
   if totalBytes < 2 * splitMinBlockBytes then
     []
@@ -3273,8 +3273,17 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- frequencies (EOB-corrected, `tokenFreqsP_append`) and the base candidate
       -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
       -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
-      let cuts := chooseSplitsHeuristicPUPacked ptokens data.size
-        (splitCheckTokensFor data level)
+      -- The packed-counter walker pays only on the large-L5 point it was tuned
+      -- for. L6–L8 and small L5 inputs retain the established scalar walker:
+      -- their shorter observation windows do not amortize packing, and keeping
+      -- that route also preserves their existing code shape/frontier points.
+      let cuts :=
+        if useL5LargeInputPolicy data level then
+          chooseSplitsHeuristicPUPacked ptokens data.size
+            (splitCheckTokensFor data level)
+        else
+          chooseSplitsHeuristicPU ptokens data.size
+            (splitCheckTokensFor data level)
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
       -- the split, matching `pickSmaller`), so the loser's captured per-block
