@@ -317,4 +317,73 @@ theorem bytesToBits_bitsToBytes_take (bits : List Bool) :
           simp only [List.getElem_drop]
           congr 1; omega
 
+/-- Decoding the eight LSB-first bits of a byte recovers that byte. -/
+private theorem bitsToByte_byteToBits (b : UInt8) :
+    Deflate.Spec.bitsToByte (Deflate.Spec.bytesToBits.byteToBits b) = b := by
+  unfold Deflate.Spec.bitsToByte Deflate.Spec.bytesToBits.byteToBits
+  rw [bitsToNat_testBit b.toNat 8 (UInt8.toNat_lt b)]
+  have : b.toNat.toUInt8 = b := by
+    unfold Nat.toUInt8 UInt8.ofNat UInt8.toNat
+    rw [BitVec.ofNat_toNat, BitVec.setWidth_eq]
+  exact this
+
+/-- `bitsToBytes` consumes one complete byte encoding before the remaining
+    aligned bit stream. -/
+private theorem bitsToBytes_byteToBits_cons (b : UInt8) (rest : List Bool) :
+    (Deflate.Spec.bitsToBytes
+      (Deflate.Spec.bytesToBits.byteToBits b ++ rest)).data.toList =
+      b :: (Deflate.Spec.bitsToBytes rest).data.toList := by
+  have hlen :
+      (Deflate.Spec.bytesToBits.byteToBits b ++ rest).length ≥ 8 := by
+    rw [List.length_append, Deflate.Spec.bytesToBits.byteToBits_length]
+    omega
+  have hbyte : Deflate.Spec.bitsToByte
+      (Deflate.Spec.bytesToBits.byteToBits b ++ rest) = b := by
+    have henc := byteToBits_bitsToByte_take
+      (Deflate.Spec.bytesToBits.byteToBits b ++ rest) hlen
+    have htake :
+        (Deflate.Spec.bytesToBits.byteToBits b ++ rest).take 8 =
+          Deflate.Spec.bytesToBits.byteToBits b := by
+      rw [List.take_append_of_le_length
+        (Nat.le_of_eq (Deflate.Spec.bytesToBits.byteToBits_length b).symm)]
+      exact List.take_of_length_le
+        (Nat.le_of_eq (Deflate.Spec.bytesToBits.byteToBits_length b))
+    rw [htake] at henc
+    have := congrArg Deflate.Spec.bitsToByte henc
+    simpa only [bitsToByte_byteToBits] using this
+  have hdrop :
+      (Deflate.Spec.bytesToBits.byteToBits b ++ rest).drop 8 = rest := by
+    rw [List.drop_append_of_le_length
+      (Nat.le_of_eq (Deflate.Spec.bytesToBits.byteToBits_length b).symm)]
+    rw [List.drop_eq_nil_of_le
+      (Nat.le_of_eq (Deflate.Spec.bytesToBits.byteToBits_length b)), List.nil_append]
+  cases hbits : Deflate.Spec.bytesToBits.byteToBits b ++ rest with
+  | nil => simp only [hbits, List.length_nil, ge_iff_le, Nat.reduceLeDiff] at hlen
+  | cons bit tail =>
+      rw [hbits] at hbyte hdrop
+      rw [bitsToBytes_cons, hbyte, hdrop]
+      rfl
+
+/-- `bitsToBytes` is a left inverse of the byte-to-bit representation. -/
+theorem bitsToBytes_bytesToBits (data : ByteArray) :
+    Deflate.Spec.bitsToBytes (Deflate.Spec.bytesToBits data) = data := by
+  apply ByteArray.ext
+  apply Array.toList_inj.mp
+  change (Deflate.Spec.bitsToBytes
+    (data.data.toList.flatMap Deflate.Spec.bytesToBits.byteToBits)).data.toList =
+      data.data.toList
+  generalize data.data.toList = bytes
+  induction bytes with
+  | nil =>
+      simp only [List.flatMap_nil, bitsToBytes_nil, ByteArray.data_empty,
+        Array.toList_empty]
+  | cons b rest ih =>
+      rw [List.flatMap_cons, bitsToBytes_byteToBits_cons, ih]
+
+/-- Byte encoding is injective. -/
+theorem bytesToBits_injective : Function.Injective Deflate.Spec.bytesToBits := by
+  intro a b h
+  have := congrArg Deflate.Spec.bitsToBytes h
+  simpa only [bitsToBytes_bytesToBits] using this
+
 end Deflate.Correctness

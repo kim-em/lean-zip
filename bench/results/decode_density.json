@@ -4,6 +4,9 @@
 "machine": "Linux chungus2 x86_64",
 "git_commit": "3f5fffbd",
 "toolchain": "leanprover/lean4:v4.30.0-rc2",
+"timing_aggregation": "median",
+"timing_reps": 5,
+"timing_provenance": "Schema backfill only; measurement rows are unchanged. At the recorded producer revision, runDecodeDensity passed reps=5 to measureNs for every in-process measurement, while each merged Go/JS/Zig/OCaml decoder ran five timing samples and selected the median.",
 "experiment": "decode-density: fixed encoder (libdeflate levels + zopfli, level 0 = zopfli), ratio = encoder compression ratio, decompress_mbps = each decoder on identical streams; compressor field holds the decoder name"
 },
 "results": [

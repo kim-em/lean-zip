@@ -542,6 +542,20 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
       have hcut : ∀ n : Nat, n < USize.size → (n.toUSize ≥ cutoffU) = (n ≥ min niceLen maxLen) := by
         intro n hn
         rw [eq_iff_iff, ge_iff_le, ge_iff_le, USize.le_iff_toNat_le, hcutU, toUSize_toNat_of_lt hn]
+      have hmllt : lz77Greedy.countMatch data cand pos maxLen hcand hpm < USize.size := by
+        have := (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
+        omega
+      have hcmU : countMatchUCore data cand.toUSize posU maxLenU hsz
+          (by rw [hcU, hmaxU]; exact hcand) (by rw [hposU, hmaxU]; exact hpm) =
+          (lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize := by
+        apply USize.toNat_inj.mp
+        calc
+          (countMatchUCore data cand.toUSize posU maxLenU hsz _ _).toNat =
+              lz77Greedy.countMatch data cand pos maxLen hcand hpm :=
+            countMatchUCore_eq data cand pos maxLen cand.toUSize posU maxLenU
+              hcU hposU hmaxU hsz hcand hpm _ _
+          _ = (lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize.toNat :=
+            (toUSize_toNat_of_lt hmllt).symm
       -- The shared `countMatch` continuation (reached when the prefilter does not skip).
       have hstep :
           (let ml := lz77Greedy.countMatch data cand pos maxLen hcand hpm
@@ -561,7 +575,6 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
              k bl bp) := by
         have hml_le : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ maxLen :=
           (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
-        have hmllt : lz77Greedy.countMatch data cand pos maxLen hcand hpm < USize.size := by omega
         have hmlU : (lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize.toNat
             = lz77Greedy.countMatch data cand pos maxLen hcand hpm := toUSize_toNat_of_lt hmllt
         have hmlcond : ((lz77Greedy.countMatch data cand pos maxLen hcand hpm).toUSize > bestLen.toUSize)
@@ -587,15 +600,214 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
           rw [USize.toNat_add, hposU, hblU]; apply Nat.mod_eq_of_lt; omega
         simp only [e1, e2]
         by_cases hbyte : data[cand + bestLen]'(by omega) = data[pos + bestLen]'(by omega)
-        · simp only [hbyte, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]; exact hstep
+        · simp only [hbyte, bne_self_eq_false, Bool.false_eq_true, ↓reduceIte]
+          rw [hcmU]
+          exact hstep
         · simp only [bne_iff_ne.mpr hbyte, ↓reduceIte, hcut _ hbl]
           by_cases hge : bestLen ≥ min niceLen maxLen
           · simp only [hge, ↓reduceIte, hblU, hbpU]
           · simp only [hge, ↓reduceIte]; rw [hsub]; exact ih _ _ _ (by omega) hbl hbp
       · simp only [dif_neg (show ¬ (bestLen.toUSize < maxLenU) by rw [hcond]; exact hlt), dif_neg hlt,
           Bool.false_eq_true, ↓reduceIte]
+        rw [hcmU]
         exact hstep
     · rw [dif_neg hc, dif_neg hc, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
+
+/-- Packing a bounded position and length in `USize` agrees with the `Nat`
+    spelling when the packed value fits in one machine word. -/
+theorem packMatchU_toNat (bestPosU bestLenU : USize) (dataSize : Nat)
+    (hpos : bestPosU.toNat ≤ dataSize) (hlen : bestLenU.toNat ≤ 511)
+    (hfit : dataSize * 512 + 511 < USize.size) :
+    (bestPosU * 512 + bestLenU).toNat = bestPosU.toNat * 512 + bestLenU.toNat := by
+  have h512 : (512 : USize).toNat = 512 := by
+    rw [USize.toNat_ofNat]
+    exact Nat.mod_eq_of_lt
+      (Nat.lt_of_lt_of_le (show 512 < 2 ^ 32 by omega) USize.le_size)
+  have hdata : dataSize * 512 < USize.size :=
+    Nat.lt_of_le_of_lt (Nat.le_add_right _ _) hfit
+  have hmul : bestPosU.toNat * 512 < USize.size :=
+    Nat.lt_of_le_of_lt (Nat.mul_le_mul_right 512 hpos) hdata
+  have hadd : bestPosU.toNat * 512 + bestLenU.toNat < USize.size :=
+    Nat.lt_of_le_of_lt (Nat.add_le_add (Nat.mul_le_mul_right 512 hpos) hlen) hfit
+  rw [USize.toNat_add, USize.toNat_mul, h512,
+    Nat.mod_eq_of_lt hmul, Nat.mod_eq_of_lt hadd]
+
+/-- The fully-`USize` measurement walk is the mixed `Nat`/`USize` walk whenever
+    its scalar inputs and packed result are representable. -/
+theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsz : data.size < USize.size)
+    (windowSizeU posU maxLenU cutoffU candU fuelU bestLenU bestPosU : USize)
+    (hwindowU : windowSizeU.toNat = windowSize) (hposU : posU.toNat = pos)
+    (hmaxU : maxLenU.toNat = maxLen) (hcutU : cutoffU.toNat = min niceLen maxLen)
+    (hpmU : posU.toNat + maxLenU.toNat ≤ data.size)
+    (hmax511 : maxLen ≤ 511) (hblmax : bestLenU.toNat ≤ maxLen)
+    (hbpdata : bestPosU.toNat ≤ data.size)
+    (hfit : data.size * 512 + 511 < USize.size) :
+    (chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU
+      candU fuelU bestLenU bestPosU hpmU).toNat =
+      chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
+        posU maxLenU cutoffU hposU hmaxU hcutU candU.toNat fuelU bestLenU bestPosU := by
+  induction hn : fuelU.toNat using Nat.strongRecOn generalizing candU fuelU bestLenU bestPosU with
+  | _ n ih =>
+    rw [chainWalkPackedUU, chainWalkPackedU]
+    by_cases hf : fuelU = 0
+    · rw [if_pos hf, if_pos hf]
+      exact packMatchU_toNat bestPosU bestLenU data.size hbpdata (by omega) hfit
+    · rw [if_neg hf, if_neg hf]
+      have hfuelPos : 0 < fuelU.toNat := by
+        rcases Nat.eq_zero_or_pos fuelU.toNat with hz | hp
+        · exact absurd (USize.toNat_inj.mp (by rw [hz, USize.toNat_zero])) hf
+        · exact hp
+      have hfuelLe : (1 : USize) ≤ fuelU := by
+        rw [USize.le_iff_toNat_le, USize.toNat_one]
+        omega
+      have hfuelSub : (fuelU - 1).toNat = fuelU.toNat - 1 := by
+        rw [USize.toNat_sub_of_le _ _ hfuelLe, USize.toNat_one]
+      have hciff :
+          (candU < posU ∧ posU - candU ≤ windowSizeU) ↔
+            (candU.toNat < pos ∧ pos - candU.toNat ≤ windowSize) := by
+        constructor
+        · intro hc
+          have hle : candU ≤ posU := USize.le_iff_toNat_le.mpr
+            (Nat.le_of_lt (USize.lt_iff_toNat_lt.mp hc.1))
+          constructor
+          · rw [← hposU]
+            exact USize.lt_iff_toNat_lt.mp hc.1
+          · have hh := USize.le_iff_toNat_le.mp hc.2
+            rw [USize.toNat_sub_of_le _ _ hle, hposU, hwindowU] at hh
+            exact hh
+        · intro hc
+          have hlt : candU < posU := USize.lt_iff_toNat_lt.mpr (by simpa [hposU] using hc.1)
+          constructor
+          · exact hlt
+          · rw [USize.le_iff_toNat_le, USize.toNat_sub_of_le _ _
+                (USize.le_iff_toNat_le.mpr (Nat.le_of_lt (USize.lt_iff_toNat_lt.mp hlt))),
+              hposU, hwindowU]
+            exact hc.2
+      by_cases hc : candU < posU ∧ posU - candU ≤ windowSizeU
+      · rw [dif_pos hc, dif_pos (hciff.mp hc)]
+        have hcandNat : candU.toNat + maxLen ≤ data.size := by
+          have := hc.1
+          rw [USize.lt_iff_toNat_lt, hposU] at this
+          omega
+        have hcandRound : candU.toNat.toUSize = candU := USize.ofNat_toNat
+        simp only [hcandRound]
+        have hcandData : candU.toNat < data.size := by
+          have hcpos := USize.lt_iff_toNat_lt.mp hc.1
+          rw [hposU] at hcpos
+          omega
+        have hidx : candU.toNat &&& 0x7FFF < prev.size := by
+          have h1 := winMask_lt candU.toNat
+          have h2 := Nat.and_le_left (n := candU.toNat) (m := 0x7FFF)
+          exact Nat.lt_of_lt_of_le
+            (Nat.lt_min.mpr ⟨h1, Nat.lt_of_le_of_lt h2 hcandData⟩) hps
+        let next := prev[candU.toNat &&& 0x7FFF]'hidx
+        let nextU := next.toUSize
+        have hcont (blU bpU : USize) (hblm : blU.toNat ≤ maxLen)
+            (hbpd : bpU.toNat ≤ data.size) :
+            (if blU ≥ cutoffU then bpU * 512 + blU
+              else if hnext : nextU.toNat = next then
+                chainWalkPackedUU data prev hps hsz windowSizeU posU maxLenU cutoffU
+                  nextU (fuelU - 1) blU bpU hpmU
+              else bpU * 512 + blU).toNat =
+            (if blU ≥ cutoffU then bpU.toNat * 512 + blU.toNat
+              else chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
+                posU maxLenU cutoffU hposU hmaxU hcutU next (fuelU - 1) blU bpU) := by
+          have hpack : (bpU * 512 + blU).toNat = bpU.toNat * 512 + blU.toNat :=
+            packMatchU_toNat bpU blU data.size hbpd (by omega) hfit
+          by_cases hge : blU ≥ cutoffU
+          · simp only [hge, ↓reduceIte, hpack]
+          · simp only [hge, ↓reduceIte]
+            by_cases hnext : nextU.toNat = next
+            · simp only [hnext, ↓reduceDIte]
+              simpa only [hnext] using
+                ih (fuelU - 1).toNat (by rw [hfuelSub, hn]; omega)
+                  nextU (fuelU - 1) blU bpU hblm hbpd rfl
+            · simp only [hnext, ↓reduceDIte, hpack]
+              have hnextge : pos ≤ next := by
+                apply Nat.le_of_not_lt
+                intro hnp
+                have hnlt : next < USize.size := by
+                  have hpSize : pos < USize.size := by
+                    rw [← hposU]
+                    exact USize.toNat_lt_two_pow_numBits posU
+                  omega
+                exact hnext (toUSize_toNat_of_lt hnlt)
+              rw [chainWalkPackedU]
+              by_cases hf' : fuelU - 1 = 0
+              · rw [if_pos hf']
+              · rw [if_neg hf', dif_neg (show ¬ (next < pos ∧ pos - next ≤ windowSize) by omega)]
+        have hmlLe :
+            (countMatchUCore data candU posU maxLenU hsz
+              (by rw [hmaxU]; exact hcandNat) hpmU).toNat ≤ maxLen := by
+          rw [countMatchUCore_eq data candU.toNat pos maxLen candU posU maxLenU
+            rfl hposU hmaxU hsz hcandNat hpm _ _]
+          exact (lz77Greedy.countMatch_matches data candU.toNat pos maxLen hcandNat hpm).2
+        have hterminal (blU bpU : USize) (hblm : blU.toNat ≤ maxLen)
+            (hbpd : bpU.toNat ≤ data.size) (hone : fuelU = 1) :
+            (bpU * 512 + blU).toNat =
+            (if blU ≥ cutoffU then bpU.toNat * 512 + blU.toNat
+              else chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
+                posU maxLenU cutoffU hposU hmaxU hcutU next (fuelU - 1) blU bpU) := by
+          have hpack : (bpU * 512 + blU).toNat = bpU.toNat * 512 + blU.toNat :=
+            packMatchU_toNat bpU blU data.size hbpd (by omega) hfit
+          by_cases hge : blU ≥ cutoffU
+          · simp only [hge, ↓reduceIte, hpack]
+          · simp only [hge, ↓reduceIte]
+            have hfzero : fuelU - 1 = 0 := by simp [hone]
+            rw [chainWalkPackedU, if_pos hfzero]
+            exact hpack
+        -- Once the candidate's round trip is collapsed, both walks have the
+        -- same prefilter and match computation; only their continuation differs.
+        by_cases hskip :
+            (if hbl : bestLenU < maxLenU then
+              data.uget (candU + bestLenU) (by
+                have him := USize.lt_iff_toNat_lt.mp hbl
+                have e : (candU + bestLenU).toNat = candU.toNat + bestLenU.toNat := by
+                  rw [USize.toNat_add]
+                  apply Nat.mod_eq_of_lt
+                  exact Nat.lt_trans (by omega) hsz
+                omega) !=
+              data.uget (posU + bestLenU) (by
+                have him := USize.lt_iff_toNat_lt.mp hbl
+                have e : (posU + bestLenU).toNat = posU.toNat + bestLenU.toNat := by
+                  rw [USize.toNat_add]
+                  apply Nat.mod_eq_of_lt
+                  exact Nat.lt_trans (by omega) hsz
+                omega)
+            else false) = true
+        · rw [if_pos hskip, if_pos hskip, if_pos hskip]
+          by_cases hone : fuelU = 1
+          · rw [if_pos hone]
+            exact hterminal bestLenU bestPosU hblmax hbpdata hone
+          · rw [if_neg hone]
+            exact hcont bestLenU bestPosU hblmax hbpdata
+        · rw [if_neg hskip, if_neg hskip, if_neg hskip]
+          by_cases hml : countMatchUCore data candU posU maxLenU hsz
+              (by rw [hmaxU]; exact hcandNat) hpmU > bestLenU
+          · simp only [hml, ↓reduceIte]
+            have hcandLe : candU.toNat ≤ data.size := by
+              have hcpos := USize.lt_iff_toNat_lt.mp hc.1
+              rw [hposU] at hcpos
+              omega
+            by_cases hone : fuelU = 1
+            · rw [if_pos hone]
+              exact hterminal (countMatchUCore data candU posU maxLenU hsz
+                (by rw [hmaxU]; exact hcandNat) hpmU) candU hmlLe hcandLe hone
+            · rw [if_neg hone]
+              exact hcont (countMatchUCore data candU posU maxLenU hsz
+                (by rw [hmaxU]; exact hcandNat) hpmU) candU hmlLe hcandLe
+          · simp only [hml, ↓reduceIte]
+            by_cases hone : fuelU = 1
+            · rw [if_pos hone]
+              exact hterminal bestLenU bestPosU hblmax hbpdata hone
+            · rw [if_neg hone]
+              exact hcont bestLenU bestPosU hblmax hbpdata
+      · have hcNat : ¬(candU.toNat < pos ∧ pos - candU.toNat ≤ windowSize) :=
+          fun h => hc (hciff.mpr h)
+        simp only [dif_neg hc, dif_neg hcNat]
+        exact packMatchU_toNat bestPosU bestLenU data.size hbpdata (by omega) hfit
 
 /-- The runtime-guarded `USize` walk equals the runtime-guarded `Nat` walk
     (`chainWalkGuardedPacked`) unconditionally: when the addressability +
@@ -619,6 +831,73 @@ theorem chainWalkGuardedPackedU_eq (data : ByteArray) (prev : Array Nat)
       · rw [← hg.2.2.2]; exact USize.toNat_lt_two_pow_numBits _
     · rfl
   · rfl
+
+/-- A `USize` value strictly below the all-ones word shifted right by nine
+    leaves enough headroom to append a nine-bit match length. -/
+theorem packFit_of_lt_maxShift (n : Nat) (hrt : n.toUSize.toNat = n)
+    (h : n.toUSize < ((~~~(0 : USize)) >>> 9)) :
+    n * 512 + 511 < USize.size := by
+  have hh := USize.lt_iff_toNat_lt.mp h
+  rw [hrt] at hh
+  rcases System.Platform.numBits_eq with hb | hb <;>
+    simp [USize.toNat_shiftRight, USize.size, hb, Nat.shiftRight_eq_div_pow] at hh ⊢ <;>
+    omega
+
+/-- On its checked branch, the native-word result is the exact packed result
+    of the existing guarded walk. -/
+theorem chainWalkPackedUUChecked_toNat (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel : Nat) (hg : chainWalkPackedUUSafe data prev windowSize maxLen cand fuel) :
+    (chainWalkPackedUUChecked data prev windowSize pos maxLen niceLen hpm cand fuel hg).toNat =
+      chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel 0 0 := by
+  have hsz : data.size < USize.size := by
+    rw [← hg.2.1]
+    exact USize.toNat_lt_two_pow_numBits _
+  have hposlt : pos < USize.size := by omega
+  have hmaxlt : maxLen < USize.size := by omega
+  have hcutlt : min niceLen maxLen < USize.size := by omega
+  have heq := chainWalkPackedUU_eq data prev windowSize pos maxLen niceLen hpm hg.1 hsz
+    windowSize.toUSize pos.toUSize maxLen.toUSize (min niceLen maxLen).toUSize
+    cand.toUSize fuel.toUSize 0 0 hg.2.2.1
+    (toUSize_toNat_of_lt hposlt) (toUSize_toNat_of_lt hmaxlt)
+    (toUSize_toNat_of_lt hcutlt)
+    (by
+      rw [toUSize_toNat_of_lt hposlt, toUSize_toNat_of_lt hmaxlt]
+      exact hpm)
+    hg.2.2.2.2.2.1 (by rw [USize.toNat_zero]; omega)
+    (by rw [USize.toNat_zero]; omega)
+    (packFit_of_lt_maxShift data.size hg.2.1 hg.2.2.2.2.2.2)
+  unfold chainWalkPackedUUChecked chainWalkGuardedPackedU
+  have hold : data.size.toUSize.toNat = data.size ∧ fuel.toUSize.toNat = fuel ∧
+      (0 : Nat).toUSize.toNat = 0 ∧ (0 : Nat).toUSize.toNat = 0 :=
+    ⟨hg.2.1, hg.2.2.2.2.1, rfl, rfl⟩
+  rw [dif_pos hg.1, dif_pos hold]
+  simpa only [hg.2.2.2.1] using heq
+
+/-- Low nine bits of the checked word decode to the old packed walk's length. -/
+theorem chainWalkPackedUUChecked_low (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel : Nat) (hg : chainWalkPackedUUSafe data prev windowSize maxLen cand fuel) :
+    (chainWalkPackedUUChecked data prev windowSize pos maxLen niceLen hpm cand fuel hg &&&
+        0x1FF).toNat =
+      chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel 0 0 % 512 := by
+  rw [USize.toNat_and,
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (show 511 < 2 ^ 32 by omega) USize.le_size),
+    show 511 = 2 ^ 9 - 1 by omega, Nat.and_two_pow_sub_one_eq_mod,
+    show 2 ^ 9 = 512 by omega, chainWalkPackedUUChecked_toNat]
+
+/-- High bits of the checked word decode to the old packed walk's position. -/
+theorem chainWalkPackedUUChecked_high (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand fuel : Nat) (hg : chainWalkPackedUUSafe data prev windowSize maxLen cand fuel) :
+    (chainWalkPackedUUChecked data prev windowSize pos maxLen niceLen hpm cand fuel hg >>> 9).toNat =
+      chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand fuel 0 0 / 512 := by
+  rw [USize.toNat_shiftRight,
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (show 9 < 2 ^ 32 by omega) USize.le_size),
+    Nat.mod_eq_of_lt (show 9 < System.Platform.numBits by
+      exact Nat.lt_of_lt_of_le (by omega) System.Platform.le_numBits),
+    Nat.shiftRight_eq_div_pow, show 2 ^ 9 = 512 by omega,
+    chainWalkPackedUUChecked_toNat]
 
 /-- From a zero-initialised best length, the reference walk's best length
     never exceeds `maxLen` (specialisation of `chainWalk_spec`). -/

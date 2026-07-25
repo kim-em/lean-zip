@@ -1,6 +1,7 @@
 import Zip.Native.BitWriter
 import Zip.Spec.Deflate
 import Zip.Spec.Huffman
+import Zip.Spec.BitstreamWriteCorrect
 
 /-!
 # BitWriter ↔ spec bitstream correspondence
@@ -91,7 +92,7 @@ whole bytes (`flushAcc`); these lemmas show that this matches the spec-level
 bit lists, by characterizing `flushAcc` via `testBit` of the accumulator. -/
 
 /-- `writeBitsLSB n v` is the low `n` bits of `v`, LSB first. -/
-private theorem writeBitsLSB_eq_map (n v : Nat) :
+theorem writeBitsLSB_eq_map (n v : Nat) :
     Deflate.Spec.writeBitsLSB n v = (List.range n).map (fun i => v.testBit i) := by
   induction n generalizing v with
   | zero => simp only [Deflate.Spec.writeBitsLSB, List.range_zero, List.map_nil]
@@ -131,7 +132,7 @@ private theorem testBit_or_shiftLeft_above (a b k j : Nat) (ha : a < 2 ^ k) :
     Bool.false_or]
 
 /-- OR of a bounded value with a shifted bounded value is bounded. -/
-private theorem or_shiftLeft_lt (a m k p : Nat) (ha : a < 2 ^ k) (hm : m < 2 ^ p) :
+theorem or_shiftLeft_lt (a m k p : Nat) (ha : a < 2 ^ k) (hm : m < 2 ^ p) :
     a ||| (m <<< k) < 2 ^ (k + p) := by
   have hshift : m <<< k < 2 ^ (k + p) := by
     rw [Nat.shiftLeft_eq, Nat.pow_add, Nat.mul_comm (2 ^ k) (2 ^ p)]
@@ -294,6 +295,158 @@ theorem writeBits_wf (bw : BitWriter) (n : Nat) (val : UInt32)
     (hwf : bw.wf) (hn : n ≤ 25) :
     (bw.writeBits n val).wf :=
   (writeBits_spec bw n val hwf hn).2
+
+/-! ## Pre-packed fields up to 48 bits -/
+
+/-- Correctness of the no-pre-drain half of `writeBits64`: an already-masked
+    field that fits together with the old pending state appends exactly its
+    `n` low bits and preserves writer well-formedness. -/
+private theorem writeBits64Small_spec (bw : BitWriter) (n : UInt32) (val : UInt64)
+    (hwf : bw.wf) (hn : n.toNat ≤ 48)
+    (hfit : bw.bitCount.toNat + n.toNat < 64)
+    (hval : val.toNat < 2 ^ n.toNat) :
+    (bw.writeBits64Small n val).toBits =
+        bw.toBits ++ Deflate.Spec.writeBitsLSB n.toNat val.toNat ∧
+      (bw.writeBits64Small n val).wf := by
+  obtain ⟨hbc, hbuf⟩ := hwf
+  have htotal : (bw.bitCount.toUInt32 + n).toNat =
+      bw.bitCount.toNat + n.toNat := by
+    rw [UInt32.toNat_add, UInt8.toNat_toUInt32, Nat.mod_eq_of_lt]
+    omega
+  have hbc64 : bw.bitCount.toUInt64.toNat % 64 = bw.bitCount.toNat := by
+    simp only [UInt8.toNat_toUInt64]
+    omega
+  have hshift : (val <<< bw.bitCount.toUInt64).toNat =
+      val.toNat <<< bw.bitCount.toNat := by
+    rw [UInt64.toNat_shiftLeft, hbc64]
+    apply Nat.mod_eq_of_lt
+    rw [Nat.shiftLeft_eq]
+    calc
+      val.toNat * 2 ^ bw.bitCount.toNat
+          < 2 ^ n.toNat * 2 ^ bw.bitCount.toNat :=
+            Nat.mul_lt_mul_of_pos_right hval (Nat.two_pow_pos _)
+      _ = 2 ^ (n.toNat + bw.bitCount.toNat) := (Nat.pow_add 2 _ _).symm
+      _ ≤ 2 ^ 64 := Nat.pow_le_pow_right (by omega) (by omega)
+  have hacc_nat :
+      (bw.bitBuf ||| (val <<< bw.bitCount.toUInt64)).toNat =
+        bw.bitBuf.toNat ||| (val.toNat <<< bw.bitCount.toNat) := by
+    rw [UInt64.toNat_or, hshift]
+  have haccbound :
+      (bw.bitBuf ||| (val <<< bw.bitCount.toUInt64)).toNat <
+        2 ^ (bw.bitCount.toNat + n.toNat) := by
+    rw [hacc_nat]
+    exact or_shiftLeft_lt bw.bitBuf.toNat val.toNat bw.bitCount.toNat n.toNat hbuf hval
+  have hsmall_def :
+      bw.writeBits64Small n val =
+        flushBatched bw.data (bw.bitBuf ||| (val <<< bw.bitCount.toUInt64))
+          (bw.bitCount.toNat + n.toNat) := by
+    unfold writeBits64Small
+    change flushBatchedU bw.data (bw.bitBuf ||| (val <<< bw.bitCount.toUInt64))
+        (bw.bitCount.toUInt32 + n) = _
+    rw [flushBatchedU_eq, htotal]
+  obtain ⟨hb, hw⟩ := flushBatched_spec bw.data
+    (bw.bitBuf ||| (val <<< bw.bitCount.toUInt64))
+    (bw.bitCount.toNat + n.toNat) haccbound
+  refine ⟨?_, ?_⟩
+  · rw [hsmall_def, hb, hacc_nat]
+    simp only [toBits, List.append_assoc]
+    congr 1
+    rw [writeBitsLSB_eq_map,
+      range_map_split
+        (fun i => (bw.bitBuf.toNat ||| val.toNat <<< bw.bitCount.toNat).testBit i)
+        bw.bitCount.toNat (bw.bitCount.toNat + n.toNat) (Nat.le_add_right _ _),
+      show bw.bitCount.toNat + n.toNat - bw.bitCount.toNat = n.toNat from by omega]
+    congr 1
+    · apply List.map_congr_left
+      intro i hi
+      simp only [List.mem_range] at hi
+      exact testBit_or_shiftLeft_below _ _ _ _ hi
+    · apply List.map_congr_left
+      intro i hi
+      simp only [List.mem_range] at hi
+      rw [Nat.add_comm i bw.bitCount.toNat,
+        testBit_or_shiftLeft_above _ _ _ _ hbuf]
+  · rw [hsmall_def]
+    exact hw
+
+/-- Draining complete pending bytes preserves the represented bit sequence and
+    produces another well-formed writer. -/
+private theorem drainPendingBytes_spec (bw : BitWriter) (hwf : bw.wf) :
+    bw.drainPendingBytes.toBits = bw.toBits ∧ bw.drainPendingBytes.wf := by
+  obtain ⟨_, hbuf⟩ := hwf
+  obtain ⟨hbits, hw⟩ := flushAcc_spec bw.data bw.bitBuf bw.bitCount.toNat hbuf
+  rw [drainPendingBytes_eq]
+  refine ⟨?_, hw⟩
+  simpa only [toBits] using hbits
+
+/-- The post-drain pending count is the old count modulo one byte. -/
+private theorem drainPendingBytes_count (bw : BitWriter) :
+    bw.drainPendingBytes.bitCount.toNat = bw.bitCount.toNat % 8 := by
+  rw [drainPendingBytes_eq, flushAcc_eq]
+  show ((bw.bitCount.toNat % 8).toUInt8).toNat = bw.bitCount.toNat % 8
+  simp only [Nat.toUInt8, UInt8.toNat_ofNat']
+  omega
+
+/-- A pre-packed field of at most 48 bits appends exactly those bits to a
+    well-formed writer, including the pre-drain case needed near bit 64. -/
+private theorem writeBits64_spec (bw : BitWriter) (n : UInt32) (val : UInt64)
+    (hwf : bw.wf) (hn : n.toNat ≤ 48) (hval : val.toNat < 2 ^ n.toNat) :
+    (bw.writeBits64 n val).toBits =
+        bw.toBits ++ Deflate.Spec.writeBitsLSB n.toNat val.toNat ∧
+      (bw.writeBits64 n val).wf := by
+  have htotal : (bw.bitCount.toUInt32 + n).toNat =
+      bw.bitCount.toNat + n.toNat := by
+    rw [UInt32.toNat_add, UInt8.toNat_toUInt32, Nat.mod_eq_of_lt]
+    have hbc := UInt8.toNat_lt bw.bitCount
+    omega
+  unfold writeBits64
+  split
+  next hge =>
+    obtain ⟨hdbits, hdwf⟩ := drainPendingBytes_spec bw hwf
+    have hfit : bw.drainPendingBytes.bitCount.toNat + n.toNat < 64 := by
+      rw [drainPendingBytes_count]
+      omega
+    obtain ⟨hbits, hw⟩ :=
+      writeBits64Small_spec bw.drainPendingBytes n val hdwf hn hfit hval
+    refine ⟨?_, hw⟩
+    rw [hbits, hdbits]
+  next hlt =>
+    have hfit : bw.bitCount.toNat + n.toNat < 64 := by
+      have hnot : ¬ (64 : UInt32).toNat ≤ (bw.bitCount.toUInt32 + n).toNat :=
+        fun hle => hlt (UInt32.le_iff_toNat_le.mpr hle)
+      have hlt' : (bw.bitCount.toUInt32 + n).toNat < (64 : UInt32).toNat := by
+        omega
+      simpa only [htotal, UInt32.reduceToNat] using hlt'
+    exact writeBits64Small_spec bw n val hwf hn hfit hval
+
+theorem writeBits64_toBits (bw : BitWriter) (n : UInt32) (val : UInt64)
+    (hwf : bw.wf) (hn : n.toNat ≤ 48) (hval : val.toNat < 2 ^ n.toNat) :
+    (bw.writeBits64 n val).toBits =
+      bw.toBits ++ Deflate.Spec.writeBitsLSB n.toNat val.toNat :=
+  (writeBits64_spec bw n val hwf hn hval).1
+
+theorem writeBits64_wf (bw : BitWriter) (n : UInt32) (val : UInt64)
+    (hwf : bw.wf) (hn : n.toNat ≤ 48) (hval : val.toNat < 2 ^ n.toNat) :
+    (bw.writeBits64 n val).wf :=
+  (writeBits64_spec bw n val hwf hn hval).2
+
+/-- Concatenating two bounded LSB-first fields by shift/OR concatenates their
+    bit lists.  This is the algebra used by the fused reference-token packer. -/
+theorem writeBitsLSB_or_shift (a b n m : Nat) (ha : a < 2 ^ n) :
+    Deflate.Spec.writeBitsLSB (n + m) (a ||| (b <<< n)) =
+      Deflate.Spec.writeBitsLSB n a ++ Deflate.Spec.writeBitsLSB m b := by
+  rw [writeBitsLSB_eq_map, writeBitsLSB_eq_map, writeBitsLSB_eq_map,
+    range_map_split (fun i => (a ||| b <<< n).testBit i) n (n + m)
+      (Nat.le_add_right _ _),
+    show n + m - n = m from by omega]
+  congr 1
+  · apply List.map_congr_left
+    intro i hi
+    simp only [List.mem_range] at hi
+    exact testBit_or_shiftLeft_below _ _ _ _ hi
+  · apply List.map_congr_left
+    intro i _
+    rw [Nat.add_comm i n, testBit_or_shiftLeft_above _ _ _ _ ha]
 
 /-! ## writeHuffCode correspondence -/
 
@@ -468,5 +621,27 @@ theorem flush_toBits (bw : BitWriter) (hwf : bw.wf) :
       hAtoB]
     congr 1
     rw [hr_bc8, Nat.mod_eq_of_lt (show 8 - bw.bitCount.toNat % 8 < 8 from by omega)]
+
+/-- Flushing is extensional in the logical bit sequence for well-formed
+    writers.  This is the observational bridge for implementations that drain
+    complete pending bytes at different intermediate boundaries. -/
+theorem flush_eq_of_toBits (a b : BitWriter) (ha : a.wf) (hb : b.wf)
+    (hbits : a.toBits = b.toBits) : a.flush = b.flush := by
+  apply Deflate.Correctness.bytesToBits_injective
+  rw [flush_toBits a ha, flush_toBits b hb, hbits]
+  congr 2
+  have hlen_a : a.toBits.length = a.data.size * 8 + a.bitCount.toNat := by
+    change (Deflate.Spec.bytesToBits a.data ++
+      (List.range a.bitCount.toNat).map (fun i => a.bitBuf.toNat.testBit i)).length = _
+    simp only [List.length_append, Deflate.Spec.bytesToBits_length, List.length_map,
+      List.length_range]
+  have hlen_b : b.toBits.length = b.data.size * 8 + b.bitCount.toNat := by
+    change (Deflate.Spec.bytesToBits b.data ++
+      (List.range b.bitCount.toNat).map (fun i => b.bitBuf.toNat.testBit i)).length = _
+    simp only [List.length_append, Deflate.Spec.bytesToBits_length, List.length_map,
+      List.length_range]
+  have hlen := congrArg List.length hbits
+  rw [hlen_a, hlen_b] at hlen
+  omega
 
 end Zip.Native.BitWriter

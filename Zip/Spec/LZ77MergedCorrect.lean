@@ -228,8 +228,8 @@ private theorem hash3U_toNat (data : ByteArray) (p hashSize : Nat) (pU hashSizeU
   subst hpUe
   unfold hash3U lz77Greedy.hash3
   have tail : ∀ w : UInt32,
-      (((w * 2654435761) >>> 16).toUSize % hashSizeU).toNat
-        = ((w * 2654435761) >>> 16).toNat % hashSize := by
+      (((w * 0x1E35A7BD) >>> 16).toUSize % hashSizeU).toNat
+        = ((w * 0x1E35A7BD) >>> 16).toNat % hashSize := by
     intro w; rw [USize.toNat_mod, UInt32.toNat_toUSize, hhsU]
   by_cases h4 : p + 4 ≤ data.size
   · rw [dif_pos h4, dif_pos h4, dif_pos (toUSize_toNat_of_lt hsz)]
@@ -396,7 +396,7 @@ private theorem updateHashesMergedH3FastU_eq (data : ByteArray) (hashSize prevSi
     `USize` branch via `updateHashesMergedFastU_eq`, the proven-bounds `Nat`
     branch via `updateHashesMergedFast_eq`; the fallback branch is definitionally
     it). -/
-private theorem updateHashesMergedGuarded_eq (data : ByteArray) (hashSize prevSize : Nat)
+theorem updateHashesMergedGuarded_eq (data : ByteArray) (hashSize prevSize : Nat)
     (c : Array Nat) (pos j matchLen insertCap : Nat) :
     updateHashesMergedGuarded data hashSize prevSize c pos j matchLen insertCap =
       updateHashesMerged data hashSize prevSize c pos j matchLen insertCap := by
@@ -616,8 +616,8 @@ private theorem mergedLoop_eq (data : ByteArray)
         set!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) pos hps hh,
         set!_append_left prev (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos)
           (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) hmask0]
-      generalize ht'eq : hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos = t'
-      generalize hp'eq : prev.set! (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) = p'
+      generalize ht'eq : hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos = t' at *
+      generalize hp'eq : prev.set! (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) = p' at *
       have hht' : t'.size = hashSize := by rw [← ht'eq, Array.size_set!]; exact hht
       have hps' : p'.size = prevSize := by rw [← hp'eq, Array.size_set!]; exact hps
       have hpv' : min chainWinSize data.size ≤ p'.size := by rw [← hp'eq, Array.size_set!]; exact hpv
@@ -734,24 +734,40 @@ private theorem greedyMergedLoop_eq (data : ByteArray)
         set!_append_right' prev hashTable prevSize (lz77Greedy.hash3 data pos hashSize hlt) pos hps hh,
         set!_append_left prev (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos)
           (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) hmask0]
-      generalize ht'eq : hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos = t'
-      generalize hp'eq : prev.set! (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) = p'
-      have hht' : t'.size = hashSize := by rw [← ht'eq, Array.size_set!]; exact hht
-      have hps' : p'.size = prevSize := by rw [← hp'eq, Array.size_set!]; exact hps
-      have hpv' : min chainWinSize data.size ≤ p'.size := by rw [← hp'eq, Array.size_set!]; exact hpv
-      rw [chainWalkGuardedPackedU_append data p' t' windowSize pos (min 258 (data.size - pos))
-        niceLen (by omega) hpv' (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0]
-      generalize chainWalkGuardedPackedU data p' windowSize pos (min 258 (data.size - pos)) niceLen
-        (by omega) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0 = rmain
-      split
-      · split
-        · rw [updateHashesMergedGuarded_eq,
-            updateHashesMerged_append data hashSize prevSize t' p' pos 1 _ insertCap hhs hht' hps' hpv',
-            updateHashesGuarded_eq]
-          exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
-            (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
+      simp only [chainWalkPackedUUChecked_low, chainWalkPackedUUChecked_high]
+      split <;> rename_i hg
+      all_goals
+        have hht' : (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos).size =
+            hashSize := by rw [Array.size_set!]; exact hht
+        have hps' : (prev.set! (pos &&& 0x7FFF)
+            (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)).size = prevSize := by
+          rw [Array.size_set!]
+          exact hps
+        have hpv' : min chainWinSize data.size ≤ (prev.set! (pos &&& 0x7FFF)
+            (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!)).size := by
+          rw [Array.size_set!]
+          exact hpv
+        rw [chainWalkGuardedPackedU_append data
+          (prev.set! (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!))
+          (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos)
+          windowSize pos (min 258 (data.size - pos)) niceLen (by omega) hpv'
+          (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0]
+        generalize chainWalkGuardedPackedU data
+          (prev.set! (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!))
+          windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
+          (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0 = rmain
+        split
+        · split
+          · rw [updateHashesMergedGuarded_eq,
+              updateHashesMerged_append data hashSize prevSize
+                (hashTable.set! (lz77Greedy.hash3 data pos hashSize hlt) pos)
+                (prev.set! (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!))
+                pos 1 _ insertCap hhs hht' hps' hpv',
+              updateHashesGuarded_eq]
+            exact ih _ (by omega) _ _ _ _ (by rw [updateHashes_size1]; exact hht')
+              (by rw [updateHashes_size2]; exact hps') (by rw [updateHashes_size2]; exact hpv') rfl
+          · exact ih _ (by omega) _ _ _ _ hht' hps' hpv' rfl
         · exact ih _ (by omega) _ _ _ _ hht' hps' hpv' rfl
-      · exact ih _ (by omega) _ _ _ _ hht' hps' hpv' rfl
     · simp only [hlt, ↓reduceDIte]
 
 /-- The merged-array greedy matcher equals the two-array packed greedy matcher. -/

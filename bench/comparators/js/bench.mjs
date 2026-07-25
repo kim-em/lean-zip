@@ -5,13 +5,17 @@
 // avoid it). Honours the shared comparator contract:
 //
 //   node bench.mjs <payload.bin> <level>  ->  stdout JSON
-//   {"out_size":N,"compress_mbps":X,"decompress_mbps":Y}
+//   {"out_size":N,"compress_mbps":X,"decompress_mbps":Y,
+//    "timing_aggregation":"median","timing_reps":5}
 //
 // Timing mirrors ZipBenchReport.lean: median-of-5 reps, itersFor(size) iters per
 // rep, throughput against the uncompressed byte count. Self-verifies its
 // roundtrip before timing.
 import { readFileSync } from "node:fs";
 import { deflateSync, inflateSync } from "fflate";
+
+const TIMING_AGGREGATION = "median";
+const TIMING_REPS = 5;
 
 function itersFor(size) {
   if (size <= 16384) return 50;
@@ -24,7 +28,7 @@ let sink = 0; // defeat dead-code elimination
 
 function medianNsPerOp(iters, op) {
   const reps = [];
-  for (let r = 0; r < 5; r++) {
+  for (let r = 0; r < TIMING_REPS; r++) {
     const t0 = process.hrtime.bigint();
     for (let i = 0; i < iters; i++) sink += op();
     const ns = Number(process.hrtime.bigint() - t0) / Math.max(iters, 1);
@@ -51,6 +55,8 @@ function runDecode(path) {
   process.stdout.write(JSON.stringify({
     decompress_mbps: mbps(size, dNs),
     decoded_size: size,
+    timing_aggregation: TIMING_AGGREGATION,
+    timing_reps: TIMING_REPS,
   }) + "\n");
 }
 
@@ -84,6 +90,8 @@ function main() {
     out_size: comp.length,
     compress_mbps: mbps(size, cNs),
     decompress_mbps: mbps(size, dNs),
+    timing_aggregation: TIMING_AGGREGATION,
+    timing_reps: TIMING_REPS,
   }) + "\n");
 }
 

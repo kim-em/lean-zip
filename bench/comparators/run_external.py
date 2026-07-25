@@ -5,7 +5,8 @@ Track D results JSON.
 Each comparator is a prebuilt CLI (see build_all.sh) honouring the contract:
 
     <cmd...> <payload.bin> <level>   ->   stdout JSON
-    {"out_size": N, "compress_mbps": X, "decompress_mbps": Y}
+    {"out_size": N, "compress_mbps": X, "decompress_mbps": Y,
+     "timing_aggregation": "median", "timing_reps": 5}
 
 It self-verifies its own roundtrip (compress -> decompress == original) and uses
 the same timing methodology as ZipBenchReport.lean (median-of-5, itersFor(size)
@@ -24,6 +25,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from benchmark_json import load_routine, require_routine_timing
 
 # key -> (display label for warnings, run-command prefix, levels to sample)
 COMPARATORS = {
@@ -74,6 +78,8 @@ def collect(key, payloads):
                 out = subprocess.run(cmd + [str(payload), str(level)],
                                      capture_output=True, text=True, check=True)
                 stat = json.loads(out.stdout.strip().splitlines()[-1])
+                require_routine_timing(
+                    stat, f"{key} {pat} {size} L{level} comparator output")
             except (subprocess.CalledProcessError, json.JSONDecodeError, IndexError) as e:
                 err = getattr(e, "stderr", str(e))
                 print(f"  {key} {pat} {size} L{level} failed: {err}", file=sys.stderr)
@@ -96,7 +102,7 @@ def main():
     payloads_dir, results_path = sys.argv[1], Path(sys.argv[2])
     keys = sys.argv[3:] or list(COMPARATORS)
 
-    doc = json.loads(results_path.read_text())
+    doc = load_routine(results_path)
     results = doc["results"]
 
     payloads = discover_payloads(payloads_dir)

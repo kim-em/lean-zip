@@ -74,6 +74,101 @@ private def checkCoresP (label : String) (data : ByteArray) : IO Unit := do
         s!"{label} level {level}: deflateDynamicBlockCoreP ({dynP.size} bytes) ≠ \
            deflateDynamicBlockCore ({dynB.size} bytes)")
 
+/-- Compiled-path gate for the specialized level-one matcher.  Compare the
+    production native-word/wide-histogram entry first with its boxed specialized
+    twin, then with the pre-specialization generic fused entry.  The final
+    `deflateRawBase*` comparison also exercises the actual production shell and
+    its established packed reference; no proof equality is used to discharge
+    any of these runtime checks. -/
+private def checkL1WideFused (label : String) (data : ByteArray) : IO Unit := do
+  let (wideTokens, wideLit, wideDist) := lz77ChainIterPMergedF1U64 data
+  let (boxedTokens, boxedLit, boxedDist) := lz77ChainIterPMergedF1U data
+  let (genericTokens, genericLit, genericDist) :=
+    lz77ChainIterPMergedF data 4 32768 2 258
+  unless wideTokens.toArray == boxedTokens.toArray do
+    throw (IO.userError
+      s!"{label}: lz77ChainIterPMergedF1U64 token stream \
+         ({wideTokens.size} tokens) ≠ boxed F1U ({boxedTokens.size} tokens)")
+  unless wideLit == boxedLit.val do
+    throw (IO.userError s!"{label}: wide L1 lit/length histogram ≠ boxed F1U")
+  unless wideDist == boxedDist.val do
+    throw (IO.userError s!"{label}: wide L1 distance histogram ≠ boxed F1U")
+  unless wideTokens.toArray == genericTokens.toArray do
+    throw (IO.userError
+      s!"{label}: specialized L1 token stream ≠ generic fused L1 \
+         ({wideTokens.size} vs {genericTokens.size} tokens)")
+  unless wideLit == genericLit.val do
+    throw (IO.userError s!"{label}: specialized L1 lit/length histogram ≠ generic fused L1")
+  unless wideDist == genericDist.val do
+    throw (IO.userError s!"{label}: specialized L1 distance histogram ≠ generic fused L1")
+  let counted := tokenFreqsPTA wideTokens
+  unless wideLit == counted.1 && wideDist == counted.2 do
+    throw (IO.userError s!"{label}: wide L1 histograms ≠ compiled tokenFreqsPTA recount")
+  let production := deflateRawBaseFU64Level1 data
+  let boxedOut := deflateRawBaseFLevel1Impl data 1
+  let established := deflateRawBase data 1
+  unless production == boxedOut do
+    throw (IO.userError
+      s!"{label}: deflateRawBaseFU64Level1 ({production.size} bytes) ≠ \
+         boxed L1 implementation ({boxedOut.size} bytes)")
+  unless production == established do
+    throw (IO.userError
+      s!"{label}: deflateRawBaseFU64Level1 ({production.size} bytes) ≠ \
+         established deflateRawBase L1 ({established.size} bytes)")
+
+/-- Direct compiled conformance for the narrowly routed flat token emitter and
+    its single-block core.  Canonical tables built from a real L1 token stream
+    satisfy the production route's bounds.  Starting the two emitters at every
+    pending-bit offset 0–7 covers byte-boundary flushes that a whole-block-only
+    comparison can miss; comparing `flush` observes the complete bit sequence
+    while intentionally ignoring when each implementation drains full bytes. -/
+private def checkFlatDynamicP (label : String) (data : ByteArray) : IO Unit := do
+  let ptoks := lzMatchP data 1
+  let f := tokenFreqsPTA ptoks
+  let lens := dynamicCodeLengths f.1 f.2
+  let plan := dynHeaderCodes lens.1 lens.2
+  have hcl : plan.clCodes.size ≥ 19 :=
+    Nat.le_of_eq (dynHeaderCodes_clCodes_size lens.1 lens.2).symm
+  have hlit : lens.1.length = 286 := (dynamicCodeLengths_length f.1 f.2).1
+  have hdist : lens.2.length = 30 := (dynamicCodeLengths_length f.1 f.2).2
+  have hlitBound : ∀ x ∈ lens.1, x ≤ 15 := (dynamicCodeLengths_bounded f.1 f.2).1
+  have hdistBound : ∀ x ∈ lens.2, x ≤ 15 := (dynamicCodeLengths_bounded f.1 f.2).2
+  let cap := dynBlockBytesWith f.1 f.2 lens.1 lens.2 plan hcl
+  let flatCore := deflateDynamicBlockCorePWithFlat data ptoks lens.1 lens.2 plan hcl
+    hlit hdist hlitBound hdistBound cap
+  let referenceCore := deflateDynamicBlockCorePWith data ptoks lens.1 lens.2 plan hcl
+    hlit hdist cap
+  unless flatCore == referenceCore do
+    throw (IO.userError
+      s!"{label}: flat dynamic core ({flatCore.size} bytes) ≠ \
+         scalar packed core ({referenceCore.size} bytes)")
+
+  let litCodes := canonicalCodes (lens.1.toArray.map Nat.toUInt8)
+  let distCodes := canonicalCodes (lens.2.toArray.map Nat.toUInt8)
+  let litT := packCodeTab litCodes
+  let distT := packCodeTab distCodes
+  have hlitCodes : litCodes.size ≥ 286 := by
+    show (canonicalCodes (lens.1.toArray.map Nat.toUInt8)).size ≥ 286
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray, hlit]
+    omega
+  have hdistCodes : distCodes.size ≥ 30 := by
+    show (canonicalCodes (lens.2.toArray.map Nat.toUInt8)).size ≥ 30
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray, hdist]
+    omega
+  have hlitT : litT.size ≥ 286 := by
+    simpa only [litT, packCodeTab_size] using hlitCodes
+  have hdistT : distT.size ≥ 30 := by
+    simpa only [distT, packCodeTab_size] using hdistCodes
+  let seeds : List (Nat × UInt32) :=
+    [(0, 0), (1, 1), (2, 2), (3, 5), (4, 10), (5, 21), (6, 42), (7, 85)]
+  for (seedBits, seedVal) in seeds do
+    let bw := (Zip.Native.BitWriter.emptyWithCapacity (cap + 1)).writeBits seedBits seedVal
+    let flat := emitTokensWithCodesTAPTFlatZero bw ptoks litT distT hlitT hdistT
+    let reference := emitTokensWithCodesTAPT bw ptoks litT distT hlitT hdistT 0
+    unless flat.flush == reference.flush do
+      throw (IO.userError
+        s!"{label}: flat token emitter ≠ scalar emitter from bit offset {seedBits}")
+
 /-- #2737 gate: the packed observation-divergence split pipeline must match
     the boxed reference — `chooseSplitsHeuristicP` against
     `chooseSplitsHeuristic` over the `unpackTok` view (cut-list equality), and
@@ -130,6 +225,34 @@ def tests : IO Unit := do
   checkCoresP "size1" (ByteArray.mk #[42])
   checkCoresP "size2" (ByteArray.mk #[42, 42])
   checkCoresP "size3" (ByteArray.mk #[7, 7, 7])
+  -- The production L1 implementation has two nested refinements that broad
+  -- roundtrip coverage does not isolate: native-word outer matcher state and
+  -- wide byte-backed frequency counters.  Exercise the <3 fallback, the
+  -- three-byte hash tail, the four-byte wide-hash boundary, long max-length
+  -- matches, literal-heavy input, a 32 KiB window-edge repeat, and real text.
+  let l1Text64k := mkTextData 65536
+  let l1Constant64k := mkConstantData 65536
+  let l1Prng64k := mkPrngData 65536
+  let windowBlock := mkPrngData 32768 0xC0FFEE
+  let l1WindowEdge := windowBlock ++ windowBlock
+  for (label, data) in
+      [("size0", ByteArray.empty), ("size1", ByteArray.mk #[42]),
+       ("size2", ByteArray.mk #[42, 42]), ("hash-tail3", ByteArray.mk #[7, 7, 7]),
+       ("wide-hash4", ByteArray.mk #[1, 2, 3, 4]),
+       ("constant64k", l1Constant64k), ("prng64k", l1Prng64k),
+       ("window-edge64k", l1WindowEdge), ("text64k", l1Text64k),
+       ("alice29", alice)] do
+    checkL1WideFused label data
+
+  -- Force the flat emitter independently of stored/fixed/dynamic arbitration.
+  -- The three nonempty shapes cover reference-heavy, literal-heavy, and mixed
+  -- token streams; empty also pins the core's EOB-only arm.
+  checkFlatDynamicP "size0" ByteArray.empty
+  checkFlatDynamicP "hash-tail3" (ByteArray.mk #[7, 7, 7])
+  checkFlatDynamicP "constant64k" l1Constant64k
+  checkFlatDynamicP "prng64k" l1Prng64k
+  checkFlatDynamicP "text64k" l1Text64k
+  checkFlatDynamicP "alice29" alice
   -- #2737: packed split pipeline against the boxed reference. The
   -- heterogeneous input's statistics shift well above the block-byte floor,
   -- so the packed heuristic must propose at least one cut there (the

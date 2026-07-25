@@ -230,6 +230,171 @@ decreasing_by all_goals (rw [hstep]; omega)
   else
     emitTokensWithCodesPT bw tokens litT distT hlit hdist 0
 
+/-- Flat-state runtime loop for `emitTokensWithCodesTAPT`.  It carries the
+    three `BitWriter` fields separately, avoiding one writer reconstruction per
+    token.  A reference token's length-code/extra and distance-code/extra bits
+    are packed into one `UInt64` field before they are merged into the pending
+    accumulator.  If that field would fill all 64 accumulator bits, already
+    complete pending bytes are drained first; production callers always enter
+    with fewer than 32 pending bits, so this leaves fewer than 8 bits and the
+    at-most-48-bit reference field then fits without overflow. -/
+@[inline] def emitRefWithCodesPTFlat (bw : BitWriter)
+    (litT distT : Array UInt32) (w : UInt32) : BitWriter :=
+  let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
+  let idx := codeIdx lw
+  if hlitlt : idx + 257 < litT.size then
+    let e := litT[idx + 257]
+    let lenN : UInt32 := (e >>> 16) &&& 0xFF
+    let lenExtraN : UInt32 := (lw >>> 8) &&& 0xFF
+    let lenMask : UInt64 := (1 <<< lenExtraN.toUInt64) - 1
+    let lenBits : UInt64 := e.toUInt16.toUInt64 |||
+      (((codeVal lw).toUInt64 &&& lenMask) <<< lenN.toUInt64)
+    let lenTotal := lenN + lenExtraN
+    let dw := distCodeWord ((w &&& 0xFFFF).toNat)
+    let dIdx := codeIdx dw
+    if hdistlt : dIdx < distT.size then
+      let de := distT[dIdx]
+      let distN : UInt32 := (de >>> 16) &&& 0xFF
+      let distExtraN : UInt32 := (dw >>> 8) &&& 0xFF
+      let distMask : UInt64 := (1 <<< distExtraN.toUInt64) - 1
+      let distBits : UInt64 := de.toUInt16.toUInt64 |||
+        (((codeVal dw).toUInt64 &&& distMask) <<< distN.toUInt64)
+      let bits : UInt64 := lenBits ||| (distBits <<< lenTotal.toUInt64)
+      bw.writeBits64 (lenTotal + distN + distExtraN) bits
+    else
+      bw.writeBits64 lenTotal lenBits
+  else bw
+
+def emitTokensWithCodesTAPTFlatLoop (data : ByteArray) (acc : UInt64) (bc : UInt32)
+    (tokens : TokenArray) (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (i : Nat) : BitWriter :=
+  if h : i < tokens.size then
+    let w := tokens.get i h
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      have he : w.toUInt8.toNat < litT.size := by
+        have := UInt8.toNat_lt w.toUInt8
+        omega
+      let e := litT[w.toUInt8.toNat]
+      let n : UInt32 := (e >>> 16) &&& 0xFF
+      let bw' := BitWriter.writeBits64 ⟨data, acc, bc.toUInt8⟩ n e.toUInt16.toUInt64
+      emitTokensWithCodesTAPTFlatLoop bw'.data bw'.bitBuf bw'.bitCount.toUInt32
+        tokens litT distT hlit hdist (i + 1)
+    else
+      let bw' := emitRefWithCodesPTFlat ⟨data, acc, bc.toUInt8⟩ litT distT w
+      emitTokensWithCodesTAPTFlatLoop bw'.data bw'.bitBuf bw'.bitCount.toUInt32
+        tokens litT distT hlit hdist (i + 1)
+  else
+    ⟨data, acc, bc.toUInt8⟩
+termination_by tokens.size - i
+
+/-- Production-specialized form of the flat token loop.  This spells out the
+    bounded `writeBits64` transitions so the native compiler keeps the pending
+    accumulator and count in scalar registers throughout the hot loop. -/
+def emitTokensWithCodesTAPTFlatFastLoop (data : ByteArray) (acc : UInt64) (bc : UInt32)
+    (tokens : TokenArray) (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (i : Nat) : BitWriter :=
+  if h : i < tokens.size then
+    let w := tokens.get i h
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      have he : w.toUInt8.toNat < litT.size := by
+        have := UInt8.toNat_lt w.toUInt8
+        omega
+      let e := litT[w.toUInt8.toNat]
+      let n : UInt32 := (e >>> 16) &&& 0xFF
+      let acc' := acc ||| (e.toUInt16.toUInt64 <<< bc.toUInt64)
+      let total := bc + n
+      if total ≥ 32 then
+        let k := total >>> 3
+        emitTokensWithCodesTAPTFlatFastLoop
+          (BitWriter.flushBytesWideU data acc' k)
+          (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
+          tokens litT distT hlit hdist (i + 1)
+      else
+        emitTokensWithCodesTAPTFlatFastLoop data acc' total.toUInt8.toUInt32
+          tokens litT distT hlit hdist (i + 1)
+    else
+      let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
+      let idx := codeIdx lw
+      if hlitlt : idx + 257 < litT.size then
+        let e := litT[idx + 257]
+        let lenN : UInt32 := (e >>> 16) &&& 0xFF
+        let lenExtraN : UInt32 := ((lw >>> 8) &&& 0xFF)
+        let lenMask : UInt64 := (1 <<< lenExtraN.toUInt64) - 1
+        let lenBits : UInt64 :=
+          e.toUInt16.toUInt64 |||
+            ((codeVal lw).toUInt64 &&& lenMask) <<< lenN.toUInt64
+        let lenTotal := lenN + lenExtraN
+        let dw := distCodeWord ((w &&& 0xFFFF).toNat)
+        let dIdx := codeIdx dw
+        if hdistlt : dIdx < distT.size then
+          let de := distT[dIdx]
+          let distN : UInt32 := (de >>> 16) &&& 0xFF
+          let distExtraN : UInt32 := ((dw >>> 8) &&& 0xFF)
+          let distMask : UInt64 := (1 <<< distExtraN.toUInt64) - 1
+          let distOff := lenTotal
+          let bits : UInt64 :=
+            lenBits ||| (de.toUInt16.toUInt64 <<< distOff.toUInt64) |||
+              (((codeVal dw).toUInt64 &&& distMask) <<<
+                (distOff.toUInt64 + distN.toUInt64))
+          let n := lenTotal + distN + distExtraN
+          if bc + n ≥ 64 then
+            let k0 := bc >>> 3
+            let data0 := BitWriter.flushBytesWideU data acc k0
+            let acc0 := acc >>> (k0.toUInt64 <<< 3)
+            let bc0 := bc &&& 7
+            let acc' := acc0 ||| (bits <<< bc0.toUInt64)
+            let total := bc0 + n
+            if total ≥ 32 then
+              let k := total >>> 3
+              emitTokensWithCodesTAPTFlatFastLoop
+                (BitWriter.flushBytesWideU data0 acc' k)
+                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
+                tokens litT distT hlit hdist (i + 1)
+            else
+              emitTokensWithCodesTAPTFlatFastLoop data0 acc' total.toUInt8.toUInt32
+                tokens litT distT hlit hdist (i + 1)
+          else
+            let acc' := acc ||| (bits <<< bc.toUInt64)
+            let total := bc + n
+            if total ≥ 32 then
+              let k := total >>> 3
+              emitTokensWithCodesTAPTFlatFastLoop
+                (BitWriter.flushBytesWideU data acc' k)
+                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
+                tokens litT distT hlit hdist (i + 1)
+            else
+              emitTokensWithCodesTAPTFlatFastLoop data acc' total.toUInt8.toUInt32
+                tokens litT distT hlit hdist (i + 1)
+        else
+          let acc' := acc ||| (lenBits <<< bc.toUInt64)
+          let total := bc + lenTotal
+          if total ≥ 32 then
+            let k := total >>> 3
+            emitTokensWithCodesTAPTFlatFastLoop
+              (BitWriter.flushBytesWideU data acc' k)
+              (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
+              tokens litT distT hlit hdist (i + 1)
+          else
+            emitTokensWithCodesTAPTFlatFastLoop data acc' total.toUInt8.toUInt32
+              tokens litT distT hlit hdist (i + 1)
+      else
+        emitTokensWithCodesTAPTFlatFastLoop data acc bc
+          tokens litT distT hlit hdist (i + 1)
+  else
+    ⟨data, acc, bc.toUInt8⟩
+termination_by tokens.size - i
+
+/-- Flat-state packed-table emitter used by the proof-gated single-block
+    production core. -/
+def emitTokensWithCodesTAPTFlat (bw : BitWriter) (tokens : TokenArray)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (i : Nat) : BitWriter :=
+  emitTokensWithCodesTAPTFlatLoop bw.data bw.bitBuf bw.bitCount.toUInt32
+    tokens litT distT hlit hdist i
+
 /-- `TokenArray` twin of `emitTokensWithCodesPT` (stage 6/7 of the token-stream
     unboxing): the packed-table dynamic emit loop reading each packed word from
     the 4-byte-per-token `TokenArray` via `.get` instead of the 8-byte
@@ -255,6 +420,25 @@ def emitTokensWithCodesTAPT (bw : BitWriter) (tokens : TokenArray)
         hlit hdist (i + 1)
   else bw
 termination_by tokens.size - i
+
+/-- Zero-index entry point for the flat implementation.  Keeping the production
+    route fixed at zero lets native code specialize away the generic boxed
+    starting-index path while the public proof helper remains general. -/
+def emitTokensWithCodesTAPTFlatZero (bw : BitWriter) (tokens : TokenArray)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
+  emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf bw.bitCount.toUInt32
+    tokens litT distT hlit hdist 0
+
+/-- Logical proof helper for the flat single-block route.  The proof-gated
+    production block calls `emitTokensWithCodesTAPTFlatZero` directly and uses
+    `emitTokensWithCodesTAPTFlatZero_eq_routed` to connect that implementation
+    to this body under its canonical code-table bounds.  The shared multi-block
+    emitter continues to call the reference `emitTokensWithCodesTAPT`. -/
+def emitTokensWithCodesTAPTFlatRouted (bw : BitWriter) (tokens : TokenArray)
+    (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
+  emitTokensWithCodesTAPTFlat bw tokens litT distT hlit hdist 0
 
 /-- Write the dynamic Huffman tree header via BitWriter.
     This is the native equivalent of spec `encodeDynamicTrees`, writing
@@ -551,6 +735,72 @@ def deflateDynamicBlockCorePWith (data : ByteArray) (tokens : TokenArray)
     let (code, len) := litCodes[256]'h256
     let bw := bw.writeHuffCode code len
     bw.flush
+
+/-- Shared source body for the two proof-gated flat single-block entry points.
+    It is inlined into those block-sized wrappers, not into their much larger
+    base-candidate callers, so the recursive emitter remains one native helper
+    without bloating `deflateRawBaseF`. -/
+@[inline] def deflateDynamicBlockCorePWithFlatBody
+    (data : ByteArray) (tokens : TokenArray)
+    (litLens distLens : List Nat) (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30)
+    (_hlit_bound : ∀ x ∈ litLens, x ≤ 15) (_hdist_bound : ∀ x ∈ distLens, x ≤ 15)
+    (cap : Nat := 0) : ByteArray :=
+  let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
+  let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
+  let bw := BitWriter.emptyWithCapacity cap
+  let bw := bw.writeBits 1 1  -- BFINAL
+  let bw := bw.writeBits 2 2  -- BTYPE = 10
+  let bw := writeDynamicHeaderWith bw litLens distLens p hcl
+  have hlit_size : litCodes.size ≥ 286 := by
+    show (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size ≥ 286
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have hdist_size : distCodes.size ≥ 30 := by
+    show (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size ≥ 30
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  have h256 : 256 < litCodes.size := by
+    show 256 < (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size
+    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
+  if data.size == 0 then
+    let (code, len) := litCodes[256]'h256
+    let bw := bw.writeHuffCode code len
+    bw.flush
+
+  else
+    have hlitT_size : (packCodeTab litCodes).size ≥ 286 := by
+      rw [packCodeTab_size]; exact hlit_size
+    have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
+      rw [packCodeTab_size]; exact hdist_size
+    let bw := emitTokensWithCodesTAPTFlatZero bw tokens
+      (packCodeTab litCodes) (packCodeTab distCodes) hlitT_size hdistT_size
+    let (code, len) := litCodes[256]'h256
+    let bw := bw.writeHuffCode code len
+    bw.flush
+
+/-- Flat-state single-block twin of `deflateDynamicBlockCorePWith`.  This is
+    deliberately a separate production entry point rather than an
+    `implemented_by` replacement for the general token emitter: only callers
+    whose dynamic-tree lengths are known to be at most 15 may select it.  The
+    proof arguments are erased; operationally the sole change is the narrowly
+    routed flat token loop in the nonempty dynamic-block arm. -/
+def deflateDynamicBlockCorePWithFlat (data : ByteArray) (tokens : TokenArray)
+    (litLens distLens : List Nat) (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30)
+    (hlit_bound : ∀ x ∈ litLens, x ≤ 15) (hdist_bound : ∀ x ∈ distLens, x ≤ 15)
+    (cap : Nat := 0) : ByteArray :=
+  deflateDynamicBlockCorePWithFlatBody data tokens litLens distLens p hcl hlit hdist
+    hlit_bound hdist_bound cap
+
+/-- Frequency-taking twin kept as a second compact native caller of the shared
+    flat emitter; this prevents LTO from cloning the large recursive loop into
+    either block shell. -/
+private def deflateDynamicBlockCorePWithFlatF (data : ByteArray) (tokens : TokenArray)
+    (litLens distLens : List Nat) (p : DynHeaderPlan) (hcl : p.clCodes.size ≥ 19)
+    (hlit : litLens.length = 286) (hdist : distLens.length = 30)
+    (hlit_bound : ∀ x ∈ litLens, x ≤ 15) (hdist_bound : ∀ x ∈ distLens, x ≤ 15)
+    (cap : Nat := 0) : ByteArray :=
+  deflateDynamicBlockCorePWithFlatBody data tokens litLens distLens p hcl hlit hdist
+    hlit_bound hdist_bound cap
 
 /-- The plan-taking emitter with the canonical plan equals the original packed
     emitter: the only difference is the header write, bridged by
@@ -2001,9 +2251,10 @@ def deflateRawBaseTokens (data : ByteArray) (tokens : Array LZ77Token) : ByteArr
     (conformance-tested in `ZipTest/PackedTokens.lean`).
 
     The dynamic-tree header plan (`dynHeaderCodes`) is built **once** and reused
-    for both sizing (`dynBlockBytesWith`) and emit (`deflateDynamicBlockCorePWith`)
+    for both sizing (`dynBlockBytesWith`) and emit (`deflateDynamicBlockCorePWithFlat`)
     rather than rebuilt in each — the #2627 dedup; equal to the un-deduped form by
-    `dynBlockBytesWith_dynHeaderCodes` / `deflateDynamicBlockCorePWith_dynHeaderCodes`
+    `dynBlockBytesWith_dynHeaderCodes` /
+    `deflateDynamicBlockCorePWithFlat_dynHeaderCodes`
     (used in `deflateRawBase_def`). -/
 def deflateRawBaseP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
   let f := tokenFreqsPTA ptokens
@@ -2016,8 +2267,9 @@ def deflateRawBaseP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
   let storedBytes := storedBlockBytes data
   if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
   else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
-  else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes
+  else deflateDynamicBlockCorePWithFlat data ptokens lens.1 lens.2 plan hcl
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    (dynamicCodeLengths_bounded f.1 f.2).1 (dynamicCodeLengths_bounded f.1 f.2).2 dynBytes
 
 /-- `deflateRawBaseP` with the whole-stream frequencies supplied as a parameter
     instead of recomputed via `tokenFreqsP ptokens` — the emit twin of
@@ -2035,8 +2287,9 @@ def deflateRawBasePF (data : ByteArray) (ptokens : TokenArray)
   let storedBytes := storedBlockBytes data
   if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
   else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
-  else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes
+  else deflateDynamicBlockCorePWithFlatF data ptokens lens.1 lens.2 plan hcl
+    (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+    (dynamicCodeLengths_bounded f.1 f.2).1 (dynamicCodeLengths_bounded f.1 f.2).2 dynBytes
 
 /-- `deflateRawBasePF` at the whole-stream frequencies is `deflateRawBaseP`. -/
 theorem deflateRawBasePF_tokenFreqsP (data : ByteArray) (ptokens : TokenArray) :
@@ -2066,8 +2319,9 @@ def deflateRawBasePPrep (data : ByteArray) (ptokens : TokenArray) : Nat × (Unit
    fun _ =>
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
     else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
-    else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes)
+    else deflateDynamicBlockCorePWithFlat data ptokens lens.1 lens.2 plan hcl
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+      (dynamicCodeLengths_bounded f.1 f.2).1 (dynamicCodeLengths_bounded f.1 f.2).2 dynBytes)
 
 /-- The prep's emit thunk is exactly `deflateRawBaseP` (same shared plan). -/
 theorem deflateRawBasePPrep_emit (data : ByteArray) (ptokens : TokenArray) :
@@ -2130,8 +2384,9 @@ def deflateRawBasePPrepF (data : ByteArray) (ptokens : TokenArray)
    fun _ =>
     if storedBytes < (if fixedBytes < dynBytes then fixedBytes else dynBytes) then deflateStoredPure data
     else if fixedBytes < dynBytes then deflateFixedBlockP data ptokens fixedBytes
-    else deflateDynamicBlockCorePWith data ptokens lens.1 lens.2 plan hcl
-      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2 dynBytes)
+    else deflateDynamicBlockCorePWithFlatF data ptokens lens.1 lens.2 plan hcl
+      (dynamicCodeLengths_length f.1 f.2).1 (dynamicCodeLengths_length f.1 f.2).2
+      (dynamicCodeLengths_bounded f.1 f.2).1 (dynamicCodeLengths_bounded f.1 f.2).2 dynBytes)
 
 /-- `deflateRawBasePPrepF` at the whole-stream frequencies is `deflateRawBasePPrep`. -/
 theorem deflateRawBasePPrepF_tokenFreqsP (data : ByteArray) (ptokens : TokenArray) :
@@ -2149,16 +2404,38 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
 theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseP data (lzMatchP data level) = deflateRawBase data level := rfl
 
-/-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**:
-    the fused matcher (`lz77ChainIterPMergedF`) produces the packed tokens and
-    their `tokenFreqsP` histograms together, and the base sizing/emit consumes
-    those frequencies directly (`deflateRawBasePF`) instead of re-walking the
-    token array with a second `tokenFreqsP`. Byte-identical to `deflateRawBase`
-    on the greedy tier (`deflateRawBaseF_eq`). -/
-def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
-  let (ptokens, litF, distF) :=
-    lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
+/-- Boxed-histogram fused base path. Level one uses the specialized native-word
+    outer loop; levels two and three retain the generic fused matcher. -/
+def deflateRawBaseFLevel1Impl (data : ByteArray) (level : UInt8) : ByteArray :=
+  let fused :=
+    if level == 1 then lz77ChainIterPMergedF1U data
+    else lz77ChainIterPMergedF data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  let (ptokens, litF, distF) := fused
   deflateRawBasePF data ptokens (litF.val, distF.val)
+
+/-- Proven L1 path combining the native-word specialized outer loop with one
+    unboxed `ByteArray` histogram. The matcher entry owns the packing guard and
+    retains the boxed specialized implementation as its exact fallback. -/
+def deflateRawBaseFU64Level1 (data : ByteArray) : ByteArray :=
+  let (ptokens, litF, distF) := lz77ChainIterPMergedF1U64 data
+  deflateRawBasePF data ptokens (litF, distF)
+
+/-- The guarded wide-counter L1 implementation is byte-identical to the
+    established boxed-histogram fused implementation. -/
+theorem deflateRawBaseFU64Level1_eq (data : ByteArray) :
+    deflateRawBaseFU64Level1 data = deflateRawBaseFLevel1Impl data 1 := by
+  unfold deflateRawBaseFU64Level1 deflateRawBaseFLevel1Impl
+  rw [lz77ChainIterPMergedF1U64_eq]
+  simp
+
+/-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**.
+    Level 1 uses the guarded wide-counter matcher; levels 2–3 use the established
+    boxed fused matcher.  Both produce the packed tokens and `tokenFreqsP`
+    histograms together, so base sizing/emission avoids a second token walk.
+    Byte-identical to `deflateRawBase` on the greedy tier (`deflateRawBaseF_eq`). -/
+def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
+  if level == 1 then deflateRawBaseFU64Level1 data
+  else deflateRawBaseFLevel1Impl data level
 
 /-- On the greedy tier (`level ≤ 3`, i.e. `¬ 4 ≤ level`) the fused base candidate
     is byte-identical to `deflateRawBase`: the fused matcher returns exactly the
@@ -2166,13 +2443,28 @@ def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
     those frequencies `deflateRawBasePF` is `deflateRawBaseP`. -/
 theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ level)) :
     deflateRawBaseF data level = deflateRawBase data level := by
-  have hlz : lzMatchP data level =
-      lz77ChainIterPMerged data (chainDepth level) 32768 (insertCap level) (niceLen level) := by
-    unfold lzMatchP; rw [if_neg h]
-  unfold deflateRawBaseF deflateRawBase
-  rw [hlz, lz77ChainIterPMergedF_eq]
-  simp only [← tokenFreqsPTA_toArray]
-  exact deflateRawBasePF_tokenFreqsP data _
+  unfold deflateRawBaseF
+  by_cases hlevel : level = 1
+  · subst level
+    simp only [beq_self_eq_true, ↓reduceIte]
+    rw [deflateRawBaseFU64Level1_eq]
+    unfold deflateRawBaseFLevel1Impl
+    simp only [beq_self_eq_true, ↓reduceIte]
+    rw [lz77ChainIterPMergedF1U_eq]
+    simp only [lz77ChainIterPMergedF_eq]
+    rw [← tokenFreqsPTA_toArray]
+    rw [deflateRawBasePF_tokenFreqsP]
+    unfold deflateRawBase lzMatchP chainDepth insertCap niceLen
+    simp only [show ¬ (4 : UInt8) ≤ 1 by decide,
+      show (1 : UInt8) ≤ 1 by decide, show (1 : UInt8) ≤ 4 by decide, ↓reduceIte]
+  · rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+    unfold deflateRawBaseFLevel1Impl
+    rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+    simp only [lz77ChainIterPMergedF_eq]
+    rw [← tokenFreqsPTA_toArray]
+    rw [deflateRawBasePF_tokenFreqsP]
+    unfold deflateRawBase lzMatchP
+    simp only [h, ↓reduceIte]
 
 theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     (choose : Array LZ77Token → List Nat) (level : UInt8) :

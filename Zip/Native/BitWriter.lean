@@ -302,6 +302,63 @@ theorem flushBatchedU_eq (data : ByteArray) (acc : UInt64) (totalU : UInt32) :
     rw [if_neg h, if_neg hn]
     congr 1
 
+/-! ### Wider pre-packed fields
+
+The dynamic token emitter can pre-pack a complete reference token into at most
+48 bits.  `writeBits64Small` merges such an already-masked field into a writer
+when the combined pending count stays below 64.  `writeBits64` handles the only
+remaining case by first draining the writer's already-complete pending bytes;
+for a well-formed writer this leaves fewer than eight bits, so a ≤48-bit field
+then fits.  These helpers keep the token loop's state flat after inlining while
+giving the proof layer one reusable bit-sequence primitive to reason about. -/
+
+/-- Drain all complete pending bytes, preserving only `bitCount % 8` bits. -/
+@[inline] def drainPendingBytes (bw : BitWriter) : BitWriter :=
+  let bc := bw.bitCount.toUInt32
+  let k := bc >>> 3
+  ⟨flushBytesWideU bw.data bw.bitBuf k, dropBytesU bw.bitBuf k, (bc &&& 7).toUInt8⟩
+
+/-- Draining complete pending bytes is exactly `flushAcc` at the old pending
+    count; the scalar implementation only replaces its byte loop and shifts. -/
+theorem drainPendingBytes_eq (bw : BitWriter) :
+    drainPendingBytes bw = flushAcc bw.data bw.bitBuf bw.bitCount.toNat := by
+  unfold drainPendingBytes
+  dsimp only
+  rw [flushAcc_eq, flushBytesWideU_eq, dropBytesU_eq]
+  have hshift : (bw.bitCount.toUInt32 >>> 3).toNat = bw.bitCount.toNat / 8 := by
+    rw [UInt32.toNat_shiftRight, UInt8.toNat_toUInt32]
+    have h3 : (3 : UInt32).toNat = 3 := rfl
+    rw [h3, Nat.mod_eq_of_lt (by omega : (3 : Nat) < 32), Nat.shiftRight_eq_div_pow]
+  rw [hshift]
+  congr 1
+  apply UInt8.toNat_inj.mp
+  rw [UInt32.toNat_toUInt8, UInt32.toNat_and, UInt8.toNat_toUInt32]
+  have h7 : (7 : UInt32).toNat = 7 := rfl
+  rw [h7]
+  have hand : bw.bitCount.toNat &&& 7 = bw.bitCount.toNat % 8 := by
+    simpa using Nat.and_two_pow_sub_one_eq_mod bw.bitCount.toNat 3
+  rw [hand]
+  simp only [Nat.toUInt8, UInt8.toNat_ofNat']
+
+/-- Merge an already-masked LSB-first `UInt64` field when `bitCount + n < 64`
+    in production.  Callers establish `val < 2^n` and use `n ≤ 48`. -/
+@[inline] def writeBits64Small (bw : BitWriter) (n : UInt32) (val : UInt64) : BitWriter :=
+  let acc := bw.bitBuf ||| (val <<< bw.bitCount.toUInt64)
+  let total := bw.bitCount.toUInt32 + n
+  if total ≥ 32 then
+    ⟨flushBytesWideU bw.data acc (total >>> 3), dropBytesU acc (total >>> 3),
+      (total &&& 7).toUInt8⟩
+  else
+    ⟨bw.data, acc, total.toUInt8⟩
+
+/-- Write an LSB-first pre-packed field of up to 48 bits.  If it would fill the
+    64-bit accumulator, first drain complete bytes from the old pending state. -/
+@[inline] def writeBits64 (bw : BitWriter) (n : UInt32) (val : UInt64) : BitWriter :=
+  if bw.bitCount.toUInt32 + n ≥ 64 then
+    (drainPendingBytes bw).writeBits64Small n val
+  else
+    bw.writeBits64Small n val
+
 /-- Write `n` bits (n ≤ 25) from `val`, LSB first.
     Fixed-width fields in DEFLATE are packed LSB-first.
 

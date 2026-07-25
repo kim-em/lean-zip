@@ -415,6 +415,44 @@ theorem lz77Greedy.goUW_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
     exact lz77Greedy.goU_eq data p1 p2 i maxLen hsz h1 h2 hile hu1 hu2
 termination_by maxLen - i
 
+/-- The guard-free `USize` count-match entry computes the same length as
+    `lz77Greedy.countMatch`.  Unlike the latter, its caller supplies the one
+    buffer-addressability witness and already-converted indices. -/
+theorem countMatchUCore_eq (data : ByteArray) (p1 p2 maxLen : Nat)
+    (p1U p2U maxLenU : USize)
+    (hp1U : p1U.toNat = p1) (hp2U : p2U.toNat = p2)
+    (hmaxU : maxLenU.toNat = maxLen)
+    (hsz : data.size < USize.size)
+    (h1 : p1 + maxLen ≤ data.size) (h2 : p2 + maxLen ≤ data.size)
+    (hu1 : p1U.toNat + maxLenU.toNat ≤ data.size)
+    (hu2 : p2U.toNat + maxLenU.toNat ≤ data.size) :
+    (countMatchUCore data p1U p2U maxLenU hsz hu1 hu2).toNat =
+      lz77Greedy.countMatch data p1 p2 maxLen h1 h2 := by
+  have ep1 : p1U = p1.toUSize := by
+    apply USize.toNat_inj.mp
+    rw [hp1U, toUSize_toNat_of_lt (show p1 < USize.size by omega)]
+  have ep2 : p2U = p2.toUSize := by
+    apply USize.toNat_inj.mp
+    rw [hp2U, toUSize_toNat_of_lt (show p2 < USize.size by omega)]
+  have emax : maxLenU = maxLen.toUSize := by
+    apply USize.toNat_inj.mp
+    rw [hmaxU, toUSize_toNat_of_lt (show maxLen < USize.size by omega)]
+  subst p1U
+  subst p2U
+  subst maxLenU
+  have hcore :
+      (countMatchUCore data p1.toUSize p2.toUSize maxLen.toUSize hsz hu1 hu2).toNat =
+        lz77Greedy.go data p1 p2 0 maxLen h1 h2 := by
+    unfold countMatchUCore
+    exact lz77Greedy.goUW_eq data p1 p2 0 maxLen hsz h1 h2 (by omega) hu1 hu2 (by simp)
+  have hcount : lz77Greedy.countMatch data p1 p2 maxLen h1 h2 =
+      lz77Greedy.go data p1 p2 0 maxLen h1 h2 := by
+    rw [lz77Greedy.countMatch]
+    split
+    · exact lz77Greedy.goUW_eq data p1 p2 0 maxLen _ h1 h2 (by omega) _ _ (by simp)
+    · rfl
+  exact hcore.trans hcount.symm
+
 /-- `countMatch` returns a count of consecutive matching bytes starting from
     position 0, with all counted positions verified equal. -/
 theorem lz77Greedy.countMatch_matches (data : ByteArray) (p1 p2 maxLen : Nat)
