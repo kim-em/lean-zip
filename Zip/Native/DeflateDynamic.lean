@@ -1774,6 +1774,24 @@ boxed reference via `deflateDynamicBlocksSharedAtP_eq`
   if w &&& ((1 : UInt32) <<< 31) = 0 then 1
   else ((w >>> 16) &&& 0x7FFF).toNat
 
+/-- Increment the observation counter selected by a `Nat` class.  Kept as a
+    named inline helper so the reference and native-word split walkers can be
+    related without expanding ten nested tuple projections at every step. -/
+@[inline] def splitBumpN (c : Nat)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 : Nat) :
+    Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat :=
+  match c with
+  | 0 => (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
+  | 1 => (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
+  | 2 => (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
+  | 3 => (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
+  | 4 => (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
+  | 5 => (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
+  | 6 => (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
+  | 7 => (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
+  | 8 => (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
+  | _ => (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+
 /-- The per-token core of `chooseSplitsHeuristicP`, threaded as a tail-recursive
     loop over explicit scalar state so the hot accumulators compile to register
     arithmetic instead of `Array Nat` `set!`/`getD` (#2762). The ten observation
@@ -1794,17 +1812,7 @@ def chooseSplitsHeuristicP.go (toks : TokenArray)
     let c := splitTokenClassP t
     let tb := splitTokenBytesP t
     let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
-      match c with
-      | 0 => (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
-      | 1 => (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
-      | 2 => (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
-      | 3 => (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
-      | 4 => (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
-      | 5 => (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
-      | 6 => (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
-      | 7 => (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
-      | 8 => (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
-      | _ => (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+      splitBumpN c n0 n1 n2 n3 n4 n5 n6 n7 n8 n9
     let newTot := newTot + 1
     let blockBytes := blockBytes + tb
     let remaining := remaining - tb
@@ -1885,17 +1893,7 @@ def chooseSplitsHeuristicPArray.go (toks : Array UInt32)
     let c := splitTokenClassP t
     let tb := splitTokenBytesP t
     let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
-      match c with
-      | 0 => (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
-      | 1 => (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
-      | 2 => (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
-      | 3 => (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
-      | 4 => (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
-      | 5 => (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
-      | 6 => (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
-      | 7 => (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
-      | 8 => (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
-      | _ => (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+      splitBumpN c n0 n1 n2 n3 n4 n5 n6 n7 n8 n9
     let newTot := newTot + 1
     let blockBytes := blockBytes + tb
     let remaining := remaining - tb
@@ -1992,6 +1990,184 @@ theorem chooseSplitsHeuristicP_toArray (toks : TokenArray) (totalBytes : Nat)
   unfold chooseSplitsHeuristicP chooseSplitsHeuristicPArray
   rw [chooseSplitsHeuristicP.go_toArray toks minBlockBytes softMaxBlockBytes checkTokens
     (toks.size + 1) 0 (by omega)]
+
+/-! ## USize-native split walker
+
+The reference walker above deliberately stays in `Nat` so its `TokenArray`
+refinement proof is nearly definitional.  Its generated code nevertheless
+pays several costs per token: recomputing `TokenArray.size`, rechecking the
+backing byte array's addressability in `TokenArray.get`, converting the index
+for the wide load, and updating boxed `Nat` loop state.  At each 512-token
+divergence check it also materializes two ten-element arrays only so
+`splitEndBlockCheck` can read their scalar values back.
+
+The production-default walker below hoists the addressability checks once,
+walks the token bytes and all accumulators in `USize`, and evaluates the
+divergence expression directly from scalar arguments.  The old proven walker
+is retained as the fallback and proof reference. -/
+
+@[inline] def splitAbsDiffN (a b : Nat) : Nat :=
+  if a ≥ b then a - b else b - a
+
+/-- Scalar `Nat` form of `splitEndBlockCheck`; unlike the reference helper it
+    does not allocate two ten-element arrays. -/
+@[inline] def splitEndBlockCheckN
+    (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : Nat)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : Nat)
+    (blockBytes : Nat) : Bool :=
+  let delta :=
+    splitAbsDiffN (n0 * oldTot) (o0 * newTot) +
+    splitAbsDiffN (n1 * oldTot) (o1 * newTot) +
+    splitAbsDiffN (n2 * oldTot) (o2 * newTot) +
+    splitAbsDiffN (n3 * oldTot) (o3 * newTot) +
+    splitAbsDiffN (n4 * oldTot) (o4 * newTot) +
+    splitAbsDiffN (n5 * oldTot) (o5 * newTot) +
+    splitAbsDiffN (n6 * oldTot) (o6 * newTot) +
+    splitAbsDiffN (n7 * oldTot) (o7 * newTot) +
+    splitAbsDiffN (n8 * oldTot) (o8 * newTot) +
+    splitAbsDiffN (n9 * oldTot) (o9 * newTot)
+  let cutoff := newTot * splitCutoffNum / splitCutoffDen * oldTot
+  delta + (blockBytes / splitBiasBytes) * oldTot ≥ cutoff
+
+/-- Scalar, native-word twin of `splitEndBlockCheck` for the production split
+    constants.  Under the walker's block/check bounds all intermediates fit
+    even a 32-bit `USize`; unlike the reference it allocates no counter arrays. -/
+@[inline] def splitEndBlockCheckU
+    (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : USize)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : USize)
+    (blockBytes : USize) : Bool :=
+  splitEndBlockCheckN
+    o0.toNat o1.toNat o2.toNat o3.toNat o4.toNat o5.toNat o6.toNat o7.toNat o8.toNat o9.toNat
+    oldTot.toNat
+    n0.toNat n1.toNat n2.toNat n3.toNat n4.toNat n5.toNat n6.toNat n7.toNat n8.toNat n9.toNat
+    newTot.toNat blockBytes.toNat
+
+@[inline] def splitTokenClassPU (w : UInt32) : USize :=
+  if w &&& ((1 : UInt32) <<< 31) = 0 then
+    (((w >>> 5) &&& 6) ||| (w &&& 1)).toUSize
+  else
+    if ((w >>> 16) &&& 0x7FFF) ≥ 9 then 9 else 8
+
+@[inline] def splitTokenBytesPU (w : UInt32) : USize :=
+  if w &&& ((1 : UInt32) <<< 31) = 0 then 1
+  else ((w >>> 16) &&& 0x7FFF).toUSize
+
+/-- Native-word counter update corresponding to `splitBumpN`. -/
+@[inline] def splitBumpU (c : USize)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 : USize) :
+    USize × USize × USize × USize × USize × USize × USize × USize × USize × USize :=
+  if c == 0 then (n0 + 1, n1, n2, n3, n4, n5, n6, n7, n8, n9)
+  else if c == 1 then (n0, n1 + 1, n2, n3, n4, n5, n6, n7, n8, n9)
+  else if c == 2 then (n0, n1, n2 + 1, n3, n4, n5, n6, n7, n8, n9)
+  else if c == 3 then (n0, n1, n2, n3 + 1, n4, n5, n6, n7, n8, n9)
+  else if c == 4 then (n0, n1, n2, n3, n4 + 1, n5, n6, n7, n8, n9)
+  else if c == 5 then (n0, n1, n2, n3, n4, n5 + 1, n6, n7, n8, n9)
+  else if c == 6 then (n0, n1, n2, n3, n4, n5, n6 + 1, n7, n8, n9)
+  else if c == 7 then (n0, n1, n2, n3, n4, n5, n6, n7 + 1, n8, n9)
+  else if c == 8 then (n0, n1, n2, n3, n4, n5, n6, n7, n8 + 1, n9)
+  else (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9 + 1)
+
+set_option maxHeartbeats 10000000 in
+/-- Fully native-word implementation of the default split policy.  The token
+    end and byte-addressability witness are loop invariants, so each iteration
+    is one direct `ugetUInt32LE` plus scalar arithmetic. -/
+def chooseSplitsHeuristicPU.go (toks : TokenArray) (endU : USize)
+    (hend : endU.toNat = toks.size) (hbytes : toks.bytes.size < USize.size)
+    (checkTokens i : USize)
+    (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : USize)
+    (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : USize)
+    (blockBytes remaining : USize) (cuts : Array Nat) : Array Nat :=
+  if hi : i < endU then
+    have hiNat : i.toNat < toks.size := by
+      rw [← hend]
+      exact USize.lt_iff_toNat_lt.mp hi
+    have hbytesMul : toks.bytes.size = 4 * (toks.bytes.size / 4) := by
+      have hm := Nat.mod_add_div toks.bytes.size 4
+      rw [toks.aligned] at hm
+      omega
+    have hoff : ((4 : USize) * i).toNat = 4 * i.toNat := by
+      rw [USize.toNat_mul]
+      have h4 : (4 : USize).toNat = 4 := by
+        exact USize.toNat_ofNat_of_lt
+          (Nat.lt_of_lt_of_le (show 4 < 2 ^ 32 by omega) USize.le_size)
+      rw [h4]
+      apply Nat.mod_eq_of_lt
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      rw [← hUS]
+      simp only [TokenArray.size] at hiNat
+      rw [hbytesMul] at hbytes
+      omega
+    let t := toks.bytes.ugetUInt32LE ((4 : USize) * i) (by
+      rw [hoff]
+      simp only [TokenArray.size] at hiNat
+      rw [hbytesMul]
+      omega)
+    let c := splitTokenClassPU t
+    let tb := splitTokenBytesPU t
+    let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) :=
+      splitBumpU c n0 n1 n2 n3 n4 n5 n6 n7 n8 n9
+    let newTot := newTot + 1
+    let blockBytes := blockBytes + tb
+    -- `Nat.sub` in the reference saturates.  Production streams never
+    -- underflow (`totalBytes = data.size`), but retain the same behavior here.
+    let remaining := if tb ≤ remaining then remaining - tb else 0
+    have hstep : (i + 1).toNat = i.toNat + 1 := by
+      rw [USize.toNat_add, USize.toNat_one]
+      apply Nat.mod_eq_of_lt
+      have hiEnd : i.toNat < endU.toNat := USize.lt_iff_toNat_lt.mp hi
+      have hEnd := USize.toNat_lt_two_pow_numBits endU
+      omega
+    if remaining < splitMinBlockBytes.toUSize then cuts
+    else if blockBytes ≥ splitMinBlockBytes.toUSize then
+      let cut :=
+        blockBytes ≥ splitSoftMaxBlockBytes.toUSize ||
+        (newTot ≥ checkTokens && oldTot > 0 &&
+          splitEndBlockCheckU
+            o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+            n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes)
+      if cut then
+        chooseSplitsHeuristicPU.go toks endU hend hbytes checkTokens (i + 1)
+          0 0 0 0 0 0 0 0 0 0 0
+          0 0 0 0 0 0 0 0 0 0 0
+          0 remaining (cuts.push (i + 1).toNat)
+      else if newTot ≥ checkTokens then
+        chooseSplitsHeuristicPU.go toks endU hend hbytes checkTokens (i + 1)
+          (o0 + n0) (o1 + n1) (o2 + n2) (o3 + n3) (o4 + n4)
+          (o5 + n5) (o6 + n6) (o7 + n7) (o8 + n8) (o9 + n9)
+          (oldTot + newTot)
+          0 0 0 0 0 0 0 0 0 0 0
+          blockBytes remaining cuts
+      else
+        chooseSplitsHeuristicPU.go toks endU hend hbytes checkTokens (i + 1)
+          o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+          n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot
+          blockBytes remaining cuts
+    else
+      chooseSplitsHeuristicPU.go toks endU hend hbytes checkTokens (i + 1)
+        o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+        n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot
+        blockBytes remaining cuts
+  else cuts
+termination_by endU.toNat - i.toNat
+decreasing_by all_goals rw [hstep]; omega
+
+/-- Guarded entry for the native-word production split walker. -/
+@[inline] def chooseSplitsHeuristicPU (toks : TokenArray) (totalBytes : Nat)
+    (checkTokens : Nat := splitCheckTokens) : List Nat :=
+  if hg : toks.bytes.size.toUSize.toNat = toks.bytes.size ∧
+      toks.size.toUSize.toNat = toks.size ∧
+      totalBytes.toUSize.toNat = totalBytes ∧
+      checkTokens.toUSize.toNat = checkTokens then
+    have hbytes : toks.bytes.size < USize.size := by
+      rw [← hg.1]
+      exact USize.toNat_lt_two_pow_numBits _
+    (chooseSplitsHeuristicPU.go toks toks.size.toUSize hg.2.1 hbytes
+      checkTokens.toUSize 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 totalBytes.toUSize #[]).toList
+  else chooseSplitsHeuristicP toks totalBytes splitMinBlockBytes
+    splitSoftMaxBlockBytes checkTokens
 
 /-- Packed twin of `emitDynBlock`: one dynamic Huffman block from a packed
     token group onto a running writer, with `emitTokensWithCodesP` in place of
@@ -2914,8 +3090,8 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- frequencies (EOB-corrected, `tokenFreqsP_append`) and the base candidate
       -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
       -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
-      let cuts := chooseSplitsHeuristicP ptokens data.size splitMinBlockBytes
-        splitSoftMaxBlockBytes (splitCheckTokensFor data level)
+      let cuts := chooseSplitsHeuristicPU ptokens data.size
+        (splitCheckTokensFor data level)
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
       -- the split, matching `pickSmaller`), so the loser's captured per-block
