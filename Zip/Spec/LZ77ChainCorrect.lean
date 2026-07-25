@@ -1009,13 +1009,10 @@ theorem chainWalkGuardedPackedUU_eq (data : ByteArray) (prev : Array Nat)
       chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
         cand fuel bestLen bestPos := by
   unfold chainWalkGuardedPackedUU
-  by_cases hu : l5LargeInputMinSize ≤ data.size ∧ (fuel = 22 ∨ fuel = 5)
-  · rw [if_pos hu]
-    split
-    · exact chainWalkPackedUUSeededChecked_toNat data prev windowSize pos maxLen niceLen
-        hpm cand fuel bestLen bestPos _
-    · rfl
-  · rw [if_neg hu]
+  split
+  · exact chainWalkPackedUUSeededChecked_toNat data prev windowSize pos maxLen niceLen
+      hpm cand fuel bestLen bestPos _
+  · rfl
 
 /-- Low nine bits of the checked word decode to the old packed walk's length. -/
 theorem chainWalkPackedUUChecked_low (data : ByteArray) (prev : Array Nat)

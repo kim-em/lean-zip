@@ -464,6 +464,7 @@ private theorem noH3SingleLoop_eq (data : ByteArray)
       generalizing pos acc c h3tab with
   | _ n ih =>
     unfold lz77LazyMergedLoopNoH3Single lz77LazyMergedLoop
+    simp only [chainWalkGuardedPackedUU_eq]
     have hnot : ¬ 1 < lazy2Steps := by omega
     have ih' (c' h3tab' : Array Nat) (pos' : Nat) (acc' : TokenArray)
         (hlt' : data.size - pos' < data.size - pos) :
@@ -485,9 +486,8 @@ private theorem noH3SingleLoop_eq (data : ByteArray)
       generalize hc2 :
         guardedSet c1 (pos &&& 0x7FFF) head = c2 at *
       generalize hr :
-        chainWalkGuardedPackedUU data c2 windowSize pos
+        chainWalkGuardedPackedU data c2 windowSize pos
           (min 258 (data.size - pos)) niceLen (by omega) head maxChain 0 0 = r at *
-      simp only [hhead, hc1, hc2, hr, Nat.zero_mod, Nat.zero_div]
       by_cases hge : r % 512 ≥ 3
       · simp only [hge, ↓reduceDIte]
         by_cases hle : pos + r % 512 ≤ data.size
@@ -497,7 +497,7 @@ private theorem noH3SingleLoop_eq (data : ByteArray)
             by_cases hgood : r % 512 < goodMatch
             · simp only [hgood, if_pos]
               generalize hr2 :
-                chainWalkGuardedPackedUU data c2 windowSize (pos + 1)
+                chainWalkGuardedPackedU data c2 windowSize (pos + 1)
                   (min 258 (data.size - (pos + 1))) niceLen (by omega)
                   (headProbeGuarded c2
                     (prevSize + lz77Greedy.hash3 data (pos + 1) hashSize (by omega)))
@@ -592,7 +592,6 @@ private theorem mergedLoop_eq (data : ByteArray)
   induction hn : data.size - pos using Nat.strongRecOn generalizing pos acc hashTable prev h3tab hht hps hpv with
   | _ n ih =>
     unfold lz77LazyMergedLoop lz77ChainLazyIterP.mainLoop
-    simp only [chainWalkGuardedPackedUU_eq]
     by_cases hlt : pos + 2 < data.size
     · have hh : lz77Greedy.hash3 data pos hashSize hlt < hashTable.size := by
         have : lz77Greedy.hash3 data pos hashSize hlt < hashSize := Nat.mod_lt _ hhs
@@ -618,7 +617,6 @@ private theorem mergedLoop_eq (data : ByteArray)
         induction hnm : data.size - mp using Nat.strongRecOn generalizing mp pLen pMatchPos step accd htd prevd h3td hhtd hpsd hpvd hlo hpl with
         | _ mnat ihm =>
           unfold lz77LazyMergedLoop
-          simp only [chainWalkGuardedPackedUU_eq]
           rw [dif_neg hpl]
           unfold lz77ChainLazyIterP.rollDefer
           by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch

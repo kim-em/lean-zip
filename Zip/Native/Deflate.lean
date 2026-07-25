@@ -1592,21 +1592,16 @@ abbrev chainWalkPackedUUSeededSafe (data : ByteArray) (prev : Array Nat)
     to the matcher dispatch so every large-L5 specialization shares one gate. -/
 def l5LargeInputMinSize : Nat := 4 * 1024 * 1024
 
-/-- Use the unrolled fully-native-word lazy chain walk only for the large-input
-    L5 policy: `fuel = 22` is its main walk and `fuel = 5` its one-byte
-    lookahead. All other lazy levels and small L5 inputs retain the established
-    guarded walk exactly; the native-word safety guard remains the large-L5
-    path's defensive fallback. -/
+/-- Unrolled fully-native-word chain walk for the specialized large-input L5
+    loop. The native-word safety guard keeps the established guarded walk as its
+    defensive fallback. General lazy loops call `chainWalkGuardedPackedU`
+    directly, so they do not pay this dispatch in their hot path. -/
 @[inline] def chainWalkGuardedPackedUU (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
     (cand fuel bestLen bestPos : Nat) : Nat :=
-  if l5LargeInputMinSize ≤ data.size ∧ (fuel = 22 ∨ fuel = 5) then
-    if hg : chainWalkPackedUUSeededSafe data prev windowSize maxLen cand fuel bestLen bestPos then
-      (chainWalkPackedUUSeededChecked data prev windowSize pos maxLen niceLen hpm
-        cand fuel bestLen bestPos hg).toNat
-    else
-      chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
-        cand fuel bestLen bestPos
+  if hg : chainWalkPackedUUSeededSafe data prev windowSize maxLen cand fuel bestLen bestPos then
+    (chainWalkPackedUUSeededChecked data prev windowSize pos maxLen niceLen hpm
+      cand fuel bestLen bestPos hg).toNat
   else
     chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
       cand fuel bestLen bestPos
@@ -2727,7 +2722,7 @@ def lz77LazyMergedLoop (data : ByteArray)
       let seed := h3Seed useH3 data h3tab windowSize pos hlt
       let h3tab := if useH3 then guardedSet h3tab (hash3Single data pos hlt) pos else h3tab
       have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
-      let r := chainWalkGuardedPackedUU data c windowSize pos (min 258 (data.size - pos)) niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
+      let r := chainWalkGuardedPackedU data c windowSize pos (min 258 (data.size - pos)) niceLen hmaxLenP head maxChain (seed % 512) (seed / 512)
       let matchLen := r % 512
       let matchPos := r / 512
       if hge : matchLen ≥ 3 then
@@ -2740,7 +2735,7 @@ def lz77LazyMergedLoop (data : ByteArray)
               let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
               let seed := if matchLen < cutoff2 then matchLen else 0
               let r2 :=
-                chainWalkGuardedPackedUU data c windowSize (pos + 1) (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 lazyDepth seed 0
+                chainWalkGuardedPackedU data c windowSize (pos + 1) (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 lazyDepth seed 0
               let matchLen2 := r2 % 512
               let matchPos2 := r2 / 512
               if lazyAcceptCost matchLen (pos - matchPos) matchLen2 (pos + 1 - matchPos2) then
@@ -2812,7 +2807,7 @@ def lz77LazyMergedLoop (data : ByteArray)
       -- `seeded_probe_bridge` (as the main lookahead already does).
       let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
       let seed := if pLen < cutoff2 then pLen else 0
-      let r2 := chainWalkGuardedPackedUU data c windowSize (pos + 1) (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 (lazy2ProbeDepth maxChain) seed 0
+      let r2 := chainWalkGuardedPackedU data c windowSize (pos + 1) (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 (lazy2ProbeDepth maxChain) seed 0
       let len' := r2 % 512
       let pos' := r2 / 512
       if lazyAcceptCost pLen (pos - pMatchPos) len' (pos + 1 - pos') = true ∧ (pos + 1) + len' ≤ data.size then
