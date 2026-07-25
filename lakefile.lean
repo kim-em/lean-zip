@@ -5,15 +5,50 @@ open System Lake DSL
 def splitFlags (s : String) : Array String :=
   s.splitOn " " |>.filter (· ≠ "") |>.toArray
 
+/-- Look `cmd` up on `PATH`, the way a shell would. -/
+def onPath (cmd : String) : IO Bool := do
+  let some path ← IO.getEnv "PATH" | return false
+  let sep := if Platform.isWindows then ";" else ":"
+  let exts := if Platform.isWindows then #["", ".exe", ".cmd", ".bat"] else #[""]
+  for dir in path.splitOn sep do
+    if dir.isEmpty then continue
+    for ext in exts do
+      let candidate : FilePath := dir / (cmd ++ ext)
+      if (← candidate.pathExists) && !(← candidate.isDir) then return true
+  return false
+
+/-- Run a probe command, reporting `none` if the tool is not installed.
+
+    We must not hand `IO.Process.output` a command that does not exist. On the
+    pinned toolchain (v4.30.0-rc2), a failed spawn duplicates whatever is
+    sitting unflushed in the parent's file buffers, and one of those buffers
+    belongs to Lake: it writes the configuration trace, then elaborates this
+    file with that write still buffered. The trace ends up holding its JSON
+    object twice, which Lake's own parser rejects, so the first `lake` command
+    in a fresh clone succeeds and every one after it fails with "compiled
+    configuration is invalid; run with '-R' to reconfigure" until you actually
+    run `-R`. That is fixed from v4.31.0-rc1 on; until we move, look the tool up
+    on `PATH` first. (`IO.Process.output` does not throw for a missing
+    executable — it reports exit code 255 — but it can still fail for other
+    reasons, hence the fallible call below.) -/
+def tryOutput (cmd : String) (args : Array String) : IO (Option IO.Process.Output) := do
+  unless (← onPath cmd) do return none
+  match ← (IO.Process.output { cmd, args }).toBaseIO with
+  | .ok out => return some out
+  | .error e =>
+    IO.eprintln s!"warning: could not run the probe '{cmd}': {e}"
+    return none
+
 /-- Run `pkg-config` and split the output into flags. Returns `#[]` on failure. -/
 def pkgConfig (pkg : String) (flag : String) : IO (Array String) := do
-  let out ← IO.Process.output { cmd := "pkg-config", args := #[flag, pkg] }
+  let some out ← tryOutput "pkg-config" #[flag, pkg] | return #[]
   if out.exitCode != 0 then return #[]
   return splitFlags out.stdout.trimAscii.toString
 
 /-- Run `xcrun --show-sdk-path` and return the SDK path on Apple platforms. -/
 def macSdkPath : IO (Option FilePath) := do
-  let out ← IO.Process.output { cmd := "xcrun", args := #["--show-sdk-path"] }
+  if !Platform.isOSX then return none
+  let some out ← tryOutput "xcrun" #["--show-sdk-path"] | return none
   if out.exitCode != 0 then
     return none
   else

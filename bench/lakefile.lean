@@ -19,9 +19,37 @@ C-library comparators; each is auto-detected and falls back to a stub, so
 def splitFlags (s : String) : Array String :=
   s.splitOn " " |>.filter (· ≠ "") |>.toArray
 
+/-- Look `cmd` up on `PATH`, the way a shell would (keep in sync with
+    `../lakefile.lean`). -/
+def onPath (cmd : String) : IO Bool := do
+  let some path ← IO.getEnv "PATH" | return false
+  let sep := if Platform.isWindows then ";" else ":"
+  let exts := if Platform.isWindows then #["", ".exe", ".cmd", ".bat"] else #[""]
+  for dir in path.splitOn sep do
+    if dir.isEmpty then continue
+    for ext in exts do
+      let candidate : FilePath := dir / (cmd ++ ext)
+      if (← candidate.pathExists) && !(← candidate.isDir) then return true
+  return false
+
+/-- Run a probe command, reporting `none` if the tool is not installed (keep in
+    sync with `../lakefile.lean`, which explains why a missing executable must
+    never reach `IO.Process.output`: on the pinned toolchain a failed spawn
+    duplicates Lake's buffered configuration trace, and every later `lake`
+    invocation then rejects the configuration until `-R`). This package probes
+    for `cargo`, which is *expected* to be absent — the comparators fall back to
+    stubs — so it is the most exposed of the two. -/
+def tryOutput (cmd : String) (args : Array String) : IO (Option IO.Process.Output) := do
+  unless (← onPath cmd) do return none
+  match ← (IO.Process.output { cmd, args }).toBaseIO with
+  | .ok out => return some out
+  | .error e =>
+    IO.eprintln s!"warning: could not run the probe '{cmd}': {e}"
+    return none
+
 /-- Run `pkg-config` and split the output into flags. Returns `#[]` on failure. -/
 def pkgConfig (pkg : String) (flag : String) : IO (Array String) := do
-  let out ← IO.Process.output { cmd := "pkg-config", args := #[flag, pkg] }
+  let some out ← tryOutput "pkg-config" #[flag, pkg] | return #[]
   if out.exitCode != 0 then return #[]
   return splitFlags out.stdout.trimAscii.toString
 
@@ -34,14 +62,15 @@ def cHeaderProbe (header : String) : IO Bool := do
   let src := "#include <" ++ header ++ ">\nint main(void) { return 0; }\n"
   try
     IO.FS.writeFile probe src
-    let out ← IO.Process.output { cmd := "cc", args := #["-fsyntax-only", probe.toString] }
+    let some out ← tryOutput "cc" #["-fsyntax-only", probe.toString] | return false
     try IO.FS.removeFile probe catch _ => pure ()
     return out.exitCode == 0
   catch _ => return false
 
 /-- Run `xcrun --show-sdk-path` and return the SDK path on Apple platforms. -/
 def macSdkPath : IO (Option FilePath) := do
-  let out ← IO.Process.output { cmd := "xcrun", args := #["--show-sdk-path"] }
+  if !Platform.isOSX then return none
+  let some out ← tryOutput "xcrun" #["--show-sdk-path"] | return none
   if out.exitCode != 0 then
     return none
   else
@@ -121,7 +150,7 @@ def minizLdFlagsOverride : IO (Option (Array String)) := do
 def minizOxideEnabled : IO Bool := do
   if (← IO.getEnv "MINIZ_OXIDE_DISABLE").isSome then return false
   if (← IO.getEnv "MINIZ_OXIDE_LDFLAGS").isSome then return true
-  let out ← IO.Process.output { cmd := "cargo", args := #["--version"] }
+  let some out ← tryOutput "cargo" #["--version"] | return false
   return out.exitCode == 0
 
 /-- Build (or refresh) the Rust shim via `cargo build --release`. Returns
@@ -129,10 +158,8 @@ def minizOxideEnabled : IO Bool := do
 def buildMinizOxideRust : IO Bool := do
   let manifest := (← minizShimDir) / "Cargo.toml"
   unless (← manifest.pathExists) do return false
-  let out ← IO.Process.output {
-    cmd := "cargo"
-    args := #["build", "--release", "--manifest-path", manifest.toString]
-  }
+  let some out ← tryOutput "cargo" #["build", "--release", "--manifest-path", manifest.toString]
+    | return false
   if out.exitCode != 0 then
     IO.eprintln s!"warning: miniz_oxide cargo build failed:\n{out.stderr}\n\
                     miniz_oxide comparator will be disabled."
