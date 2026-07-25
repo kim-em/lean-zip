@@ -44,6 +44,7 @@ import Zip.Native.BitWriter
 import Zip.Native.Deflate
 import Zip.Native.DeflateDynamic
 import Zip.Spec.SplitWalkerCorrect
+import Zip.Spec.SplitWalkerPackedCorrect
 import Zip.Native.DeflateFreqs
 import Zip.Native.DeflateFreqsFused
 import Zip.Spec.DeflateFreqsFusedCorrect

@@ -1869,10 +1869,15 @@ def chooseSplitsHeuristicP (toks : TokenArray) (totalBytes : Nat)
     (minBlockBytes : Nat := splitMinBlockBytes)
     (softMaxBlockBytes : Nat := splitSoftMaxBlockBytes)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
-  (chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens 0
-    0 0 0 0 0 0 0 0 0 0 0
-    0 0 0 0 0 0 0 0 0 0 0
-    0 totalBytes #[]).toList
+  -- Before an underflow, `blockBytes + remaining = totalBytes`; after one,
+  -- saturated `remaining` stays below the tail floor. Thus both min-block
+  -- floors cannot hold when the whole stream is below twice the floor.
+  if totalBytes < 2 * minBlockBytes then []
+  else
+    (chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 totalBytes #[]).toList
 
 /-- `Array UInt32` reference walker for `chooseSplitsHeuristicP.go`: the exact
     pre-`TokenArray` body, reading each packed word from an `Array UInt32` slot
@@ -1933,10 +1938,12 @@ def chooseSplitsHeuristicPArray (toks : Array UInt32) (totalBytes : Nat)
     (minBlockBytes : Nat := splitMinBlockBytes)
     (softMaxBlockBytes : Nat := splitSoftMaxBlockBytes)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
-  (chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens 0
-    0 0 0 0 0 0 0 0 0 0 0
-    0 0 0 0 0 0 0 0 0 0 0
-    0 totalBytes #[]).toList
+  if totalBytes < 2 * minBlockBytes then []
+  else
+    (chooseSplitsHeuristicPArray.go toks minBlockBytes softMaxBlockBytes checkTokens 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 0 0 0 0 0 0 0 0 0 0
+      0 totalBytes #[]).toList
 
 /-- **Split-walker refinement (byte-identity of the cut points).** The packed
     `TokenArray` walk equals the `Array UInt32` reference walk over the `.toArray`
@@ -1988,8 +1995,11 @@ theorem chooseSplitsHeuristicP_toArray (toks : TokenArray) (totalBytes : Nat)
     chooseSplitsHeuristicP toks totalBytes minBlockBytes softMaxBlockBytes checkTokens
       = chooseSplitsHeuristicPArray toks.toArray totalBytes minBlockBytes softMaxBlockBytes checkTokens := by
   unfold chooseSplitsHeuristicP chooseSplitsHeuristicPArray
-  rw [chooseSplitsHeuristicP.go_toArray toks minBlockBytes softMaxBlockBytes checkTokens
-    (toks.size + 1) 0 (by omega)]
+  by_cases hsmall : totalBytes < 2 * minBlockBytes
+  · simp only [hsmall, if_true]
+  · simp only [hsmall, if_false]
+    rw [chooseSplitsHeuristicP.go_toArray toks minBlockBytes softMaxBlockBytes checkTokens
+      (toks.size + 1) 0 (by omega)]
 
 /-! ## USize-native split walker
 
@@ -2154,20 +2164,188 @@ decreasing_by all_goals rw [hstep]; omega
 /-- Guarded entry for the native-word production split walker. -/
 @[inline] def chooseSplitsHeuristicPU (toks : TokenArray) (totalBytes : Nat)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
-  if hg : toks.bytes.size.toUSize.toNat = toks.bytes.size ∧
-      toks.size.toUSize.toNat = toks.size ∧
-      totalBytes.toUSize.toNat = totalBytes ∧
-      checkTokens.toUSize.toNat = checkTokens then
-    have hbytes : toks.bytes.size < USize.size := by
-      rw [← hg.1]
-      exact USize.toNat_lt_two_pow_numBits _
-    (chooseSplitsHeuristicPU.go toks toks.size.toUSize hg.2.1 hbytes
-      checkTokens.toUSize 0
-      0 0 0 0 0 0 0 0 0 0 0
-      0 0 0 0 0 0 0 0 0 0 0
-      0 totalBytes.toUSize #[]).toList
-  else chooseSplitsHeuristicP toks totalBytes splitMinBlockBytes
-    splitSoftMaxBlockBytes checkTokens
+  if totalBytes < 2 * splitMinBlockBytes then []
+  else
+    if hg : toks.bytes.size.toUSize.toNat = toks.bytes.size ∧
+        toks.size.toUSize.toNat = toks.size ∧
+        totalBytes.toUSize.toNat = totalBytes ∧
+        checkTokens.toUSize.toNat = checkTokens then
+      have hbytes : toks.bytes.size < USize.size := by
+        rw [← hg.1]
+        exact USize.toNat_lt_two_pow_numBits _
+      (chooseSplitsHeuristicPU.go toks toks.size.toUSize hg.2.1 hbytes
+        checkTokens.toUSize 0
+        0 0 0 0 0 0 0 0 0 0 0
+        0 0 0 0 0 0 0 0 0 0 0
+        0 totalBytes.toUSize #[]).toList
+    else chooseSplitsHeuristicP toks totalBytes splitMinBlockBytes
+      splitSoftMaxBlockBytes checkTokens
+
+/-- Extract one 15-bit recent-window counter from a packed `UInt64`. -/
+@[inline] def splitField15 (w shift : UInt64) : UInt64 :=
+  (w >>> shift) &&& 0x7FFF
+
+/-- Extract one 20-bit block-so-far counter from a packed `UInt64`. -/
+@[inline] def splitField20 (w shift : UInt64) : UInt64 :=
+  (w >>> shift) &&& 0xFFFFF
+
+/-- Decode the ten 15-bit recent-window counters. -/
+@[inline] def splitUnpack15 (a b c : UInt64) :
+    USize × USize × USize × USize × USize × USize × USize × USize × USize × USize :=
+  ((splitField15 a 0).toUSize, (splitField15 a 15).toUSize,
+    (splitField15 a 30).toUSize, (splitField15 a 45).toUSize,
+    (splitField15 b 0).toUSize, (splitField15 b 15).toUSize,
+    (splitField15 b 30).toUSize, (splitField15 b 45).toUSize,
+    (splitField15 c 0).toUSize, (splitField15 c 15).toUSize)
+
+/-- Decode the ten 20-bit block-so-far counters. -/
+@[inline] def splitUnpack20 (a b c d : UInt64) :
+    USize × USize × USize × USize × USize × USize × USize × USize × USize × USize :=
+  ((splitField20 a 0).toUSize, (splitField20 a 20).toUSize,
+    (splitField20 a 40).toUSize, (splitField20 b 0).toUSize,
+    (splitField20 b 20).toUSize, (splitField20 b 40).toUSize,
+    (splitField20 c 0).toUSize, (splitField20 c 20).toUSize,
+    (splitField20 c 40).toUSize, (splitField20 d 0).toUSize)
+
+/-- Increment one packed 15-bit recent-window counter. -/
+@[inline] def splitBumpPacked15 (cls a b c : UInt64) : UInt64 × UInt64 × UInt64 :=
+  if cls < 4 then (a + ((1 : UInt64) <<< (cls * 15)), b, c)
+  else if cls < 8 then (a, b + ((1 : UInt64) <<< ((cls - 4) * 15)), c)
+  else (a, b, c + ((1 : UInt64) <<< ((cls - 8) * 15)))
+
+/-- Merge packed 15-bit recent counters into packed 20-bit block counters. -/
+@[inline] def splitMergePacked20 (oA oB oC oD nA nB nC : UInt64) :
+    UInt64 × UInt64 × UInt64 × UInt64 :=
+  let q0 := splitField15 nA 0
+  let q1 := splitField15 nA 15
+  let q2 := splitField15 nA 30
+  let q3 := splitField15 nA 45
+  let q4 := splitField15 nB 0
+  let q5 := splitField15 nB 15
+  let q6 := splitField15 nB 30
+  let q7 := splitField15 nB 45
+  let q8 := splitField15 nC 0
+  let q9 := splitField15 nC 15
+  (oA + q0 + (q1 <<< 20) + (q2 <<< 40),
+    oB + q3 + (q4 <<< 20) + (q5 <<< 40),
+    oC + q6 + (q7 <<< 20) + (q8 <<< 40),
+    oD + q9)
+
+/-- Packed-counter twin of `splitEndBlockCheckU`. Recent counters are grouped
+    4+4+2 in 15-bit fields; block-so-far counters are grouped 3+3+3+1 in
+    20-bit fields. -/
+@[inline] def splitEndBlockCheckPackedU
+    (oA oB oC oD : UInt64) (oldTot : USize)
+    (nA nB nC : UInt64) (newTot blockBytes : USize) : Bool :=
+  let (o0, o1, o2, o3, o4, o5, o6, o7, o8, o9) := splitUnpack20 oA oB oC oD
+  let (n0, n1, n2, n3, n4, n5, n6, n7, n8, n9) := splitUnpack15 nA nB nC
+  splitEndBlockCheckU
+    o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+    n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes
+
+set_option maxHeartbeats 2000000 in
+/-- Compact native split walker. The 20 observation counters occupy seven
+    `UInt64` words, reducing loop-carried register pressure and replacing the
+    per-token class branch chain with two range checks and one variable shift.
+    This loop requires every token to contribute at least one output byte and
+    `0 < checkTokens ≤ 32767`. Under those preconditions each recent field is
+    below 32767 before increment, while merged old fields stay below the
+    300K-byte forced-cut ceiling. The production `lzMatchP` call satisfies the
+    token precondition; `chooseSplitsHeuristicPUPacked_lzMatchP_eq` proves the
+    resulting cuts equal the reference walker. -/
+def chooseSplitsHeuristicPUPacked.go (toks : TokenArray) (endU : USize)
+    (hend : endU.toNat = toks.size) (hbytes : toks.bytes.size < USize.size)
+    (checkTokens i : USize)
+    (oA oB oC oD : UInt64) (oldTot : USize)
+    (nA nB nC : UInt64) (newTot blockBytes remaining : USize)
+    (cuts : Array Nat) : Array Nat :=
+  if hi : i < endU then
+    have hiNat : i.toNat < toks.size := by
+      rw [← hend]
+      exact USize.lt_iff_toNat_lt.mp hi
+    have hbytesMul : toks.bytes.size = 4 * (toks.bytes.size / 4) := by
+      have hm := Nat.mod_add_div toks.bytes.size 4
+      rw [toks.aligned] at hm
+      omega
+    have hoff : ((4 : USize) * i).toNat = 4 * i.toNat := by
+      rw [USize.toNat_mul]
+      have h4 : (4 : USize).toNat = 4 := by
+        exact USize.toNat_ofNat_of_lt
+          (Nat.lt_of_lt_of_le (show 4 < 2 ^ 32 by omega) USize.le_size)
+      rw [h4]
+      apply Nat.mod_eq_of_lt
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      rw [← hUS]
+      simp only [TokenArray.size] at hiNat
+      rw [hbytesMul] at hbytes
+      omega
+    let t := toks.bytes.ugetUInt32LE ((4 : USize) * i) (by
+      rw [hoff]
+      simp only [TokenArray.size] at hiNat
+      rw [hbytesMul]
+      omega)
+    let isLit := t &&& ((1 : UInt32) <<< 31) = 0
+    let tb : USize :=
+      if isLit then 1 else ((t >>> 16) &&& 0x7FFF).toUSize
+    let c : UInt64 :=
+      if isLit then (((t >>> 5) &&& 6) ||| (t &&& 1)).toUInt64
+      else if ((t >>> 16) &&& 0x7FFF) ≥ 9 then 9 else 8
+    let (nA, nB, nC) := splitBumpPacked15 c nA nB nC
+    let newTot := newTot + 1
+    let blockBytes := blockBytes + tb
+    let remaining := if tb ≤ remaining then remaining - tb else 0
+    have hstep : (i + 1).toNat = i.toNat + 1 := by
+      rw [USize.toNat_add, USize.toNat_one]
+      apply Nat.mod_eq_of_lt
+      have hiEnd : i.toNat < endU.toNat := USize.lt_iff_toNat_lt.mp hi
+      have hEnd := USize.toNat_lt_two_pow_numBits endU
+      omega
+    if remaining < splitMinBlockBytes.toUSize then cuts
+    else if blockBytes ≥ splitMinBlockBytes.toUSize then
+      let cut :=
+        blockBytes ≥ splitSoftMaxBlockBytes.toUSize ||
+        (newTot ≥ checkTokens && oldTot > 0 &&
+          splitEndBlockCheckPackedU oA oB oC oD oldTot nA nB nC newTot blockBytes)
+      if cut then
+        chooseSplitsHeuristicPUPacked.go toks endU hend hbytes checkTokens (i + 1)
+          0 0 0 0 0 0 0 0 0 0 remaining (cuts.push (i + 1).toNat)
+      else if newTot ≥ checkTokens then
+        let (oA, oB, oC, oD) := splitMergePacked20 oA oB oC oD nA nB nC
+        chooseSplitsHeuristicPUPacked.go toks endU hend hbytes checkTokens (i + 1)
+          oA oB oC oD (oldTot + newTot)
+          0 0 0 0 blockBytes remaining cuts
+      else
+        chooseSplitsHeuristicPUPacked.go toks endU hend hbytes checkTokens (i + 1)
+          oA oB oC oD oldTot nA nB nC newTot blockBytes remaining cuts
+    else
+      chooseSplitsHeuristicPUPacked.go toks endU hend hbytes checkTokens (i + 1)
+        oA oB oC oD oldTot nA nB nC newTot blockBytes remaining cuts
+  else cuts
+termination_by endU.toNat - i.toNat
+decreasing_by all_goals rw [hstep]; omega
+
+/-- Internal packed-counter entry for positive-length token streams. The
+    positivity precondition is semantic and deliberately not rescanned here;
+    cadence and native-word representability are checked, with the scalar
+    walker used outside those bounds. Generic `TokenArray` callers should use
+    `chooseSplitsHeuristicPU`; production calls this only on `lzMatchP`. -/
+@[inline] def chooseSplitsHeuristicPUPacked (toks : TokenArray)
+    (totalBytes : Nat) (checkTokens : Nat := splitCheckTokens) : List Nat :=
+  if totalBytes < 2 * splitMinBlockBytes then
+    []
+  else if hc : 0 < checkTokens ∧ checkTokens ≤ 32767 then
+    if hg : toks.bytes.size.toUSize.toNat = toks.bytes.size ∧
+        toks.size.toUSize.toNat = toks.size ∧
+        totalBytes.toUSize.toNat = totalBytes ∧
+        checkTokens.toUSize.toNat = checkTokens then
+      have hbytes : toks.bytes.size < USize.size := by
+        rw [← hg.1]
+        exact USize.toNat_lt_two_pow_numBits _
+      (chooseSplitsHeuristicPUPacked.go toks toks.size.toUSize hg.2.1 hbytes
+        checkTokens.toUSize 0
+        0 0 0 0 0 0 0 0 0 0 totalBytes.toUSize #[]).toList
+    else chooseSplitsHeuristicPU toks totalBytes checkTokens
+  else chooseSplitsHeuristicPU toks totalBytes checkTokens
 
 /-- Packed twin of `emitDynBlock`: one dynamic Huffman block from a packed
     token group onto a running writer, with `emitTokensWithCodesP` in place of
@@ -3090,7 +3268,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- frequencies (EOB-corrected, `tokenFreqsP_append`) and the base candidate
       -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
       -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
-      let cuts := chooseSplitsHeuristicPU ptokens data.size
+      let cuts := chooseSplitsHeuristicPUPacked ptokens data.size
         (splitCheckTokensFor data level)
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →

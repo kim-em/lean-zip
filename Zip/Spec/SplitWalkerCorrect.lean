@@ -580,22 +580,75 @@ theorem chooseSplitsHeuristicPU_eq (toks : TokenArray) (totalBytes checkTokens :
       chooseSplitsHeuristicP toks totalBytes splitMinBlockBytes
         splitSoftMaxBlockBytes checkTokens := by
   unfold chooseSplitsHeuristicPU chooseSplitsHeuristicP
-  split
-  · rename_i hg
-    have hbytes : toks.bytes.size < USize.size := by
-      rw [← hg.1]
-      exact USize.toNat_lt_two_pow_numBits _
-    have hgo := chooseSplitsHeuristicPU_go_eq toks toks.size.toUSize hg.2.1 hbytes
-      checkTokens.toUSize checkTokens hg.2.2.2
-      (toks.size + 1) 0 (by omega)
-      0 0 0 0 0 0 0 0 0 0 0
-      0 0 0 0 0 0 0 0 0 0 0
-      0 totalBytes.toUSize #[]
-      (by rfl) (by rfl) (by simp) (by
-        simp only [splitSoftMaxBlockBytes, USize.toNat_zero]
-        omega)
-    have hlist := congrArg Array.toList hgo
-    simpa only [hg.2.2.1, USize.toNat_zero] using hlist
-  · rfl
+  by_cases hsmall : totalBytes < 2 * splitMinBlockBytes
+  · simp only [hsmall, if_true]
+  · simp only [hsmall, if_false]
+    split
+    · rename_i hg
+      have hbytes : toks.bytes.size < USize.size := by
+        rw [← hg.1]
+        exact USize.toNat_lt_two_pow_numBits _
+      have hgo := chooseSplitsHeuristicPU_go_eq toks toks.size.toUSize hg.2.1 hbytes
+        checkTokens.toUSize checkTokens hg.2.2.2
+        (toks.size + 1) 0 (by omega)
+        0 0 0 0 0 0 0 0 0 0 0
+        0 0 0 0 0 0 0 0 0 0 0
+        0 totalBytes.toUSize #[]
+        (by rfl) (by rfl) (by simp) (by
+          simp only [splitSoftMaxBlockBytes, USize.toNat_zero]
+          omega)
+      have hlist := congrArg Array.toList hgo
+      simpa only [hg.2.2.1, USize.toNat_zero] using hlist
+    · rfl
+
+/-- The reference walker cannot cut while the live block and remaining suffix
+    total less than two minimum blocks. If token bytes underflow `remaining`,
+    the saturated suffix stays below the tail floor; otherwise the sum is
+    preserved by the step. This justifies the wrappers' short-stream guard. -/
+theorem chooseSplitsHeuristicP_go_no_cuts_below_two_min (toks : TokenArray)
+    (minBlockBytes softMaxBlockBytes checkTokens : Nat) :
+    ∀ (fuel i : Nat), toks.size - i < fuel →
+      ∀ (o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot : Nat)
+        (n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot : Nat)
+        (blockBytes remaining : Nat) (cuts : Array Nat),
+        blockBytes + remaining < 2 * minBlockBytes →
+        chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens i
+            o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+            n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes remaining cuts = cuts := by
+  intro fuel
+  induction fuel with
+  | zero => intro i hf; omega
+  | succ fuel ih =>
+    intro i hf o0 o1 o2 o3 o4 o5 o6 o7 o8 o9 oldTot
+      n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes remaining cuts hsmall
+    unfold chooseSplitsHeuristicP.go
+    by_cases hi : i < toks.size
+    · rw [dif_pos hi]
+      let tb := splitTokenBytesP (toks.get i hi)
+      have hstep : ∀ p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT
+          q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT qc,
+          chooseSplitsHeuristicP.go toks minBlockBytes softMaxBlockBytes checkTokens (i + 1)
+            p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT
+            q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT (blockBytes + tb)
+            (remaining - tb) qc = qc := by
+        intro p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT
+          q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT qc
+        by_cases hle : tb ≤ remaining
+        · exact ih (i + 1) (by omega)
+            p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT
+            q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT
+            (blockBytes + tb) (remaining - tb) qc (by omega)
+        · exact chooseSplitsHeuristicP_go_no_remaining toks minBlockBytes
+            softMaxBlockBytes checkTokens (toks.size + 1) (i + 1) (by omega)
+            p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT
+            q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT
+            (blockBytes + tb) (remaining - tb) qc (by omega)
+      have hgate :
+          ¬ (blockBytes + tb ≥ minBlockBytes ∧
+            remaining - tb ≥ minBlockBytes) := by
+        by_cases hle : tb ≤ remaining <;> omega
+      simp only [tb] at hstep hgate
+      simp [hgate, hstep]
+    · rw [dif_neg hi]
 
 end Zip.Native.Deflate
