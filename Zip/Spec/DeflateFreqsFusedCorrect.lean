@@ -808,6 +808,30 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
     exact lz77GreedyMergedLoopF1U_eq_step data prevSize dataSizeU prevSizeU hds hpsU
       hsz hfit hpv hprev hshift c hcs posU hpos hc acc litF distF n hn ih
 
+/-- The guarded level-one native entry is the fixed-policy generic fused entry. -/
+theorem lz77ChainIterPMergedF1U_eq (data : ByteArray) :
+    lz77ChainIterPMergedF1U data = lz77ChainIterPMergedF data 4 32768 2 258 := by
+  unfold lz77ChainIterPMergedF1U lz77ChainIterPMergedF
+  by_cases hsmall : data.size < 3
+  · simp only [hsmall, ↓reduceIte]
+  · simp only [hsmall, ↓reduceIte]
+    split
+    · rename_i hg
+      exact lz77GreedyMergedLoopF1U_eq data (min chainWinSize data.size) data.size.toUSize
+        (min chainWinSize data.size).toUSize hg.1
+        (toUSize_toNat_of_lt (by simp only [chainWinSize]; omega))
+        (by rw [← hg.1]; exact USize.toNat_lt_two_pow_numBits _)
+        hg.2.2 (Nat.le_refl _) (Nat.min_le_left _ _) hg.2.1
+        (Array.replicate (min chainWinSize data.size + 65536) data.size)
+        (by simp) 0 (by simp)
+        (by
+          intro i hi
+          rw [getElem!_pos _ i hi]
+          rw [Array.getElem_replicate]
+          exact Nat.le_refl _)
+        (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
+    · rfl
+
 /-- A packed literal token has the tag bit clear. -/
 theorem packTok_literal_tag (b : UInt8) :
     packTok (.literal b) &&& ((1 : UInt32) <<< 31) = 0 := by

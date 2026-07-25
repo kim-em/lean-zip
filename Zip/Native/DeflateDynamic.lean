@@ -2445,7 +2445,23 @@ def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
     those frequencies `deflateRawBasePF` is `deflateRawBaseP`. -/
 theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ level)) :
     deflateRawBaseF data level = deflateRawBase data level := by
-  sorry
+  unfold deflateRawBaseF
+  by_cases hlevel : level = 1
+  · subst level
+    simp only [beq_self_eq_true, ↓reduceIte]
+    rw [lz77ChainIterPMergedF1U_eq]
+    simp only [lz77ChainIterPMergedF_eq]
+    rw [← tokenFreqsPTA_toArray]
+    rw [deflateRawBasePF_tokenFreqsP]
+    unfold deflateRawBase lzMatchP chainDepth insertCap niceLen
+    simp only [show ¬ (4 : UInt8) ≤ 1 by decide,
+      show (1 : UInt8) ≤ 1 by decide, show (1 : UInt8) ≤ 4 by decide, ↓reduceIte]
+  · rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+    simp only [lz77ChainIterPMergedF_eq]
+    rw [← tokenFreqsPTA_toArray]
+    rw [deflateRawBasePF_tokenFreqsP]
+    unfold deflateRawBase lzMatchP
+    simp only [h, ↓reduceIte]
 
 theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     (choose : Array LZ77Token → List Nat) (level : UInt8) :
