@@ -1140,6 +1140,20 @@ theorem lz77GreedyMergedLoopF_spec (data : ByteArray)
     · simp only [hlt, ↓reduceDIte]
       exact trailingPF_spec data pos acc litF distF hlit hdist
 
+/-- A masked match length of at least three advances a native-word position
+    without wrapping under the outer loop's addressability guard. -/
+private theorem usize_add_progress_of_ge_three (dataSize : Nat) (pos matchLen : USize)
+    (hpos : pos.toNat ≤ dataSize) (hfit : dataSize * 512 + 511 < USize.size)
+    (hge : matchLen ≥ 3) (hmask : matchLen.toNat ≤ 511) :
+    pos.toNat < (pos + matchLen).toNat := by
+  have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+  have hthree : (3 : USize).toNat = 3 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have hgeN := USize.le_iff_toNat_le.mp hge
+  rw [hthree] at hgeN
+  rw [USize.toNat_add, Nat.mod_eq_of_lt (by rw [← hUS]; omega)]
+  omega
+
 /-- The specialized native-word wide loop has exactly the same token result as
     the boxed specialized loop, while its final byte buffer represents that
     token stream's mathematical histogram. -/
@@ -1194,28 +1208,33 @@ theorem lz77GreedyMergedLoopF1U64_spec (data : ByteArray) (prevSize : Nat)
       all_goals
         split
         · split
-          · split
-            · refine ih _ ?_ _ _ _ _ _ _ _ _ ?_ ?_ ?_ ?_ rfl
-              · have hh := USize.lt_iff_toNat_lt.mp
-                    (by assumption : posU < posU + _)
-                omega
-              · rw [TokenArray.push_toArray, Array.size_push]
-                have hh := USize.lt_iff_toNat_lt.mp
-                  (by assumption : posU < posU + _)
-                omega
-              · rw [TokenArray.push_toArray]
-                exact bumpRefFreqU64_rep freqs acc.toArray _
-                  (packTok_reference_tag _ _) hrep hcap
-              · rw [TokenArray.push_toArray]
-                exact bumpRefLitFreqP_push acc.toArray _ litF
-                  (packTok_reference_tag _ _) hlit
-              · rw [TokenArray.push_toArray]
-                exact bumpRefDistFreqP_push acc.toArray _ distF
-                  (packTok_reference_tag _ _) hdist
-            · have hw := trailingPFU64_spec data posU.toNat acc freqs haddr hsize hrep
-              have hb := trailingPF_spec data posU.toNat acc litF distF hlit hdist
-              rw [hb]
-              exact ⟨hw.1, hw.2, rfl, rfl⟩
+          · refine ih _ ?_ _ _ _ _ _ _ _ _ ?_ ?_ ?_ ?_ rfl
+            · have hprogress := usize_add_progress_of_ge_three data.size posU _
+                hpos hfit (by assumption) (by
+                  rw [USize.toNat_and,
+                    USize.toNat_ofNat_of_lt
+                      (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+                  exact Nat.and_le_right)
+              have hnext := USize.le_iff_toNat_le.mp (by assumption)
+              rw [hds] at hnext
+              omega
+            · rw [TokenArray.push_toArray, Array.size_push]
+              have hprogress := usize_add_progress_of_ge_three data.size posU _
+                hpos hfit (by assumption) (by
+                  rw [USize.toNat_and,
+                    USize.toNat_ofNat_of_lt
+                      (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+                  exact Nat.and_le_right)
+              omega
+            · rw [TokenArray.push_toArray]
+              exact bumpRefFreqU64_rep freqs acc.toArray _
+                (packTok_reference_tag _ _) hrep hcap
+            · rw [TokenArray.push_toArray]
+              exact bumpRefLitFreqP_push acc.toArray _ litF
+                (packTok_reference_tag _ _) hlit
+            · rw [TokenArray.push_toArray]
+              exact bumpRefDistFreqP_push acc.toArray _ distF
+                (packTok_reference_tag _ _) hdist
           · refine ih _ (by rw [hnextOne]; omega) _ _ _ _ _ _ _ _ ?_ ?_ ?_ ?_ rfl
             · rw [TokenArray.push_toArray, Array.size_push, hnextOne]
               omega
