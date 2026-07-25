@@ -1746,9 +1746,10 @@ The libdeflate-style divergence heuristic and the shared-window block emitter,
 both walking the `packTok`-encoded `UInt32` stream directly — the packed twins
 of `chooseSplitsHeuristic` and `emitSharedBlocksAt`. This is what lets the
 mid-band levels (5–8) afford per-block Huffman trees at all: the per-block
-frequency pass runs on `tokenFreqsP` (dense packed tables) and the emit on
-`emitTokensWithCodesP`, so the split candidate never materializes boxed
-`LZ77Token`s and never touches the `findTableCode` linear scans. At level 8 the
+frequency pass runs on `tokenFreqsPTA` (dense packed tables), while the sized
+emitter uses `emitDynBlockPFlat` and its flat token loop, so the split candidate
+never materializes boxed `LZ77Token`s and never touches the `findTableCode`
+linear scans. At level 8 the
 same pipeline **replaces** the `chooseSplitsArbitrated` sizing pass: libdeflate
 picks boundaries with the streaming heuristic alone (no exact-bits arbitration),
 and the sizing pass — two extra boxed `tokenFreqs`+`symbolBitCount` walks over
@@ -2011,10 +2012,11 @@ for the wide load, and updating boxed `Nat` loop state.  At each 512-token
 divergence check it also materializes two ten-element arrays only so
 `splitEndBlockCheck` can read their scalar values back.
 
-The production-default walker below hoists the addressability checks once,
+The scalar native-word walker below hoists the addressability checks once,
 walks the token bytes and all accumulators in `USize`, and evaluates the
-divergence expression directly from scalar arguments.  The old proven walker
-is retained as the fallback and proof reference. -/
+divergence expression directly from scalar arguments. The packed-counter
+production walker later in this section refines this scalar bridge, which is
+retained as its fallback and proof reference. -/
 
 @[inline] def splitAbsDiffN (a b : Nat) : Nat :=
   if a ≥ b then a - b else b - a
@@ -2161,7 +2163,8 @@ def chooseSplitsHeuristicPU.go (toks : TokenArray) (endU : USize)
 termination_by endU.toNat - i.toNat
 decreasing_by all_goals rw [hstep]; omega
 
-/-- Guarded entry for the native-word production split walker. -/
+/-- Guarded entry for the scalar native-word split walker. This is the fallback
+    and proof bridge for the packed-counter production entry below. -/
 @[inline] def chooseSplitsHeuristicPU (toks : TokenArray) (totalBytes : Nat)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
   if totalBytes < 2 * splitMinBlockBytes then []
@@ -2429,8 +2432,9 @@ def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : TokenArray)
     partition and the boundary heuristic stays proof-free. The clamping makes
     arbitrary cuts correctness-safe, not performance-safe: a pathological list
     (non-monotone, dense) degrades to one-token blocks, each paying a full tree
-    header. `deflateRaw` only ever feeds it `chooseSplitsHeuristicP`'s strictly
-    increasing, byte-floored cuts. -/
+    header. `deflateRaw` only ever feeds it `chooseSplitsHeuristicPUPacked`'s
+    strictly increasing, byte-floored cuts, proved equal to the reference
+    `chooseSplitsHeuristicP` cuts on the production token stream. -/
 def emitSharedBlocksAtP (data : ByteArray) (toks : TokenArray) (cuts : List Nat)
     (pos : Nat) (bw : BitWriter) : BitWriter :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
@@ -2445,8 +2449,8 @@ decreasing_by
 
 /-- The packed observation-divergence shared-window split candidate: emit the
     packed token stream as shared-window dynamic blocks at the given cut points
-    (in `deflateRaw`, the `chooseSplitsHeuristicP` boundaries). Byte-identical
-    to the boxed reference
+    (in `deflateRaw`, the `chooseSplitsHeuristicPUPacked` boundaries, proved
+    equal to `chooseSplitsHeuristicP` there). Byte-identical to the boxed reference
     `deflateDynamicBlocksSharedAtTokens data (toks.map unpackTok) (fun _ => cuts)`
     (`deflateDynamicBlocksSharedAtP_eq`), through which the roundtrip and
     padding theorems transfer for **any** cut list. -/
@@ -3092,8 +3096,9 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     (`deflateRawBase`); levels 5–8 (#2737, L5 since the L5 re-grid) additionally try the cross-block
     (shared-window) split candidate — one whole-file match pass, token stream
     partitioned per block, references cross block boundaries — with the
-    partition chosen by the packed observation-divergence heuristic
-    (`chooseSplitsHeuristicP`, libdeflate's streaming boundary check): each
+    partition chosen by the packed-counter observation-divergence heuristic
+    (`chooseSplitsHeuristicPUPacked`, refining libdeflate's streaming boundary
+    check): each
     block gets its own frequency-fit Huffman trees, recovering most of the
     ratio a single whole-file tree leaves on large or heterogeneous inputs
     (zlib refits trees every ~16K symbols; the whole-file tree was why the
