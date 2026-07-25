@@ -1643,23 +1643,17 @@ Huffman build. `emitSharedBlocksAt` stays as the reference emitter:
 `deflateDynamicBlocksSharedSized_eq` (`Zip/Spec/DeflateBlockSplit.lean`) proves
 the sized pipeline byte-identical, so the spec quadruple is untouched. -/
 
-/-- A per-block pair of code-length lists carrying the alphabet-size and
-    RFC 1951 code-length-bound facts the emitter needs (286 lit/len, 30
-    distance, every length at most 15) — what `dynamicCodeLengths` produces,
-    bundled with `dynamicCodeLengths_length` and
-    `dynamicCodeLengths_bounded`. -/
+/-- A per-block pair of code-length lists carrying the alphabet-size facts the
+    emitter needs (286 lit/len, 30 distance) — what `dynamicCodeLengths`
+    produces, bundled with `dynamicCodeLengths_length`. -/
 def SizedTrees : Type :=
-  {p : List Nat × List Nat //
-    p.1.length = 286 ∧ p.2.length = 30 ∧
-    (∀ x ∈ p.1, x ≤ 15) ∧ (∀ x ∈ p.2, x ≤ 15)}
+  {p : List Nat × List Nat // p.1.length = 286 ∧ p.2.length = 30}
 
 /-- The sized trees `dynamicCodeLengths` selects for the given frequencies. -/
 @[inline] def sizedTrees (litFreqs distFreqs : Array Nat) : SizedTrees :=
   ⟨dynamicCodeLengths litFreqs distFreqs,
     (dynamicCodeLengths_length litFreqs distFreqs).1,
-    (dynamicCodeLengths_length litFreqs distFreqs).2,
-    (dynamicCodeLengths_bounded litFreqs distFreqs).1,
-    (dynamicCodeLengths_bounded litFreqs distFreqs).2⟩
+    (dynamicCodeLengths_length litFreqs distFreqs).2⟩
 
 /-- The sized trees of the empty token group: the (never-reached) `headD`
     default in `emitSharedBlocksAtSized` — the trees list produced by
@@ -1701,7 +1695,7 @@ def emitSharedBlocksAtSized (data : ByteArray) (toks : Array LZ77Token) (cuts : 
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
   let t := trees.headD emptySizedTrees
   let bw := emitDynBlock bw data (toks.extract pos j) t.val.1 t.val.2
-    t.property.1 t.property.2.1 (decide (j ≥ toks.size))
+    t.property.1 t.property.2 (decide (j ≥ toks.size))
   if j ≥ toks.size then bw
   else emitSharedBlocksAtSized data toks cuts.tail trees.tail j bw
 termination_by toks.size - pos
@@ -2382,41 +2376,6 @@ def emitDynBlockP (bw : BitWriter) (data : ByteArray) (ptoks : TokenArray)
   let (code, len) := litCodes[256]'h256
   bw.writeHuffCode code len
 
-/-- Bounded flat-state twin of `emitDynBlockP`, for callers whose dynamic
-    trees are known to satisfy RFC 1951's 15-bit maximum.  The proof arguments
-    are erased; operationally its only difference from the reference body is
-    routing the packed-token walk through `emitTokensWithCodesTAPTFlatZero`. -/
-def emitDynBlockPFlat (bw : BitWriter) (data : ByteArray) (ptoks : TokenArray)
-    (litLens distLens : List Nat)
-    (hlit : litLens.length = 286) (hdist : distLens.length = 30)
-    (_hlit_bound : ∀ x ∈ litLens, x ≤ 15)
-    (_hdist_bound : ∀ x ∈ distLens, x ≤ 15)
-    (isFinal : Bool) : BitWriter :=
-  let litCodes := canonicalCodes (litLens.toArray.map Nat.toUInt8)
-  let distCodes := canonicalCodes (distLens.toArray.map Nat.toUInt8)
-  let bw := bw.writeBits 1 (if isFinal then 1 else 0)
-  let bw := bw.writeBits 2 2
-  let bw := writeDynamicHeader bw litLens distLens
-  have hlit_size : litCodes.size ≥ 286 := by
-    show (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size ≥ 286
-    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
-  have hdist_size : distCodes.size ≥ 30 := by
-    show (canonicalCodes (distLens.toArray.map Nat.toUInt8)).size ≥ 30
-    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
-  have h256 : 256 < litCodes.size := by
-    show 256 < (canonicalCodes (litLens.toArray.map Nat.toUInt8)).size
-    rw [canonicalCodes_size, Array.size_map, List.size_toArray]; omega
-  have hlitT_size : (packCodeTab litCodes).size ≥ 286 := by
-    rw [packCodeTab_size]; exact hlit_size
-  have hdistT_size : (packCodeTab distCodes).size ≥ 30 := by
-    rw [packCodeTab_size]; exact hdist_size
-  let bw := if data.size == 0 then bw
-            else emitTokensWithCodesTAPTFlatZero bw ptoks
-              (packCodeTab litCodes) (packCodeTab distCodes)
-              hlitT_size hdistT_size
-  let (code, len) := litCodes[256]'h256
-  bw.writeHuffCode code len
-
 /-- Packed twin of `emitSharedBlock`: the group's frequencies come from
     `tokenFreqsP` (dense packed tables) and the emit from `emitDynBlockP`. -/
 def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : TokenArray)
@@ -2471,7 +2430,7 @@ def deflateDynamicBlocksSharedAtP (data : ByteArray) (toks : TokenArray)
     `3 + header + freq·codeLen` sum the packed emitter (`emitSharedBlocksAtP`)
     flushes as `⌈bits/8⌉`, and component 2's entries are definitionally
     `dynamicCodeLengths (tokenFreqsP group)` — exactly what `emitSharedBlockP`
-    would recompute (`emitSharedBlocksAtSizedP_spec`). This is what makes the
+    would recompute (`emitSharedBlocksAtSizedP_eq`). This is what makes the
     size-arbitrated dispatch (#2753) a net win: the per-block trees are built
     **once**, during sizing, and the emit pass reuses them. -/
 def sharedPartitionSizedP (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
@@ -2581,14 +2540,13 @@ decreasing_by
     block's `(litLens, distLens)` come from the `trees` list (in lockstep with
     `cuts`) instead of being recomputed from the group via `tokenFreqsP` +
     `dynamicCodeLengths`. Byte-identical to `emitSharedBlocksAtP` when `trees` is
-    `sharedPartitionSizedP`'s output (`emitSharedBlocksAtSizedP_spec`). -/
+    `sharedPartitionSizedP`'s output (`emitSharedBlocksAtSizedP_eq`). -/
 def emitSharedBlocksAtSizedP (data : ByteArray) (toks : TokenArray) (cuts : List Nat)
     (trees : List SizedTrees) (pos : Nat) (bw : BitWriter) : BitWriter :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
   let t := trees.headD emptySizedTrees
-  let bw := emitDynBlockPFlat bw data (toks.extract pos j) t.val.1 t.val.2
-    t.property.1 t.property.2.1 t.property.2.2.1 t.property.2.2.2
-    (decide (j ≥ toks.size))
+  let bw := emitDynBlockP bw data (toks.extract pos j) t.val.1 t.val.2
+    t.property.1 t.property.2 (decide (j ≥ toks.size))
   if j ≥ toks.size then bw
   else emitSharedBlocksAtSizedP data toks cuts.tail trees.tail j bw
 termination_by toks.size - pos
