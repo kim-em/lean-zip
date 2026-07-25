@@ -299,6 +299,41 @@ def distCodeWordTab : Array UInt32 :=
 @[simp] theorem distCodeWordTab_size : distCodeWordTab.size = 32769 := by
   simp only [distCodeWordTab, Array.size_map, Array.size_range]
 
+private theorem packCodeBytesList_size (xs : List UInt32) (acc : ByteArray) :
+    (xs.foldl (fun b w => b.pushUInt32LE w) acc).size = acc.size + 4 * xs.length := by
+  induction xs generalizing acc with
+  | nil => simp
+  | cons x xs ih =>
+    simp only [List.foldl_cons, List.length_cons]
+    rw [ih, ByteArray.size_pushUInt32LE]
+    omega
+
+private theorem packCodeBytes_size (xs : Array UInt32) :
+    (xs.foldl (fun b w => b.pushUInt32LE w) ByteArray.empty).size = 4 * xs.size := by
+  rw [← Array.foldl_toList, packCodeBytesList_size]
+  simp
+
+/-- Runtime distance-code table packed into four bytes per entry instead of the
+    generic array's eight-byte tagged slots.  Build it directly so the boxed
+    proof-facing table does not have to stay resident on the native path. -/
+def distCodeWordBytes : ByteArray :=
+  let tab := (Array.range 32769).map (fun dist => packCode (findDistCode dist))
+  tab.foldl (fun b w => b.pushUInt32LE w) ByteArray.empty
+
+@[simp] theorem distCodeWordBytes_size : distCodeWordBytes.size = 4 * 32769 := by
+  rw [distCodeWordBytes, packCodeBytes_size, Array.size_map, Array.size_range]
+
+@[inline] def distCodeWordBytesImpl (dist : Nat) : UInt32 :=
+  if h : dist < 32769 then
+    have hoff : (4 * dist).toUSize.toNat = 4 * dist := by
+      simp only [Nat.toUSize]
+      apply Nat.mod_eq_of_lt
+      exact Nat.lt_of_lt_of_le (by omega) USize.le_size
+    distCodeWordBytes.ugetUInt32LE (4 * dist).toUSize (by
+      rw [hoff, distCodeWordBytes_size]
+      omega)
+  else packCode (findDistCode dist)
+
 /-- Table-backed packed length code: one `Array UInt32` read for lengths
     0–258, the packed linear search beyond. -/
 @[inline] def lenCodeWord (length : Nat) : UInt32 :=
@@ -307,7 +342,7 @@ def distCodeWordTab : Array UInt32 :=
 
 /-- Table-backed packed distance code: one `Array UInt32` read for distances
     0–32768, the packed linear search beyond. -/
-@[inline] def distCodeWord (dist : Nat) : UInt32 :=
+@[implemented_by distCodeWordBytesImpl, inline] def distCodeWord (dist : Nat) : UInt32 :=
   if h : dist < 32769 then distCodeWordTab[dist]'(distCodeWordTab_size ▸ h)
   else packCode (findDistCode dist)
 
