@@ -25,6 +25,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from benchmark_json import load_routine
+
 # key -> (display label for warnings, run-command prefix, levels to sample)
 COMPARATORS = {
     "go":    ("Go compress/flate",        ["bench/comparators/go/bench-go"],          range(1, 10)),
@@ -96,7 +99,7 @@ def main():
     payloads_dir, results_path = sys.argv[1], Path(sys.argv[2])
     keys = sys.argv[3:] or list(COMPARATORS)
 
-    doc = json.loads(results_path.read_text())
+    doc = load_routine(results_path)
     results = doc["results"]
 
     payloads = discover_payloads(payloads_dir)

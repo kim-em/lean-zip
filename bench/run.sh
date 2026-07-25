@@ -11,8 +11,9 @@
 # plots); the external comparators each pull their own toolchain (see
 # comparators/build_all.sh) and are run with node + python3 on PATH.
 #
-# Note: throughput numbers are a median-of-N snapshot of THIS machine; commit the
-# regenerated JSON + SVGs together, and record the machine in the dashboard.
+# Note: throughput numbers are a median-of-5 snapshot of THIS machine for every
+# corpus; commit the regenerated JSON + SVGs together. Machine-readable timing
+# metadata is validated before routine snapshots can be merged or plotted.
 #
 # Every *measurement* step below runs through bench/pin_core.sh, which pins the
 # command (and its children) to the idlest single core — unpinned runs wander
@@ -65,8 +66,8 @@ refresh_whole_tar() {
 # levels 9 (L9-fast) and 10 (exact crown, ~1 MB/s); pass a level list to skip
 # them when the Lean change does not touch that path (the prior rows are kept by
 # the upsert merge).
-#   bench/run.sh --native-only                  # all 10 native levels, incl. the L10 crown (~14 min)
-#   bench/run.sh --native-only 1,2,3,4,5,6,7,8  # skip the slow L9/L10 (~half the time)
+#   bench/run.sh --native-only                  # all 10 native levels, incl. the L10 crown (~19 min)
+#   bench/run.sh --native-only 1,2,3,4,5,6,7,8  # skip the slow L9/L10 (~8 min)
 if [ "${1:-}" = "--native-only" ]; then
   [ -f "$OUT" ] || { echo "no existing $OUT to splice into — run a full bench/run.sh first" >&2; exit 1; }
   TMP="$(mktemp --suffix=.json)"

@@ -18,7 +18,10 @@ That runs [`lake -d bench exe bench-report`](ZipBenchReport.lean) (writes
 [`results/latest.json`](results/latest.json) and dumps the exact payloads), then
 the external-language comparators (see below), then [`plot.py`](plot.py) (writes
 the SVGs). Ratios are deterministic; throughput is a **median-of-5 snapshot of
-the machine recorded in the JSON `meta`** — commit the JSON and SVGs together.
+the machine recorded in the JSON `meta`, for every corpus**. The producer records
+`meta.timing_aggregation = "median"` and `meta.timing_reps = 5`; merge and plot
+tools reject routine snapshots that do not declare that protocol. Commit the
+JSON and SVGs together.
 
 > **Benchmark machine: chungus2 (since 2026-07-05).** The canonical machine moved
 > from `chungus` to `chungus2`. The two are indistinguishable on throughput —
@@ -96,9 +99,10 @@ files land).
   dictionary, a source tarball, XML, databases, medical images, a DLL) — the
   modern standard zstd/brotli/lzma report against. Fetched on demand into a
   gitignored cache (`fetch_corpora.sh silesia`, pinned GitHub mirror,
-  SHA-256-verified); its rows slot into the same per-level charts automatically.
-  Because it is ~70× larger than Canterbury, it runs a **reduced matrix** —
-  a single timing pass — so the regeneration stays tractable.
+  SHA-256-verified); its rows slot into the same per-level charts automatically
+  and use the same median-of-5 timing policy as Canterbury. This makes a full
+  refresh slower, but prevents one-shot Silesia noise from masquerading as a
+  high-level regression.
 
 The synthetic `prng` pattern used to be the only incompressible workload; its
 replacement is **real** poorly-compressible files in the corpora (Silesia `sao`,

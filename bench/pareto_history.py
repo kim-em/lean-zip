@@ -62,6 +62,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plot  # COMPRESSORS, _level_points, _mix_curve maths, geomean
+from benchmark_json import load_frozen_zopfli, load_routine, require_routine_if_declared
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -190,11 +191,11 @@ def extract(corpus, include_worktree=False, only=None):
     `only`, if given, is a set of reference compressor keys to keep (native, the
     animated subject, is always kept regardless) — e.g. `{"miniz_oxide"}` for the
     Lean-vs-Rust cut used in the blog. `None` keeps every reference curve."""
-    now = json.load(open(REPO / "bench/results/latest.json"))
+    now = load_routine(REPO / "bench/results/latest.json")
     results_now = now["results"]
     ceiling_path = REPO / "bench/results/zopfli-ceiling.json"
     if ceiling_path.exists():
-        ceiling = json.load(open(ceiling_path))["results"]
+        ceiling = load_frozen_zopfli(ceiling_path)["results"]
         results_now = [r for r in results_now
                        if r["compressor"] != "zopfli"] + ceiling
 
@@ -220,6 +221,7 @@ def extract(corpus, include_worktree=False, only=None):
             continue
         try:
             d = json.loads(git("show", f"{sha}:bench/results/latest.json"))
+            require_routine_if_declared(d, f"{sha}:bench/results/latest.json")
         except Exception:
             continue
         pts = native_points(d.get("results", []), corpus)

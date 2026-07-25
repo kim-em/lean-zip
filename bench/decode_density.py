@@ -25,6 +25,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from benchmark_json import load_routine
+
 # key -> (display label, decode-command prefix)
 COMPARATORS = {
     "go":    ("Go compress/flate",      ["bench/comparators/go/bench-go", "decode"]),
@@ -102,7 +104,7 @@ def main():
     streams_dir, results_path = sys.argv[1], Path(sys.argv[2])
     keys = sys.argv[3:] or list(COMPARATORS)
 
-    doc = json.loads(results_path.read_text())
+    doc = load_routine(results_path)
     results = doc["results"]
     streams = discover_streams(streams_dir)
 

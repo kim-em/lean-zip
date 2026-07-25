@@ -1,6 +1,15 @@
 ---
 name: perf-pr-graphs
-description: Produce before/after native speed-vs-ratio comparison graphs (against the other-language curves), post them to the PR, and show them to Kim BEFORE merging. PROACTIVELY REQUIRED for any lean-zip performance PR (perf:/runtime/throughput change to compress or decode): the moment such a PR goes green, invoke this YOURSELF without being asked — generating and posting the graphs is part of finishing the PR, never a step that waits for Kim to request it. Do not report the PR as done, and do not merely offer to "produce them if she wants", until the graphs are generated and posted; only the merge itself waits for her go-ahead. Most interesting for compression changes.
+description: >-
+  Produce before/after native speed-vs-ratio comparison graphs (against the
+  other-language curves), post them to the PR, and show them to Kim BEFORE
+  merging. PROACTIVELY REQUIRED for any lean-zip performance PR
+  (perf:/runtime/throughput change to compress or decode): the moment such a PR
+  goes green, invoke this YOURSELF without being asked — generating and posting
+  the graphs is part of finishing the PR, never a step that waits for Kim to
+  request it. Do not report the PR as done, and do not merely offer to "produce
+  them if she wants", until the graphs are generated and posted; only the merge
+  itself waits for her go-ahead. Most interesting for compression changes.
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
@@ -243,8 +252,8 @@ artifacts move into `$W`.
 4. **BEFORE is the base branch's committed `bench/results/latest.json` — do NOT
    rebuild it.** Master already carries up-to-date native numbers:
    `bench/results/latest.json` is the committed dashboard snapshot (native
-   `ratio` / `compress_mbps` / `decompress_mbps`, median-of-5 on Canterbury, same
-   machine), and it is the canonical BEFORE. There is **no merge-base worktree
+   `ratio` / `compress_mbps` / `decompress_mbps`, median-of-5 on every corpus,
+   same machine), and it is the canonical BEFORE. There is **no merge-base worktree
    build** — that whole step was wasted work, because the data it would reproduce
    is already recorded in the tree.
 
@@ -304,8 +313,9 @@ artifacts move into `$W`.
    are different sessions, so a small single-digit-% speed delta can be
    cross-session / machine-load noise rather than the PR. Before reading a fine
    speed verdict, make the AFTER run on a quiet machine (no competing `lake`
-   builds — check `uptime` / `ps` first), and weight Canterbury's median-of-5
-   over Silesia's single pass.
+   builds — check `uptime` / `ps` first). Both corpora are median-of-5; weight
+   Silesia more heavily because it is the representative large-file workload,
+   while still treating a small cross-session delta as unresolved.
 
 5. **Sanity-check before plotting.** Three independent checks — they catch
    different failures, so read all of them:
@@ -384,12 +394,11 @@ artifacts move into `$W`.
    Silesia** — a real split, not noise). **A Silesia win outweighs a Canterbury
    loss.** Do NOT read Canterbury alone and call it the verdict.
 
-   The catch: Canterbury is median-of-5 (low per-run noise) but unrepresentative;
-   Silesia is single-pass (`reps=1`), so a *single* Silesia run carries ±30%+
-   run-to-run noise and a lone graph cannot resolve a single-digit-% delta on it.
-   When the Silesia delta is small or borderline — exactly when the merge decision
-   hinges on it — do the self-controlled sandwich measurement below instead of
-   trusting one pass or a cross-session graph.
+   Both corpora use the same median-of-5 policy, which removes the former
+   Silesia one-shot failure mode. A median does not eliminate cross-session host
+   drift, however, so when the Silesia delta is small or borderline — exactly
+   when the merge decision hinges on it — do the self-controlled sandwich
+   measurement below instead of trusting a cross-session graph.
 
 8. **Refresh the dashboard inside this PR and commit it.** This is compulsory and
    part of *this* PR — Kim does not want a follow-up "bench: dashboard refresh"
@@ -480,10 +489,10 @@ artifacts move into `$W`.
 The routine graph (steps 1–9) compares a fresh AFTER against the base-branch
 `latest.json` BEFORE — a *cross-session* comparison whose noise floor is a few
 percent, which is fine for visible wins but **cannot** settle a single-digit-%
-delta (and single-pass Silesia adds ±30% on top). **Do not post a single-pass
-overlay as evidence for a sub-few-percent change** — its per-level scatter reads
-as regressions and wins that are pure noise (in #2735 the overlay showed the
-AFTER curve dipping below baseline at several levels; the real effect was
+delta even with median-of-5. **Do not post a lone cross-session overlay as
+evidence for a sub-few-percent change** — its per-level scatter can still read as
+regressions and wins that are host drift (in #2735 the overlay showed the AFTER
+curve dipping below baseline at several levels; the real effect was
 neutral-to-+1.6%). When the merge decision hinges on a small delta, run the
 measurement below and present *it*, not the overlay.
 
@@ -512,7 +521,8 @@ rep, run BEFORE → AFTER → BEFORE back-to-back (`M1, X, M2`), pinned to one c
 - The sandwich puts AFTER in the middle *every* rep, so it carries a fixed
   position bias — read it off the control levels (their nonzero mean *is* that
   bias) and subtract it to isolate the per-level code effect.
-- ≥4–5 reps; aggregate per `(file, level)` over log-ratios, geomean + 95% CI.
+- Use 5 sandwich rounds; aggregate per `(file, level)` over log-ratios, geomean
+  + 95% CI.
   CI excluding 0 and clearing the floor → real; inside the floor band → neutral.
   This is what turned #2735's overlay chaos into a firm "L2 +1.6%, L6 (target)
   0.0%, no level regresses" on both corpora.
@@ -546,9 +556,9 @@ bit #2735:
   by output filename, not by the stamp.) For a **Silesia-only** matrix, point the
   run at a corpora dir that contains only the `silesia` symlink (or `mv
   bench/corpora/canterbury` aside and restore it via a `trap` on EXIT). L9's
-  optimal-parse *compress* on 203 MB is minutes/run — measure it with fewer reps,
-  or skip it if 1–8 settles the sign (decode delta was uniform across levels in
-  #2650).
+  optimal-parse *compress* on 203 MB is minutes/run; keep at least five rounds
+  for any point used as evidence, or skip L9 if levels 1–8 already settle the
+  sign (decode delta was uniform across levels in #2650).
 
 ## Notes
 
