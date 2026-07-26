@@ -251,11 +251,23 @@ theorem l7MatchPFor_eq (data : ByteArray) (profile : L7Profile) :
     simp only [l7MatchConfig]
     rw [if_pos hsize]
     exact lz77ChainLazyIterP_eq data 22 32768 1000000000 64 65 5 false 1
-  · rw [if_neg hs, lz77ChainLazyIterPMerged_eq]
-    exact lz77ChainLazyIterP_eq data (l7MatchConfig data profile).chainDepth 32768
-      1000000000 (l7MatchConfig data profile).goodMatch
-      (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
-      (l7MatchConfig data profile).useH3 (l7MatchConfig data profile).lazy2Steps
+  · rw [if_neg hs]
+    by_cases hh : (l7MatchConfig data profile).useH3 = true
+    · simp only [hh, ↓reduceIte, lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_eq data (l7MatchConfig data profile).chainDepth 32768
+        1000000000 (l7MatchConfig data profile).goodMatch
+        (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+        true (l7MatchConfig data profile).lazy2Steps
+    · have hh' : (l7MatchConfig data profile).useH3 = false := by
+        cases h : (l7MatchConfig data profile).useH3 with
+        | false => rfl
+        | true => exact (hh h).elim
+      simp only [hh', Bool.false_eq_true, ↓reduceIte, lz77ChainLazyIterPMergedNoH3,
+        lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_eq data (l7MatchConfig data profile).chainDepth 32768
+        1000000000 (l7MatchConfig data profile).goodMatch
+        (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+        false (l7MatchConfig data profile).lazy2Steps
 
 /-- The boxed view of an already-selected packed level-7 profile is its boxed
     matcher. -/
@@ -274,12 +286,23 @@ theorem l7MatchPFor_map (data : ByteArray) (profile : L7Profile) :
     rw [if_pos hsize]
     exact lz77ChainLazyIterP_map data 22 32768 1000000000 64 65 5 false 1
       (by omega) (by omega)
-  · rw [if_neg hs, lz77ChainLazyIterPMerged_eq]
-    exact lz77ChainLazyIterP_map data (l7MatchConfig data profile).chainDepth 32768
-      1000000000 (l7MatchConfig data profile).goodMatch
-      (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
-      (l7MatchConfig data profile).useH3 (l7MatchConfig data profile).lazy2Steps
-      (by omega) (by omega)
+  · rw [if_neg hs]
+    by_cases hh : (l7MatchConfig data profile).useH3 = true
+    · simp only [hh, ↓reduceIte, lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_map data (l7MatchConfig data profile).chainDepth 32768
+        1000000000 (l7MatchConfig data profile).goodMatch
+        (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+        true (l7MatchConfig data profile).lazy2Steps (by omega) (by omega)
+    · have hh' : (l7MatchConfig data profile).useH3 = false := by
+        cases h : (l7MatchConfig data profile).useH3 with
+        | false => rfl
+        | true => exact (hh h).elim
+      simp only [hh', Bool.false_eq_true, ↓reduceIte, lz77ChainLazyIterPMergedNoH3,
+        lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_map data (l7MatchConfig data profile).chainDepth 32768
+        1000000000 (l7MatchConfig data profile).goodMatch
+        (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+        false (l7MatchConfig data profile).lazy2Steps (by omega) (by omega)
 
 /-- `lzMatchP` is the `packTok` image of `lzMatch` at every level. -/
 theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :

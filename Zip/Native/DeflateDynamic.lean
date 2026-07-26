@@ -1506,8 +1506,12 @@ def l7MatchPFor (data : ByteArray) (profile : L7Profile) : TokenArray :=
     lz77ChainLazyIterPMergedL5Large data 32768 1000000000 64 65
   else
     let cfg := l7MatchConfig data profile
-    lz77ChainLazyIterPMerged data cfg.chainDepth 32768 1000000000 cfg.goodMatch cfg.niceLen
-      cfg.lazyDepth cfg.useH3 cfg.lazy2Steps
+    if cfg.useH3 then
+      lz77ChainLazyIterPMerged data cfg.chainDepth 32768 1000000000 cfg.goodMatch cfg.niceLen
+        cfg.lazyDepth true cfg.lazy2Steps
+    else
+      lz77ChainLazyIterPMergedNoH3 data cfg.chainDepth 32768 1000000000 cfg.goodMatch
+        cfg.niceLen cfg.lazyDepth cfg.lazy2Steps
 
 /-- Rolling lazy2 deferral steps per level (#2837): with steps > 1 the lazy
     matcher keeps deferring while each next position strictly improves
