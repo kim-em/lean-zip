@@ -51,6 +51,9 @@ def checkFileIfPresent (path : String) (expectedProfile : L7Profile)
     let routed := deflateRawL7RouteP data profile ptokens
     unless routed == legacy do
       throw (IO.userError s!"L7 route {path}: bytes differ from size-arbitrated winner")
+    let production := deflateRaw data 7
+    unless production == routed do
+      throw (IO.userError s!"L7 production dispatch {path}: bytes differ from selected route")
     unless routed.size == expectedSize do
       throw (IO.userError
         s!"L7 route {path}: expected {expectedSize} bytes, got {routed.size}")
@@ -132,8 +135,11 @@ def tests : IO Unit := do
       (l7OutputRouteFor (h3ProbeMinSize - 1) profile) .arbitrate
 
   -- Pin the route independently of signal extraction, then exercise extraction
-  -- and exact winner-byte identity on every available file.  Canterbury is
+  -- and exact winner-byte identity on every available file. Canterbury is
   -- committed; Silesia is an optional download under the ignored directory.
+  -- The aggregate L7 speed/ratio point intentionally does not promise per-file
+  -- monotonicity: the selected fast profile makes kennedy and lcet10 0.28% and
+  -- 0.32% larger than L6 (203000 vs 202429; 145333 vs 144871).
   let files : List (String × Nat × L7Profile × Nat × L7OutputRoute × Nat) := [
     ("canterbury/alice29.txt", 152089, .chain64Probe8, 512, .split, 54155),
     ("canterbury/asyoulik.txt", 125179, .shallow, 512, .split, 48703),

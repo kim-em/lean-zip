@@ -170,8 +170,9 @@ def tests : IO Unit := do
   -- flushed byte counts), the emit thunks must be byte-identical to the
   -- reference emitters (`deflateRawBaseP` / `deflateDynamicBlocksSharedAtP`,
   -- proven — this pins the compiled code), and the new emit-only-the-winner
-  -- `deflateRaw` at levels 6/7/8 must be byte-identical to the retired
-  -- emit-every-candidate dispatch.
+  -- `deflateRaw` at levels 6/8 must be byte-identical to the retired
+  -- emit-every-candidate dispatch. Level 7 now has profile-specific cadence
+  -- and output routing, covered directly in `L7Adaptive`.
   for (name, data) in samples do
     for level in [(6 : UInt8), 7, 8] do
       let ptokens := lzMatchP data level
@@ -202,21 +203,23 @@ def tests : IO Unit := do
           unless (splitPrep.2 ()).beq splitEmit do
             throw (IO.userError
               s!"deflateDynamicBlocksSharedAtSizedP emit not byte-identical on {name}@L{level}/{cname}")
-      -- 7c. the size-arbitrated dispatch is byte-identical to the old
-      -- emit-every-candidate one (`pickSmaller` over emitted blocks).
-      let base := deflateRawBaseP data ptokens
-      let cuts := chooseSplitsHeuristicP ptokens data.size
-      let withObs := if cuts.isEmpty then base
-        else pickSmaller base (deflateDynamicBlocksSharedAtP data ptokens cuts)
-      let refOut := if 8 ≤ level then
-          pickSmaller withObs (deflateDynamicBlocksSharedAtP data ptokens
-            (fixedCadenceCuts sharedTokChunk ptokens.size))
-        else withObs
-      let newOut := deflateRaw data level
-      unless newOut.beq refOut do
-        throw (IO.userError
-          s!"deflateRaw(L{level}) not byte-identical to emit-all reference on {name}: \
-             new.size={newOut.size} ref.size={refOut.size}")
+      -- 7c. At the non-adaptive levels, the size-arbitrated dispatch is
+      -- byte-identical to the old emit-every-candidate one (`pickSmaller` over
+      -- emitted blocks).
+      if level != 7 then
+        let base := deflateRawBaseP data ptokens
+        let cuts := chooseSplitsHeuristicP ptokens data.size
+        let withObs := if cuts.isEmpty then base
+          else pickSmaller base (deflateDynamicBlocksSharedAtP data ptokens cuts)
+        let refOut := if 8 ≤ level then
+            pickSmaller withObs (deflateDynamicBlocksSharedAtP data ptokens
+              (fixedCadenceCuts sharedTokChunk ptokens.size))
+          else withObs
+        let newOut := deflateRaw data level
+        unless newOut.beq refOut do
+          throw (IO.userError
+            s!"deflateRaw(L{level}) not byte-identical to emit-all reference on {name}: \
+               new.size={newOut.size} ref.size={refOut.size}")
   IO.println "  SizeHelpers tests passed."
 
 end ZipTest.SizeHelpers

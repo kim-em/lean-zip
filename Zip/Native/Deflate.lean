@@ -2608,6 +2608,16 @@ decreasing_by
     (updateHashesMerged data hashSize prevSize c pos j matchLen insertCap,
      updateHash3 data h3tab pos j matchLen insertCap)
 
+/-- The constant-enabled helper is definitionally the `useH3 := true` branch
+    of the proved generic dispatcher. -/
+theorem updateHashesMergedH3GuardedEnabled_eq (data : ByteArray)
+    (hashSize prevSize : Nat) (c h3tab : Array Nat) (pos j matchLen insertCap : Nat) :
+    updateHashesMergedH3GuardedEnabled data hashSize prevSize c h3tab
+        pos j matchLen insertCap =
+      updateHashesMergedH3Guarded true data hashSize prevSize c h3tab
+        pos j matchLen insertCap := by
+  rfl
+
 /-- Merged-array twin of `lz77ChainLazyIterP` with the mainLoop **and** the
     rolling deferral fused into one hot loop (#2837): identical control flow, but
     the chain state is the single combined array `c` (prev ring at offset 0, hash

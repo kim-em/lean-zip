@@ -260,10 +260,11 @@ private def checkLargeL5CompiledPath : IO Unit := do
     throw (IO.userError "large-L5 production/reference output mismatch")
 
 /-- Direct compiled conformance for the two level-7 `@[implemented_by]`
-    specializations. The explicit `*Native` entry runs the copied hot loop while
-    `lz77ChainLazyIterPMerged` is its proved generic/logical reference. Keep the
-    matcher shallow enough for CI while retaining H3 updates, interior insertion,
-    lazy lookahead, and rolling deferral. -/
+    specializations. Calling the proof-facing wrappers exercises their native
+    implementations in compiled tests, while `lz77ChainLazyIterPMerged` is the
+    proved generic/logical reference. Keep the matcher shallow enough for CI
+    while retaining H3 updates, interior insertion, lazy lookahead, and rolling
+    deferral. -/
 private def checkLazySpecialization (label : String) (data : ByteArray)
     (expectFastLog : Bool) : IO Unit := do
   let useFastLog : Bool := decide (h3ProbeMinSize ≤ data.size)
@@ -272,22 +273,22 @@ private def checkLazySpecialization (label : String) (data : ByteArray)
       s!"{label}: expected useFastLog={expectFastLog}, got {useFastLog} at size {data.size}")
   let maxChain := 4
   let lazyDepth := 2
-  let nativeNoH3 := lz77ChainLazyIterPMergedNoH3Native data maxChain
+  let dispatchedNoH3 := lz77ChainLazyIterPMergedNoH3 data maxChain
     32768 1000000000 259 65 lazyDepth 2
   let genericNoH3 := lz77ChainLazyIterPMerged data maxChain
     32768 1000000000 259 65 lazyDepth false 2
-  unless nativeNoH3.toArray == genericNoH3.toArray do
+  unless dispatchedNoH3.toArray == genericNoH3.toArray do
     throw (IO.userError
-      s!"{label}: no-H3 native/generic token mismatch \
-         ({nativeNoH3.size} vs {genericNoH3.size} tokens)")
-  let nativeH3 := lz77ChainLazyIterPMergedH3Native data maxChain
+      s!"{label}: no-H3 dispatched/generic token mismatch \
+         ({dispatchedNoH3.size} vs {genericNoH3.size} tokens)")
+  let dispatchedH3 := lz77ChainLazyIterPMergedH3 data maxChain
     32768 1000000000 259 65 lazyDepth 2
   let genericH3 := lz77ChainLazyIterPMerged data maxChain
     32768 1000000000 259 65 lazyDepth true 2
-  unless nativeH3.toArray == genericH3.toArray do
+  unless dispatchedH3.toArray == genericH3.toArray do
     throw (IO.userError
-      s!"{label}: H3 native/generic token mismatch \
-         ({nativeH3.size} vs {genericH3.size} tokens)")
+      s!"{label}: H3 dispatched/generic token mismatch \
+         ({dispatchedH3.size} vs {genericH3.size} tokens)")
 
 /-- Pin both native specializations immediately below, at, and above the
     once-per-entry 1 MiB distance-log gate. The near-boundary text is
