@@ -1272,6 +1272,66 @@ decreasing_by
       rw [USize.toNat_sub_of_le _ _ hle, USize.toNat_one]
     omega
 
+/-- Hot-path specialization of `chainWalkPackedU` for an accumulator below the
+    match cutoff.  That inequality is preserved by the skip branch and is
+    re-established by the non-skip continuation, so the skip branch does not
+    need to retest it at every candidate.  `chainWalkPackedUBelow_eq` proves that
+    this is exactly `chainWalkPackedU` whenever `hbelow` holds. -/
+def chainWalkPackedUBelow (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsz : data.size < USize.size)
+    (posU maxLenU cutoffU : USize) (hposU : posU.toNat = pos) (hmaxU : maxLenU.toNat = maxLen)
+    (hcutU : cutoffU.toNat = min niceLen maxLen)
+    (cand : Nat) (fuelU bestLenU bestPosU : USize) (hbelow : bestLenU < cutoffU) : Nat :=
+  if fuelU = 0 then bestPosU.toNat * 512 + bestLenU.toNat
+  else if hc : cand < pos ∧ pos - cand ≤ windowSize then
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have hcand : cand + maxLen ≤ data.size := by omega
+    have hcandlt : cand < USize.size := by omega
+    let candU : USize := cand.toUSize
+    have hcandU : candU.toNat = cand := toUSize_toNat_of_lt hcandlt
+    let skip : Bool := if hbl : bestLenU < maxLenU then
+        have hbln : bestLenU.toNat < maxLen := by rw [← hmaxU]; exact USize.lt_iff_toNat_lt.mp hbl
+        have hb1 : (candU + bestLenU).toNat < data.size := by
+          have e : (candU + bestLenU).toNat = cand + bestLenU.toNat := by
+            rw [USize.toNat_add, hcandU]; apply Nat.mod_eq_of_lt; omega
+          omega
+        have hb2 : (posU + bestLenU).toNat < data.size := by
+          have e : (posU + bestLenU).toNat = pos + bestLenU.toNat := by
+            rw [USize.toNat_add, hposU]; apply Nat.mod_eq_of_lt; omega
+          omega
+        data.uget (candU + bestLenU) hb1 != data.uget (posU + bestLenU) hb2
+      else false
+    if skip then
+      chainWalkPackedUBelow data prev windowSize pos maxLen niceLen hpm hps hsz
+        posU maxLenU cutoffU hposU hmaxU hcutU
+        (prev[cand &&& 0x7FFF]'(by have h1 := winMask_lt cand; have h2 := Nat.and_le_left (n := cand) (m := 0x7FFF); simp only [chainWinSize] at h1 hps; omega))
+        (fuelU - 1) bestLenU bestPosU hbelow
+    else
+      let mlU := countMatchUCore data candU posU maxLenU hsz
+        (by rw [hcandU, hmaxU]; exact hcand)
+        (by rw [hposU, hmaxU]; exact hpm)
+      let blU : USize := if mlU > bestLenU then mlU else bestLenU
+      let bpU : USize := if mlU > bestLenU then candU else bestPosU
+      if hstop : blU ≥ cutoffU then bpU.toNat * 512 + blU.toNat
+      else chainWalkPackedUBelow data prev windowSize pos maxLen niceLen hpm hps hsz
+        posU maxLenU cutoffU hposU hmaxU hcutU
+        (prev[cand &&& 0x7FFF]'(by have h1 := winMask_lt cand; have h2 := Nat.and_le_left (n := cand) (m := 0x7FFF); simp only [chainWinSize] at h1 hps; omega))
+        (fuelU - 1) blU bpU (USize.not_le.mp hstop)
+  else bestPosU.toNat * 512 + bestLenU.toNat
+termination_by fuelU.toNat
+decreasing_by
+  all_goals
+    have hfz : ¬ fuelU = 0 := by assumption
+    have hpos : 0 < fuelU.toNat := by
+      rcases Nat.eq_zero_or_pos fuelU.toNat with h | h
+      · exact absurd (USize.toNat_inj.mp (by rw [h, USize.toNat_zero])) hfz
+      · exact h
+    have hle : (1 : USize) ≤ fuelU := by rw [USize.le_iff_toNat_le, USize.toNat_one]; omega
+    have heq : (fuelU - 1).toNat = fuelU.toNat - 1 := by
+      rw [USize.toNat_sub_of_le _ _ hle, USize.toNat_one]
+    omega
+
 /-- Packed chain walk with all scalar hot-loop state
     in `USize`, including the candidate and packed result.  The `prev` ring is
     still an `Array Nat`, so each link is converted once when loaded; all
@@ -1373,7 +1433,9 @@ abbrev chainWalkPackedUUSafe (data : ByteArray) (prev : Array Nat)
     that `fuel`/`bestLen`/`bestPos` are representable. Every miss (never taken for
     the production matcher: `data.size` fits a `size_t`, `fuel = maxChain` is tiny,
     and the walk starts at `bestLen = bestPos = 0`) falls back to `chainWalkPacked`,
-    so this equals `chainWalkGuardedPacked` (`chainWalkGuardedPackedU_eq`). -/
+    so this equals `chainWalkGuardedPacked` (`chainWalkGuardedPackedU_eq`). A
+    once-per-walk cutoff guard selects `chainWalkPackedUBelow`; an already-at-cutoff
+    defensive seed keeps using the generic loop. -/
 @[inline] def chainWalkGuardedPackedU (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
     (cand fuel bestLen bestPos : Nat) : Nat :=
@@ -1381,10 +1443,16 @@ abbrev chainWalkPackedUUSafe (data : ByteArray) (prev : Array Nat)
     if hg : data.size.toUSize.toNat = data.size ∧ fuel.toUSize.toNat = fuel ∧
         bestLen.toUSize.toNat = bestLen ∧ bestPos.toUSize.toNat = bestPos then
       have hsz : data.size < USize.size := by rw [← hg.1]; exact USize.toNat_lt_two_pow_numBits _
-      chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
-        pos.toUSize maxLen.toUSize (min niceLen maxLen).toUSize
-        (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
-        (toUSize_toNat_of_lt (by omega)) cand fuel.toUSize bestLen.toUSize bestPos.toUSize
+      if hbelow : bestLen.toUSize < (min niceLen maxLen).toUSize then
+        chainWalkPackedUBelow data prev windowSize pos maxLen niceLen hpm hps hsz
+          pos.toUSize maxLen.toUSize (min niceLen maxLen).toUSize
+          (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+          (toUSize_toNat_of_lt (by omega)) cand fuel.toUSize bestLen.toUSize bestPos.toUSize hbelow
+      else
+        chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
+          pos.toUSize maxLen.toUSize (min niceLen maxLen).toUSize
+          (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+          (toUSize_toNat_of_lt (by omega)) cand fuel.toUSize bestLen.toUSize bestPos.toUSize
     else
       chainWalkPacked data prev windowSize pos maxLen niceLen hpm hps cand fuel bestLen bestPos
   else

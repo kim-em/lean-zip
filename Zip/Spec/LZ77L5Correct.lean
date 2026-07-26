@@ -135,7 +135,10 @@ theorem chainWalkPackedUUSeededChecked_toNat (data : ByteArray) (prev : Array Na
     ⟨hg.1.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1⟩
   rw [dif_pos hg.1.1, dif_pos hold]
   rw [chainWalkPackedUU2_eq]
-  simpa only [hg.1.2.2.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1] using heq
+  split
+  · rw [chainWalkPackedUBelow_eq]
+    simpa only [hg.1.2.2.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1] using heq
+  · simpa only [hg.1.2.2.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1] using heq
 
 /-- The fully-native-word guarded wrapper is observationally identical to the
     existing mixed-`Nat`/`USize` guarded walk. -/

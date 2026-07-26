@@ -809,6 +809,34 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
         simp only [dif_neg hc, dif_neg hcNat]
         exact packMatchU_toNat bestPosU bestLenU data.size hbpdata (by omega) hfit
 
+set_option maxHeartbeats 1000000 in
+/-- The below-cutoff specialization removes only the cutoff check on the skip
+    branch; its invariant makes that check false, and both recursive branches
+    preserve the invariant. -/
+theorem chainWalkPackedUBelow_eq (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsz : data.size < USize.size)
+    (posU maxLenU cutoffU : USize) (hposU : posU.toNat = pos) (hmaxU : maxLenU.toNat = maxLen)
+    (hcutU : cutoffU.toNat = min niceLen maxLen)
+    (cand : Nat) (fuelU bestLenU bestPosU : USize) (hbelow : bestLenU < cutoffU) :
+    chainWalkPackedUBelow data prev windowSize pos maxLen niceLen hpm hps hsz
+        posU maxLenU cutoffU hposU hmaxU hcutU cand fuelU bestLenU bestPosU hbelow =
+      chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
+        posU maxLenU cutoffU hposU hmaxU hcutU cand fuelU bestLenU bestPosU := by
+  fun_induction chainWalkPackedUBelow data prev windowSize pos maxLen niceLen hpm hps hsz
+      posU maxLenU cutoffU hposU hmaxU hcutU cand fuelU bestLenU bestPosU hbelow <;>
+    rw [chainWalkPackedU] <;>
+    simp_all (config := { zetaDelta := true })
+  all_goals
+    intro h
+    first
+    | omega
+    | exfalso
+      exact (USize.not_le.mpr (by
+        first
+        | assumption
+        | exact USize.not_le.mp (by assumption))) h
+
 /-- The runtime-guarded `USize` walk equals the runtime-guarded `Nat` walk
     (`chainWalkGuardedPacked`) unconditionally: when the addressability +
     accumulator-faithfulness check passes it is `chainWalkPackedU_eq`, and every
@@ -825,10 +853,15 @@ theorem chainWalkGuardedPackedU_eq (data : ByteArray) (prev : Array Nat)
   split
   · split
     · rename_i _ hg
-      rw [chainWalkPackedU_eq]
-      · rw [← hg.2.1]; exact USize.toNat_lt_two_pow_numBits _
-      · rw [← hg.2.2.1]; exact USize.toNat_lt_two_pow_numBits _
-      · rw [← hg.2.2.2]; exact USize.toNat_lt_two_pow_numBits _
+      split
+      · rw [chainWalkPackedUBelow_eq, chainWalkPackedU_eq]
+        · rw [← hg.2.1]; exact USize.toNat_lt_two_pow_numBits _
+        · rw [← hg.2.2.1]; exact USize.toNat_lt_two_pow_numBits _
+        · rw [← hg.2.2.2]; exact USize.toNat_lt_two_pow_numBits _
+      · rw [chainWalkPackedU_eq]
+        · rw [← hg.2.1]; exact USize.toNat_lt_two_pow_numBits _
+        · rw [← hg.2.2.1]; exact USize.toNat_lt_two_pow_numBits _
+        · rw [← hg.2.2.2]; exact USize.toNat_lt_two_pow_numBits _
     · rfl
   · rfl
 
@@ -872,7 +905,10 @@ theorem chainWalkPackedUUChecked_toNat (data : ByteArray) (prev : Array Nat)
       (0 : Nat).toUSize.toNat = 0 ∧ (0 : Nat).toUSize.toNat = 0 :=
     ⟨hg.2.1, hg.2.2.2.2.1, rfl, rfl⟩
   rw [dif_pos hg.1, dif_pos hold]
-  simpa only [hg.2.2.2.1, show ((0 : Nat).toUSize) = 0 from rfl] using heq
+  split
+  · rw [chainWalkPackedUBelow_eq]
+    simpa only [hg.2.2.2.1, show ((0 : Nat).toUSize) = 0 from rfl] using heq
+  · simpa only [hg.2.2.2.1, show ((0 : Nat).toUSize) = 0 from rfl] using heq
 
 /-- Low nine bits of the checked word decode to the old packed walk's length. -/
 theorem chainWalkPackedUUChecked_low (data : ByteArray) (prev : Array Nat)
