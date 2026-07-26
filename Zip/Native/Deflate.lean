@@ -1591,14 +1591,17 @@ def h3ProbeMinSize : Nat := 1048576
     at most 32768, while the fallback preserves behavior for arbitrary `Nat`s. -/
 @[inline] def lazyDistLog2 (dist : Nat) : Nat :=
   if h : dist ≤ 32768 then
-    (UInt32.ofNatLT dist (Nat.lt_of_le_of_lt h (by decide))).log2.toNat
+    (UInt32.ofNatLT dist (Nat.lt_of_le_of_lt h (by decide))).log2Clz.toNat
   else
     dist.log2
 
 @[simp] theorem lazyDistLog2_eq (dist : Nat) :
     lazyDistLog2 dist = dist.log2 := by
   unfold lazyDistLog2
-  split <;> rfl
+  split
+  · rw [UInt32.toNat_log2Clz]
+    rfl
+  · rfl
 
 /-- libdeflate's cost-based lazy accept rule (`deflate_compress.c`, the first
     lookahead step). The lazy matcher prefers the `pos+1` match `(len2, dist2)`
