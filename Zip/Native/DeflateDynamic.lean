@@ -1464,7 +1464,7 @@ def l7ClassifyLarge (minUnique meanUnique maxUnique : Nat) : L7Profile :=
   else if meanUnique < 545 then .chain128Probe32
   else .chain96Probe16
 
-/-- Content-selected matcher profile for level 7.
+/-- Content-selected matcher profile shared by adaptive levels 2–7 and 9.
 
     Inputs below 1 MiB use the 63-probe adjacent-run signal.  Larger inputs use
     four spread 32 KiB regions and the allocation-free four-word cardinality
@@ -3411,18 +3411,18 @@ theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     deflateDynamicBlocksSharedAtTokens data (lzMatch data level) choose =
       deflateDynamicBlocksSharedAt data choose level := rfl
 
-/-! ## Near-optimal candidate (level 9) -/
+/-! ## Optimal candidates (L9-fast source and level-10 crown) -/
 
-/-- Input-size gate for the near-optimal candidate. Measured (#2537, GNU
+/-- Input-size gate between the global-choice and windowed DP implementations.
+    Measured (#2537, GNU
     time MaxRSS of the ungated candidate on silesia/mozilla slices): 793 MB
     peak at 16 MiB input, 1.73 GB at 52 MiB — ≈27 B of transient state per
     input byte marginal (global choice arrays + per-region cache + token
     stream) over the process baseline. 64 MiB covers every Silesia file at a
-    projected ~2.1 GB peak, acceptable for the max-effort tiers (levels 9–10);
-    truly huge inputs still fall back to the split path. A pure dispatch knob —
-    `pickSmaller` composes either way. (The L9-fast candidate at level 9 has a
-    lower peak — shallower cache, single round — so the gate is conservative
-    there, but a single gate for both optimal tiers keeps the dispatch simple.) -/
+    projected ~2.1 GB peak. Above the gate, region-capped choice storage
+    preserves the same tokens in bounded memory instead of falling back to a
+    split parse. The explicit L9-fast source helper shares this threshold for
+    conformance, although public adaptive L9 selects it only below 5 MiB. -/
 def optimalMaxSize : Nat := 67108864
 
 /-- Cross-block (shared-window) block-split dynamic compression over the
@@ -3478,8 +3478,8 @@ def deflateDynamicBlocksOptimalWindowedFast (data : ByteArray) (tokChunk : Nat) 
 
 `deflateRaw` already falls back to a stored block whenever every compressed
 candidate is larger — but it only learns this *after* paying the full hash-chain
-match pass (and, at level 9, the optimal-parse DP), which is essentially the
-whole compress cost and finds almost nothing on incompressible input. Measured
+match pass (and, on an optimal source point, the cost-model DP), which is
+essentially the whole compress cost and finds almost nothing on incompressible input. Measured
 (`bench compress-pareto`, 4 MiB PRNG): level 9 runs at ≈2.5 MB/s, all of it
 wasted before the stored fallback. The pre-scan reads up to ≈128 KiB of bounded
 sample and, when the input is unambiguously incompressible, routes straight to
@@ -3853,8 +3853,8 @@ def deflateRawL9AdaptiveP (data : ByteArray) (profile : L7Profile) : ByteArray :
     any input, and one packed emit pass is far cheaper than the two boxed
     sizing walks it replaces.
 
-    Level 10 (and L9-fast within the `optimalMaxSize` memory gate) switches to a
-    cost-model DP parse (grouped into blocks on the fixed
+    The level-10 source and the L9-fast source retained below the adaptive gate
+    use a cost-model DP parse (grouped into blocks on the fixed
     `sharedTokChunk` cadence, emitted as `pickSmaller(base, optimal)`), choosing
     the globally cheapest token sequence under an estimated bit cost instead of
     the locally longest match. **Level 10** runs the exact backward-DP crown
@@ -3865,8 +3865,9 @@ def deflateRawL9AdaptiveP (data : ByteArray) (profile : L7Profile) : ByteArray :
     inputs, level 9 instead classifies the content once with `l7ProfileFor` and
     selects an exact existing endpoint: L10 for `chain128LongProbe32`, `h3Fast`,
     and `deep`; L10 for `h3Balanced` below 20 MiB and L8 at or above it; L8 for
-    every other profile. The selector adds no nested `deflateRaw`, second
-    profile scan, or extra candidate emission.
+    every other profile. The adaptive layer performs one `l7ProfileFor` scan
+    and adds no nested `deflateRaw` or extra candidate emission. An L8-selected
+    arm still retains L8's existing H3 content gate.
 
     On the
     Canterbury (11) and Silesia (12) corpora this fixed-cadence optimal candidate is
@@ -3965,8 +3966,9 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
         -- #2640) — the max-ratio ceiling, kept reachable per the #2638 directive.
         -- The fixed-cadence optimal candidate measured strictly smallest on every
         -- Canterbury and Silesia file, so the split candidates are dropped here;
-        -- `pickSmaller(base, optimal)` is never worse than the lazy baseline. As at
-        -- level 9, above the memory gate the exact parse runs windowed (#2787).
+        -- `pickSmaller(base, optimal)` is never worse than the lazy baseline.
+        -- Above the memory gate the exact parse runs windowed (#2787), including
+        -- when this endpoint is selected by adaptive level 9.
         -- Sized floor here too — see the level-9 arm.
         deflateRawL10TokensP data ptokens
       else if level == 8 then

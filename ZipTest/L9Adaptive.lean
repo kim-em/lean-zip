@@ -56,6 +56,11 @@ private def adaptiveExerciseData : ByteArray :=
   ByteArray.mk <| Array.ofFn (n := l9AdaptiveMinSize) fun i =>
     seed[i.val % seed.size]!
 
+/-- A run-heavy at-gate fixture whose low four-gram cardinality deterministically
+    selects `chain128LongProbe32`, and therefore the public L10 source point. -/
+private def adaptiveL10ExerciseData : ByteArray :=
+  ByteArray.mk <| Array.replicate l9AdaptiveMinSize (0x41 : UInt8)
+
 /-- Exercise the inclusive production gate in ordinary CI and pin its selected
     payload to the exact named L8 pipeline. -/
 def checkAdaptiveProductionArm : IO Unit := do
@@ -77,6 +82,29 @@ def checkAdaptiveProductionArm : IO Unit := do
   let decoded ← RawDeflate.decompress production data.size.toUInt64
   unless decoded == data do
     throw (IO.userError "L9 synthetic fixture roundtrip failed")
+
+/-- Exercise a public L10-selected production arm in ordinary CI, including
+    byte identity with the public level-10 endpoint and a decoder roundtrip. -/
+def checkAdaptiveL10ProductionArm : IO Unit := do
+  let data := adaptiveL10ExerciseData
+  unless data.size == l9AdaptiveMinSize do
+    throw (IO.userError
+      s!"L9 synthetic L10 fixture: expected {l9AdaptiveMinSize} bytes, got {data.size}")
+  if incompressiblePrescan data then
+    throw (IO.userError
+      "L9 synthetic L10 fixture unexpectedly took the stored prescan route")
+  let profile := l7ProfileFor data
+  assertProfile "synthetic-L10-at-gate" profile .chain128LongProbe32
+  assertRoute "synthetic-L10-at-gate"
+    (l9AdaptiveRouteFor data.size profile) .level10
+  let production := deflateRaw data 9
+  let publicL10 := deflateRaw data 10
+  unless production == publicL10 do
+    throw (IO.userError
+      "L9 synthetic L10 fixture differs from public level-10 payload")
+  let decoded ← RawDeflate.decompress production data.size.toUInt64
+  unless decoded == data do
+    throw (IO.userError "L9 synthetic L10 fixture roundtrip failed")
 
 def canterburyFiles : List String := [
   "alice29.txt", "asyoulik.txt", "cp.html", "fields.c", "grammar.lsp",
@@ -181,6 +209,7 @@ def tests : IO Unit := do
 
   checkSelectedPayloadIdentity
   checkAdaptiveProductionArm
+  checkAdaptiveL10ProductionArm
   checkCanterburyBypass
   checkSilesiaIfPresent
 

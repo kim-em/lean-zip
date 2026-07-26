@@ -211,17 +211,19 @@ def tests : IO Unit := do
   let prng := mkPrngData 65536
   unless (deflateRaw prng 9).size ≤ prng.size + 600 do
     throw (IO.userError "deflateRaw-9: incompressible input expanded past stored bound")
-  -- Inputs above the memory gate now run the *windowed* optimal candidate
-  -- (#2787): region-capped choice storage, byte-identical tokens, so the crown
-  -- survives past 64 MiB instead of collapsing to the split ratio. Verify both
-  -- tiers roundtrip through the whole `deflateRaw` dispatch above the gate.
+  -- Inputs above the memory gate run the region-capped windowed candidates
+  -- (#2787), with byte-identical tokens. Public adaptive L9 now selects L10 for
+  -- this chain128LongProbe32 fixture, so exercise the retained windowed
+  -- L9-fast source explicitly and the exact crown through public dispatch.
   let big := mkConstantData (optimalMaxSize + 1)
-  for lvl in [(9 : UInt8), 10] do
-    match Zip.Native.Inflate.inflate (deflateRaw big lvl) (big.size + 1) with
+  for (label, out) in [
+      ("deflateRawL9P", deflateRawL9P big),
+      ("deflateRaw-10", deflateRaw big 10)] do
+    match Zip.Native.Inflate.inflate out (big.size + 1) with
     | .ok r =>
       unless r == big do
-        throw (IO.userError s!"deflateRaw-{lvl} above-gate: roundtrip mismatch")
-    | .error e => throw (IO.userError s!"deflateRaw-{lvl} above-gate: inflate failed: {e}")
+        throw (IO.userError s!"{label} above-gate: roundtrip mismatch")
+    | .error e => throw (IO.userError s!"{label} above-gate: inflate failed: {e}")
 
   IO.println "  OptimalParse tests passed"
 
