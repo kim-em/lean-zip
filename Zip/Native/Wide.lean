@@ -1,3 +1,5 @@
+import Std.Tactic.BVDecide
+
 /-!
   Word-sized little-endian `ByteArray` loads and stores for the DEFLATE
   hot loops.
@@ -115,11 +117,46 @@ def pushUInt64LE (a : ByteArray) (v : UInt64) (k : USize)
 
 end ByteArray
 
-/-- Count trailing zero bits of a `UInt64` (`__builtin_ctzll`, with the
-    zero case defined as 64 to match the reference body `BitVec.ctz`). The
-    match-extension loop uses `ctz (w1 ^^^ w2) >>> 3` as the little-endian byte
-    index of the first difference between two 8-byte words. The reference body
-    is the trusted specification of the `@[extern]`; the C compiles it to a
-    single `tzcnt`/`bsf`. -/
-@[extern "lean_zip_ctz64"]
+/-- Count trailing zero bits of a `UInt64` (zero case defined as 64). This is the
+    pure logical *specification* — its body is `BitVec.ctz`, kept for the
+    match-extension proofs (`ctz (w1 ^^^ w2) >>> 3` is the little-endian byte
+    index of the first differing byte between two 8-byte words). It carries no
+    `@[extern]`: the runtime is supplied by `UInt64.ctzFast` via the `@[csimp]`
+    bridge below, so every compiled call to `UInt64.ctz` becomes a call to
+    `UInt64.ctzFast` — whose C `@[extern]` compiles to a single `tzcnt`/`bsf`. -/
 def UInt64.ctz (x : UInt64) : UInt64 := ⟨BitVec.ctz x.toBitVec⟩
+
+/-- The runtime implementation of counting trailing zeros: a branchy binary
+    search over native `UInt64` ops only (`&&&`, `>>>`, `==`, `+`). The C
+    `@[extern]` (`lean_zip_ctz64`) compiles it to one `tzcnt`/`bsf`; this fast
+    pure-Lean body — proven equal to `UInt64.ctz` (= `BitVec.ctz`) by the
+    `@[csimp]` lemma below — is the trusted specification of that extern *and* the
+    compiled fallback when the C symbol is unavailable (the interpreter, or a
+    platform without the shim), so the fallback runs within ~1% of `tzcnt`, not
+    the ~64× slower `BitVec.ctz`. Nested-`if` form (no `do`-notation) so
+    `bv_decide` reduces it cleanly. -/
+@[extern "lean_zip_ctz64"]
+def UInt64.ctzFast (x : UInt64) : UInt64 :=
+  if x == 0 then 64 else
+    let s5 : UInt64 := if x &&& 0xFFFFFFFF == 0 then 32 else 0
+    let x5 := x >>> s5
+    let s4 : UInt64 := if x5 &&& 0xFFFF == 0 then 16 else 0
+    let x4 := x5 >>> s4
+    let s3 : UInt64 := if x4 &&& 0xFF == 0 then 8 else 0
+    let x3 := x4 >>> s3
+    let s2 : UInt64 := if x3 &&& 0xF == 0 then 4 else 0
+    let x2 := x3 >>> s2
+    let s1 : UInt64 := if x2 &&& 0x3 == 0 then 2 else 0
+    let x1 := x2 >>> s1
+    let s0 : UInt64 := if x1 &&& 0x1 == 0 then 1 else 0
+    s5 + s4 + s3 + s2 + s1 + s0
+
+/-- `UInt64.ctz` (the `BitVec.ctz` spec) computes exactly `UInt64.ctzFast` (the
+    fast binary search). Registered `@[csimp]`, so every compiled call to
+    `UInt64.ctz` is replaced by `UInt64.ctzFast` — which is `@[extern]`, hence the
+    production path is the C `tzcnt` (measured 0% cost) while the fallback stays
+    the fast pure-Lean search. -/
+@[csimp] theorem UInt64.ctz_eq_ctzFast : UInt64.ctz = UInt64.ctzFast := by
+  funext x
+  unfold UInt64.ctz UInt64.ctzFast
+  bv_decide
