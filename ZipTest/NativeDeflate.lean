@@ -380,7 +380,7 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
   | .ok result => assert! result == largeCyclic
   | .error e => throw (IO.userError s!"deflateRaw(1) 256KB roundtrip failed: {e}")
 
-  -- Lazy chain matcher (zlib deflate_slow): levels ≥ 4 dispatch to lz77ChainLazyIter.
+  -- Lazy chain matcher: levels ≥ 5 dispatch to lz77ChainLazyIter.
   -- lz77ChainLazyIter must equal the recursive lz77ChainLazy (the Array==List bridge).
   for (name, data) in [("empty", ByteArray.empty), ("single", singleByte),
                         ("hello", helloBytes), ("big", big),
@@ -406,8 +406,8 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       throw (IO.userError s!"lz77ChainLazyIterP vs lz77ChainLazyIter (lazyDepth=32) mismatch on {name}: \
         {packedShallow.size} vs {iterShallow.size} tokens")
 
-  -- deflateRaw at every lazy level (4–9) → native inflate AND FFI decompress, on
-  -- varied shapes incl. edge cases. Exercises the lazy path end to end.
+  -- deflateRaw at every mid/high level (4–9) → native inflate AND FFI decompress,
+  -- on varied shapes incl. edge cases. Exercises greedy L4 and lazy L5–L9.
   let lazyShapes : List (String × ByteArray) :=
     [("empty", ByteArray.empty), ("single", singleByte), ("hello", helloBytes),
      ("text64K", mkTextData 65536), ("cyclic128K", mkCyclicData 131072),
