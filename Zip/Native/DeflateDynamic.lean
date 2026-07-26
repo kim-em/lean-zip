@@ -966,10 +966,10 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     The ratio gain saturates around 256–512 (measured), so level 9 caps there.
 
     **L4 is chain 16 in the greedy tier**, paired with `insertCap = 128`.
-    A pinned production median-of-5 measured 88.58 MB/s at 0.340536 geometric-
-    mean Silesia ratio, 2.20% above the proper time-per-byte interpolation
-    between L3 and L5 at that ratio. The former lazy chain-64 L4 measured only
-    57.61 MB/s at 0.331300 and sat well inside that frontier.
+    Pinned production median-of-5 measurements place its 0.340536 geometric-
+    mean Silesia ratio above the proper L3↔L5 time-per-byte interpolation.
+    The former lazy chain-64 L4 measured only 57.61 MB/s at 0.331300 and sat
+    well inside that frontier.
 
     **L5 = 24 since the L5 re-grid** (`gate-sweep`, run after the hash3 singleton #2824, gm/ld
     re-grid #2825, and greedy re-grid #2830 landings): the old L5 = (128,
@@ -3092,8 +3092,8 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     Every old L4–L8 point is dominated by (or within 1% of) the new curve's
     mixing frontier, and the split points sit far outside the old one.
     L4 has since moved again: the fused greedy chain-16/cap-128 point is
-    88.58 MB/s at 0.340536 on the production median-of-5 Silesia run, 2.20%
-    above the current L3↔L5 time-per-byte interpolation.
+    measured above the current L3↔L5 time-per-byte interpolation on both
+    headline corpora.
 
     At level 8 this **replaces** the arbitrated split
     (`chooseSplitsArbitrated` + `deflateDynamicBlocksSharedSized`, retired
