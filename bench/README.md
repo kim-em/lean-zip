@@ -2,7 +2,7 @@
 
 Native lean-zip vs. reference implementations, on **compression ratio** and
 **throughput**, over the **real compression corpora** across every DEFLATE
-level. The graphs are regenerated from committed data by a single command.
+level. The graphs are regenerated from committed data by the workflow below.
 
 > **Real corpora only.** Synthetic patterns were removed (see
 > [`../plans/track-d-state.md`](../plans/track-d-state.md), D-18): the pseudo-prose
@@ -11,17 +11,24 @@ level. The graphs are regenerated from committed data by a single command.
 > every axis. The headline numbers now rest entirely on representative data.
 
 ```
-bench/run.sh        # build + run the matrix, build + run the comparators, render the SVGs
+bench/run.sh                 # measure, render static SVGs + untracked animation previews
+# commit the refreshed JSON and static SVGs
+bench/run.sh --history-only  # render tracked animations from that committed history
 ```
 
 That runs [`lake -d bench exe bench-report`](ZipBenchReport.lean) (writes
 [`results/latest.json`](results/latest.json) and dumps the exact payloads), then
 the external-language comparators (see below), then [`plot.py`](plot.py) (writes
-the SVGs). Ratios are deterministic; throughput is a **median-of-5 snapshot of
-the machine recorded in the JSON `meta`, for every corpus**. The producer records
-`meta.timing_aggregation = "median"` and `meta.timing_reps = 5`; merge and plot
-tools reject routine snapshots that do not declare that protocol. Commit the
-JSON and SVGs together.
+the static SVGs) and local animation previews. Ratios are deterministic;
+throughput is a **median-of-5 snapshot of the machine recorded in the JSON
+`meta`, for every corpus**. The producer records `meta.timing_aggregation =
+"median"` and `meta.timing_reps = 5`; merge and plot tools reject routine
+snapshots that do not declare that protocol. Commit the JSON and static SVGs,
+then run `bench/run.sh --history-only` and commit the two tracked history SVGs
+in a separate commit. Do not amend the data commit afterward: its SHA, date,
+and subject are embedded in the animation frame. For the same reason, merge a
+dashboard-refresh PR with a **merge commit**, never squash or rebase it; either
+history-rewriting method changes the embedded commit identity after CI runs.
 
 > **Benchmark machine: chungus2 (since 2026-07-05).** The canonical machine moved
 > from `chungus` to `chungus2`. The two are indistinguishable on throughput —
@@ -122,10 +129,11 @@ the lower-right. Two complements give precise numbers and per-file detail:
 - `<corpus>_compress_pareto.svg` — **headline**: compression speed vs ratio,
   codecs as level-curves (replaces the whole per-level bar set).
 - `<corpus>_compress_pareto_history.svg` — the headline chart **animated
-  through git history** (`bench/pareto_history.py`, run automatically by
-  `run.sh`): the reference curves stay fixed at the current data while the
-  native curve replays every committed dashboard refresh, one faint trail per
-  level. Self-playing SMIL, so it animates inside a README `<img>`. Frames
+  through git history** (`bench/pareto_history.py`, regenerated after the data
+  commit by `bench/run.sh --history-only`): the reference curves stay fixed at
+  the current data while the native curve replays every committed dashboard
+  refresh, one faint trail per level. Self-playing SMIL, so it animates inside
+  a README `<img>`. Frames
   that only jitter within throughput noise are dropped, as are stale-branch
   refreshes whose deterministic ratios revert to an already-seen state (see
   the script docstring). `--video` additionally renders an mp4 + GIF (needs

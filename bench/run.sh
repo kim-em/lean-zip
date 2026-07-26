@@ -4,7 +4,14 @@
 #   2. dump the exact payloads    → bench/payloads/<corpus>/*.bin
 #   3. build + run the external-language comparators (Go / JS / Zig / OCaml),
 #      merging their rows into the same JSON
-#   4. render the log-scale SVGs  → bench/graphs/*.svg          (bench/plot.py)
+#   4. render the static SVGs and untracked animation previews
+#
+# The tracked history animations are intentionally a second step: their final
+# frame embeds the benchmark-data commit's SHA, date, and subject, so the data
+# must be committed before they can be regenerated reproducibly:
+#   bench/run.sh --history-only
+# Preserve that data commit afterward: merge dashboard PRs with a merge commit,
+# never squash or rebase them.
 #
 # Run from anywhere in the repo. The Lean matrix and plotting use the project
 # nix-shell (zlib + cargo for the FFI comparators, python3 + matplotlib for the
@@ -12,10 +19,10 @@
 # comparators/build_all.sh) and are run with node + python3 on PATH.
 #
 # Note: throughput numbers are a median-of-5 snapshot of THIS machine for every
-# corpus; commit the regenerated JSON + SVGs together. Machine-readable timing
-# metadata is validated before routine snapshots can be merged or plotted. The
-# whole-tar experiment is separate: its timing uses meta.reps (normally 9), and
-# its peak-RSS fields come from one fresh process per implementation.
+# corpus; commit the regenerated JSON + static SVGs together. Machine-readable
+# timing metadata is validated before routine snapshots can be merged or plotted.
+# The whole-tar experiment is separate: its timing uses meta.reps (normally 9),
+# and its peak-RSS fields come from one fresh process per implementation.
 #
 # Every *measurement* step below runs through bench/pin_core.sh, which pins the
 # command (and its children) to the idlest single core — unpinned runs wander
@@ -31,6 +38,25 @@ PIN="bash bench/pin_core.sh"
 in_project_shell() {
   if [ -n "${IN_NIX_SHELL:-}" ]; then bash -c "$1"; else nix-shell --run "$1"; fi
 }
+
+render_history_previews() {
+  in_project_shell "python3 bench/pareto_history.py --preview \
+    && python3 bench/pareto_history.py --only miniz_oxide --stem-suffix _vs_rust --preview"
+}
+
+if [ "${1:-}" = "--history-only" ]; then
+  [ "$#" -eq 1 ] || {
+    echo "usage: bench/run.sh --history-only" >&2
+    exit 1
+  }
+  in_project_shell "python3 bench/pareto_history.py \
+    && python3 bench/pareto_history.py --only miniz_oxide --stem-suffix _vs_rust"
+  echo "Tracked Pareto-history animations regenerated from committed data:"
+  echo "  graphs → bench/graphs/silesia_compress_pareto_history.svg"
+  echo "  graphs → bench/graphs/silesia_compress_pareto_history_vs_rust.svg"
+  echo "  merge  → preserve the data commit: use a merge commit, not squash/rebase"
+  exit 0
+fi
 
 # Whole-tar L6 measurement: record BOTH honest sections on the COLD whole
 # silesia.tar into bench/results/whole_tar_l6.json —
@@ -78,15 +104,17 @@ if [ "${1:-}" = "--native-only" ]; then
   in_project_shell "lake -d bench build bench-report \
     && $PIN lake -d bench env bench/.lake/build/bin/bench-report --native-only $TMP ${2:-}"
   in_project_shell "python3 bench/merge_native.py $OUT $TMP $OUT \
-    && python bench/plot.py $OUT bench/graphs \
-    && python bench/pareto_history.py \
-    && python bench/pareto_history.py --only miniz_oxide --stem-suffix _vs_rust"
+    && python3 bench/plot.py $OUT bench/graphs"
+  render_history_previews
   rm -f "$TMP"
   refresh_whole_tar
   echo "Native-only dashboard refresh done:"
   echo "  data   → $OUT (native rows refreshed; reference rows reused)"
   echo "  data   → $WTAR (whole-tar L6: codec native-vs-miniz + end-to-end lean-CLI-vs-rust-CLI wall + peak RSS, cold)"
-  echo "  graphs → bench/graphs/*.svg"
+  echo "  graphs → static SVGs + untracked *_preview.svg animations"
+  echo "  next   → commit the data/static graphs, then run 'bench/run.sh --history-only'"
+  echo "           and commit the tracked animations separately; do not amend the data commit"
+  echo "  merge  → preserve the data commit: use a merge commit, not squash/rebase"
   exit 0
 fi
 
@@ -135,15 +163,16 @@ nix-shell -p nodejs_latest python3 --run \
 refresh_whole_tar
 
 # 4. Render (project shell: python + matplotlib). plot.py auto-detects the
-#    sibling decode_density.json and emits the decode-density chart too;
-#    pareto_history.py replays the git history of latest.json into the
-#    animated Pareto (the just-refreshed uncommitted data becomes its final
-#    frame — see bench/pareto_history.py). It runs twice: the full-field
-#    animation, then the Lean-vs-Rust cut (--only miniz_oxide) used in blog.md.
-in_project_shell "python bench/plot.py $OUT bench/graphs \
-  && python bench/pareto_history.py \
-  && python bench/pareto_history.py --only miniz_oxide --stem-suffix _vs_rust"
+#    sibling decode_density.json and emits the decode-density chart too.
+#    The history previews include the uncommitted worktree frame for local
+#    inspection, but are gitignored. Commit the refreshed data/static graphs
+#    before regenerating the tracked animations with --history-only.
+in_project_shell "python3 bench/plot.py $OUT bench/graphs"
+render_history_previews
 
 echo "Track D dashboard regenerated:"
 echo "  data   → $OUT  (+ decode_density.json, whole_tar_l6.json)"
-echo "  graphs → bench/graphs/*.svg"
+echo "  graphs → static SVGs + untracked *_preview.svg animations"
+echo "  next   → commit the data/static graphs, then run 'bench/run.sh --history-only'"
+echo "           and commit the tracked animations separately; do not amend the data commit"
+echo "  merge  → preserve the data commit: use a merge commit, not squash/rebase"

@@ -93,9 +93,11 @@ jobs:
   animation-sync:
     # The committed compress-Pareto animation must match what
     # bench/pareto_history.py renders from the current latest.json git
-    # history. bench/run.sh regenerates it after every dashboard refresh, but a
-    # PR can still commit bench/results/latest.json without re-running that step
-    # (as #2821-#2825 did, leaving the README animation 5 frames stale). This
+    # history. A dashboard refresh must commit its data/static graphs first,
+    # then run bench/run.sh --history-only so the frame can embed that commit's
+    # identity, and the PR must use a merge commit so squash/rebase does not
+    # rewrite that identity after CI. A PR can still omit the regeneration step
+    # (as #2821-#2825 did, leaving the README animation 5 frames stale), so this
     # check replays the history and fails if the committed SVG is out of date.
     #
     # No Lean build: pareto_history.py's SMIL-SVG output is pure-Python float
@@ -126,7 +128,7 @@ jobs:
                      bench/graphs/silesia_compress_pareto_history_vs_rust.svg; do
             if ! git diff --exit-code "$svg"; then
               echo "::error::$svg is out of sync with bench/results/latest.json." \
-                   "Run 'bench/run.sh' (or the two 'python3 bench/pareto_history.py' commands) and commit the result."
+                   "Commit the refreshed data first, then run 'bench/run.sh --history-only' and commit the result."
               exit 1
             fi
           done
