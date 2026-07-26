@@ -1494,7 +1494,8 @@ def splitCheckTokens : Nat := 512
     and tree-preparation overhead. Corpus-total bytes instead favor miniz_oxide by
     0.17%, led by `mozilla`; this is an intentional fixed-L5 ratio/speed trade.
     Small L5 streams and L6–L8 retain the established 512-token cadence, so their
-    bytes are unchanged. -/
+    bytes are unchanged. The cadence is independent of whether the scalar or
+    packed-counter walker implements the heuristic. -/
 def splitCheckTokensFor (data : ByteArray) (level : UInt8) : Nat :=
   if useL5LargeInputPolicy data level then 2016 else splitCheckTokens
 
@@ -2167,8 +2168,8 @@ termination_by endU.toNat - i.toNat
 decreasing_by all_goals rw [hstep]; omega
 
 /-- Guarded entry for the scalar native-word split walker. This is the direct
-    production route for small L5 and L6–L8, and the fallback/proof bridge for
-    the packed-counter large-L5 entry below. -/
+    production route for small L5 and the fallback/proof bridge for the packed
+    counter entry below. -/
 @[inline] def chooseSplitsHeuristicPU (toks : TokenArray) (totalBytes : Nat)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
   if totalBytes < 2 * splitMinBlockBytes then []
@@ -2401,9 +2402,10 @@ def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : TokenArray)
     partition and the boundary heuristic stays proof-free. The clamping makes
     arbitrary cuts correctness-safe, not performance-safe: a pathological list
     (non-monotone, dense) degrades to one-token blocks, each paying a full tree
-    header. `deflateRaw` feeds it the scalar native-word walker's cuts, or the
-    packed-counter walker's cuts on large L5; both are proved equal to the
-    reference `chooseSplitsHeuristicP` cuts on the production token stream. -/
+    header. `deflateRaw` feeds it the scalar native-word walker's cuts on small
+    L5, or the packed-counter walker's cuts on large L5 and L6–L8; both are
+    proved equal to the reference `chooseSplitsHeuristicP` cuts on the
+    production token stream. -/
 def emitSharedBlocksAtP (data : ByteArray) (toks : TokenArray) (cuts : List Nat)
     (pos : Nat) (bw : BitWriter) : BitWriter :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
@@ -2418,11 +2420,12 @@ decreasing_by
 
 /-- The packed observation-divergence shared-window split candidate: emit the
     packed token stream as shared-window dynamic blocks at the given cut points
-    (in `deflateRaw`, scalar-native or large-L5 packed-counter boundaries, both
-    proved equal to `chooseSplitsHeuristicP`). Byte-identical to the boxed reference
+    (in `deflateRaw`, scalar-native small-L5 or packed-counter large-L5/L6–L8
+    boundaries, both proved equal to `chooseSplitsHeuristicP`). Byte-identical to
+    the boxed reference
     `deflateDynamicBlocksSharedAtTokens data (toks.map unpackTok) (fun _ => cuts)`
-    (`deflateDynamicBlocksSharedAtP_eq`), through which the roundtrip and
-    padding theorems transfer for **any** cut list. -/
+    (`deflateDynamicBlocksSharedAtP_eq`), through which the roundtrip and padding
+    theorems transfer for **any** cut list. -/
 def deflateDynamicBlocksSharedAtP (data : ByteArray) (toks : TokenArray)
     (cuts : List Nat) : ByteArray :=
   if data.size == 0 then
@@ -3245,16 +3248,21 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- frequencies (EOB-corrected, `tokenFreqsP_append`) and the base candidate
       -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
       -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
-      -- The packed-counter walker pays only on the large-L5 point it was tuned
-      -- for. L6–L8 and small L5 inputs retain the established scalar walker:
-      -- their shorter observation windows do not amortize packing, and keeping
-      -- that route also preserves their existing code shape/frontier points.
+      -- The packed-counter walker is used for large L5 and all of L6–L8. It is
+      -- exactly equal to the scalar walker on `lzMatchP` streams
+      -- (`chooseSplitsHeuristicPUPacked_lzMatchP_eq`), while reducing the hot
+      -- loop's twenty counters to seven words. Small L5 retains the scalar
+      -- route, where setup dominates the shorter stream.
       let cuts :=
-        if useL5LargeInputPolicy data level then
-          chooseSplitsHeuristicPUPacked ptokens data.size
-            (splitCheckTokensFor data level)
+        if level == 5 then
+          if useL5LargeInputPolicy data level then
+            chooseSplitsHeuristicPUPacked ptokens data.size
+              (splitCheckTokensFor data level)
+          else
+            chooseSplitsHeuristicPU ptokens data.size
+              (splitCheckTokensFor data level)
         else
-          chooseSplitsHeuristicPU ptokens data.size
+          chooseSplitsHeuristicPUPacked ptokens data.size
             (splitCheckTokensFor data level)
       -- `withObs`: the base, or the size-arbitrated smaller of base and the
       -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
