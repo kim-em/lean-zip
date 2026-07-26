@@ -119,7 +119,7 @@ jobs:
       - name: Regenerate the animations from committed history
         run: |
           python3 bench/pareto_history.py
-          # The Lean-vs-Rust cut (blog.md) is regenerated from the same history.
+          # The Lean-vs-Rust cut (used by the blog post) is regenerated from the same history.
           python3 bench/pareto_history.py --only miniz_oxide --stem-suffix _vs_rust
 
       - name: Fail if a committed animation is stale
