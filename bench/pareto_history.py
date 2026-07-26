@@ -22,9 +22,10 @@ Outputs (all under bench/graphs/):
 `--only KEYS` restricts the fixed reference curves to a subset (native, the
 animated subject, is always kept) and `--stem-suffix` writes it to a distinct
 file: `--only miniz_oxide --stem-suffix _vs_rust` produces the Lean-vs-Rust cut
-(`<corpus>_compress_pareto_history_vs_rust.svg`) embedded in blog.md. bench/run.sh
-regenerates both the full-field animation and that cut on every dashboard refresh,
-and CI's animation-sync check diffs both.
+(`<corpus>_compress_pareto_history_vs_rust.svg`) embedded in blog.md.
+`bench/run.sh --history-only` regenerates both the full-field animation and that
+cut after the dashboard data is committed, and CI's animation-sync check diffs
+both.
 
 Run inside the project shell (matplotlib comes from shell.nix, same as
 plot.py):
