@@ -77,15 +77,22 @@ def tests : IO Unit := do
   checkLarge "x-ray" 726 917 1000 .h3Fast
   checkLarge "xml" 99 199 416 .deep
 
-  -- Every profile falls back below the large-input classifier boundary.  This
-  -- is the conservative guard against extrapolating the large-corpus winner to
-  -- the coarser small-input signal.
-  let profiles : List L7Profile := [
-    .shallow, .h3Fast, .h3Balanced, .chain64Probe8, .chain64Probe16,
-    .chain96Probe16, .chain128Probe16, .chain128Probe32,
-    .chain128LongProbe32, .deep
+  -- Pin the three held-out-safe small-input exceptions and their boundary.
+  assertRoute "small/h3Fast/0" (l7OutputRouteFor 0 .h3Fast) .split
+  assertRoute "small/h3Fast/max"
+    (l7OutputRouteFor (h3ProbeMinSize - 1) .h3Fast) .split
+  for profile in [.chain64Probe8, .shallow] do
+    assertRoute s!"small/split/{repr profile}"
+      (l7OutputRouteFor (l7SmallDirectSplitMaxSize - 1) profile) .split
+    assertRoute s!"small/fallback/{repr profile}"
+      (l7OutputRouteFor l7SmallDirectSplitMaxSize profile) .arbitrate
+
+  -- All other small profiles retain exact size arbitration.
+  let fallbackProfiles : List L7Profile := [
+    .h3Balanced, .chain64Probe16, .chain96Probe16, .chain128Probe16,
+    .chain128Probe32, .chain128LongProbe32, .deep
   ]
-  for profile in profiles do
+  for profile in fallbackProfiles do
     assertRoute s!"small/{repr profile}"
       (l7OutputRouteFor (h3ProbeMinSize - 1) profile) .arbitrate
 
@@ -93,8 +100,8 @@ def tests : IO Unit := do
   -- and exact winner-byte identity on every available file.  Canterbury is
   -- committed; Silesia is an optional download under the ignored directory.
   let files : List (String × Nat × L7Profile × L7OutputRoute × Nat) := [
-    ("canterbury/alice29.txt", 152089, .chain64Probe8, .arbitrate, 54155),
-    ("canterbury/asyoulik.txt", 125179, .shallow, .arbitrate, 48703),
+    ("canterbury/alice29.txt", 152089, .chain64Probe8, .split, 54155),
+    ("canterbury/asyoulik.txt", 125179, .shallow, .split, 48703),
     ("canterbury/cp.html", 24603, .chain64Probe16, .arbitrate, 7914),
     ("canterbury/fields.c", 11150, .chain64Probe16, .arbitrate, 3120),
     ("canterbury/grammar.lsp", 3721, .chain64Probe16, .arbitrate, 1209),
@@ -102,7 +109,7 @@ def tests : IO Unit := do
     ("canterbury/lcet10.txt", 426754, .shallow, .arbitrate, 145147),
     ("canterbury/plrabn12.txt", 481861, .shallow, .arbitrate, 195481),
     ("canterbury/ptt5", 513216, .chain128Probe16, .arbitrate, 54966),
-    ("canterbury/sum", 38240, .h3Fast, .arbitrate, 12675),
+    ("canterbury/sum", 38240, .h3Fast, .split, 12675),
     ("canterbury/xargs.1", 4227, .chain64Probe16, .arbitrate, 1723),
     ("silesia/dickens", 10192446, .chain96Probe16, .split, 3841372),
     ("silesia/mozilla", 51220480, .h3Balanced, .split, 18825061),

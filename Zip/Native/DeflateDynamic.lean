@@ -1302,19 +1302,29 @@ inductive L7OutputRoute where
   | split
   deriving BEq, ReflBEq, LawfulBEq, Repr
 
+/-- Upper bound for the two size-sensitive small-input profiles whose split
+    winner was stable in both the calibration corpus and a held-out source-file
+    audit.  At and above this boundary they retain exact size arbitration. -/
+def l7SmallDirectSplitMaxSize : Nat := 160 * 1024
+
 /-- Select level 7's output-preparation route from input size and the already
     retained content profile.
 
-    Inputs below the large-profile threshold keep exact size arbitration.  That
-    region uses a different, deliberately coarse adjacent-run classifier and
-    contains profiles whose winner changes between samples (notably
-    `chain128Probe16`), so a direct route would be overconfident.  On large
-    inputs, the shallow and chain-128/depth-32 profiles consistently selected
-    the whole-stream base during calibration; the remaining profiles selected
-    the observation split.  The fallback makes every uncalibrated small input
-    pay the old safe arbitration rather than extrapolating a corpus result. -/
+    Most inputs below the large-profile threshold keep exact size arbitration:
+    that region uses a deliberately coarse adjacent-run classifier, and some
+    profiles change winner between samples (notably `chain128Probe16`).  Three
+    conservative exceptions were byte-identical to the arbitrated winner across
+    Canterbury and 123 held-out source files: `h3Fast`, plus `chain64Probe8` and
+    `shallow` below 160 KiB.  On large inputs, shallow and chain-128/depth-32
+    consistently selected the whole-stream base during calibration; the
+    remaining profiles selected the observation split. -/
 def l7OutputRouteFor (size : Nat) (profile : L7Profile) : L7OutputRoute :=
-  if size < h3ProbeMinSize then .arbitrate
+  if size < h3ProbeMinSize then
+    match profile with
+    | .h3Fast => .split
+    | .chain64Probe8 | .shallow =>
+      if size < l7SmallDirectSplitMaxSize then .split else .arbitrate
+    | _ => .arbitrate
   else
     match profile with
     | .shallow | .chain128Probe32 => .base
@@ -3534,7 +3544,8 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- split-cadence/output-route selection.  In particular, the large shallow
       -- point needs the specialized L5 matcher, its 2016-token cadence, and the
       -- direct base route; recomputing `l7ProfileFor` would pay the four-region
-      -- sketch twice.  Small inputs conservatively retain size arbitration.
+      -- sketch twice.  Small inputs retain size arbitration except for the
+      -- held-out-safe direct-split profiles selected by `l7OutputRouteFor`.
       let profile := l7ProfileFor data
       let ptokens := l7MatchPFor data profile
       deflateRawL7RouteP data profile ptokens
