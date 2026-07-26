@@ -94,7 +94,7 @@ refresh_whole_tar() {
 # to host drift. Do not treat a small native-vs-reference speed gap from this
 # mixed-session fast path as a matched comparison. Reusing those rows skips the
 # ~2 h external-comparator rebuild entirely. The dominant remaining cost is
-# native's own optimal-parse at levels 9 (L9-fast) and 10 (exact crown, ~1 MB/s);
+# native's adaptive level 9 and optimal-parse level 10 (exact crown, ~1 MB/s);
 # pass a level list to skip them when the Lean change does not touch that path
 # (the prior rows are kept by the upsert merge).
 #   bench/run.sh --native-only                  # all 10 native levels, incl. the L10 crown (~19 min)

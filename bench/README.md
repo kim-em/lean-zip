@@ -52,7 +52,7 @@ implementations (no SIMD/asm, or GC'd, or JIT'd) — not just the C + SIMD ceili
 
 | Key | Implementation | Role |
 |-----|----------------|------|
-| `native` | lean-zip pure-Lean DEFLATE | the thing we are improving; swept **levels 1–10** — since #2638 level 9 is the L9-fast tier and level 10 is the exact-DP crown (always sweep through 10 so the crown stays on the Pareto) |
+| `native` | lean-zip pure-Lean DEFLATE | the thing we are improving; swept **levels 1–10** — level 9 is adaptive on large inputs (exact L8/L10 source points, retaining L9-fast below its gate) and level 10 is the exact-DP crown (always sweep through 10 so the crown stays on the Pareto) |
 | `zlib` | system zlib (FFI) | the ubiquitous baseline |
 | `miniz_oxide` | Rust miniz_oxide (FFI) | widely-used Rust reimplementation |
 | `zlib_rs` | [zlib-rs](https://github.com/trifectatechfoundation/zlib-rs) via Rust `flate2` | optimized pure-Rust zlib implementation; the comparator enables only flate2's zlib-rs backend and emits raw DEFLATE |

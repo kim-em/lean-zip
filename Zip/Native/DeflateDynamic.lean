@@ -1468,9 +1468,10 @@ def l7ClassifyLarge (minUnique meanUnique maxUnique : Nat) : L7Profile :=
 
     Inputs below 1 MiB use the 63-probe adjacent-run signal.  Larger inputs use
     four spread 32 KiB regions and the allocation-free four-word cardinality
-    sketch.  Level 7 uses the selected matcher directly; sufficiently large
-    levels 2–6 also reuse the profile to select among proven production
-    frontier constituents. -/
+    sketch.  Levels 2–7 share the selected profile: level 7 uses the selected
+    matcher directly, while sufficiently large levels 2–6 reuse it to select
+    among proven production frontier constituents.  Adaptive level 9 also
+    reuses the profile to select an exact level-8 or level-10 endpoint. -/
 def l7ProfileFor (data : ByteArray) : L7Profile := Id.run do
   if data.size < h3ProbeMinSize then
     return l7ClassifySmall data.size (l7AdjacentRunSamples data)
@@ -3440,8 +3441,9 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
     (`lz77OptimalFastIter`, #2638): identical to `deflateDynamicBlocksOptimal`
     but the cheaper single-round, bounds-free, shallow-cache parser. The tokens
     satisfy the same encoder contracts, so the roundtrip proof is the exact
-    twin (`decode_deflateDynamicBlocksOptimalFast` etc.). Deployed at level 9;
-    the exact crown moves to level 10. -/
+    twin (`decode_deflateDynamicBlocksOptimalFast` etc.). It remains the
+    production level-9 source point below the adaptive size gate; the exact
+    crown is level 10. -/
 def deflateDynamicBlocksOptimalFast (data : ByteArray) (tokChunk : Nat) : ByteArray :=
   if data.size == 0 then
     let f := tokenFreqs #[]
@@ -3702,11 +3704,90 @@ def deflateRawL6Adaptive (data : ByteArray) : ByteArray :=
     | .level5 => deflateRawSplitLevelP data 5
     | .level7 => deflateRawL7P data profile
 
+/-- Source production point selected by adaptive level 9.  Below the size gate,
+    `currentL9` preserves the established L9-fast pipeline byte-for-byte. -/
+inductive L9AdaptiveRoute where
+  | currentL9
+  | level8
+  | level10
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+/-- Adaptive level 9 shares the fast-tier 5 MiB size gate. -/
+def l9AdaptiveMinSize : Nat := adaptiveFastTierMinSize
+
+/-- Balanced-H3 shares the fast-tier 20 MiB upper edge: below it adaptive L9
+    selects exact L10, and at or above it exact L8. -/
+def l9AdaptiveH3BalancedL10MaxSize : Nat := adaptiveBalancedMaxSize
+
+/-- Pure size/profile routing policy for adaptive level 9. -/
+def l9AdaptiveRouteFor (size : Nat) (profile : L7Profile) : L9AdaptiveRoute :=
+  if size < l9AdaptiveMinSize then .currentL9
+  else
+    match profile with
+    | .chain128LongProbe32 | .h3Fast | .deep => .level10
+    | .h3Balanced =>
+        if size < l9AdaptiveH3BalancedL10MaxSize then .level10 else .level8
+    | .chain64Probe8 | .shallow | .chain64Probe16 | .chain96Probe16
+    | .chain128Probe16 | .chain128Probe32 => .level8
+
+/-- Exact pre-adaptive production L8 tail over retained packed tokens. -/
+def deflateRawL8TokensP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
+  let cuts :=
+    chooseSplitsHeuristicPUPacked ptokens data.size
+      (splitCheckTokensFor data 8)
+  deflateRawSplitTierP data ptokens cuts
+
+/-- Exact pre-adaptive production L8 pipeline after the shared prescan. -/
+def deflateRawL8P (data : ByteArray) : ByteArray :=
+  deflateRawL8TokensP data (lzMatchP data 8)
+
+/-- Exact pre-adaptive production L9-fast tail over retained packed tokens. -/
+def deflateRawL9TokensP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
+  let opt :=
+    if data.size ≤ optimalMaxSize then
+      deflateDynamicBlocksOptimalFast data sharedTokChunk
+    else
+      deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk
+  let bp := deflateRawBasePPrep data ptokens
+  emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
+
+/-- Exact pre-adaptive production L9-fast pipeline after the shared prescan. -/
+def deflateRawL9P (data : ByteArray) : ByteArray :=
+  deflateRawL9TokensP data (lzMatchP data 9)
+
+/-- Exact production L10 tail over retained packed tokens. -/
+def deflateRawL10TokensP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
+  let opt :=
+    if data.size ≤ optimalMaxSize then
+      deflateDynamicBlocksOptimal data sharedTokChunk
+    else
+      deflateDynamicBlocksOptimalWindowed data sharedTokChunk
+  let bp := deflateRawBasePPrep data ptokens
+  emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
+
+/-- Exact production L10 pipeline after the shared prescan. -/
+def deflateRawL10P (data : ByteArray) : ByteArray :=
+  deflateRawL10TokensP data (lzMatchP data 10)
+
+/-- Execute one exact source point for adaptive L9, without recursive dispatch. -/
+def deflateRawL9RouteP (data : ByteArray) (route : L9AdaptiveRoute) : ByteArray :=
+  match route with
+  | .currentL9 => deflateRawL9P data
+  | .level8 => deflateRawL8P data
+  | .level10 => deflateRawL10P data
+
+/-- Adaptive L9 after the size gate and shared incompressible prescan.  The
+    retained profile is consumed exactly once and every arm is an existing
+    production pipeline, with no recursive `deflateRaw` call. -/
+def deflateRawL9AdaptiveP (data : ByteArray) (profile : L7Profile) : ByteArray :=
+  deflateRawL9RouteP data (l9AdaptiveRouteFor data.size profile)
+
 /-- Unified raw DEFLATE compression dispatch. The native level range is **0–10**
     (wider than zlib's 0–9). Since #2638 the top of the ladder is:
 
-      * **level 9** — the **L9-fast** approximate-optimal parse (near-crown ratio,
-        ~2× faster); this is a change from the old level-9 = exact crown;
+      * **level 9** — below 5 MiB, the **L9-fast** approximate-optimal parse;
+        from 5 MiB upward, a content profile selects the exact production L8
+        or L10 point;
       * **level ≥ 10** — the exact backward-DP **crown** (the max-ratio ceiling,
         the former level-9 output); 11+ alias level 10.
 
@@ -3772,31 +3853,36 @@ def deflateRawL6Adaptive (data : ByteArray) : ByteArray :=
     any input, and one packed emit pass is far cheaper than the two boxed
     sizing walks it replaces.
 
-    At levels 9 and 10 (and within the `optimalMaxSize` memory gate) the dispatch
-    switches to a cost-model DP parse (grouped into blocks on the fixed
+    Level 10 (and L9-fast within the `optimalMaxSize` memory gate) switches to a
+    cost-model DP parse (grouped into blocks on the fixed
     `sharedTokChunk` cadence, emitted as `pickSmaller(base, optimal)`), choosing
     the globally cheapest token sequence under an estimated bit cost instead of
     the locally longest match. **Level 10** runs the exact backward-DP crown
-    (`deflateDynamicBlocksOptimal`) — the max-ratio ceiling. **Level 9** runs the
-    cheaper **L9-fast** approximate-optimal parse (`deflateDynamicBlocksOptimalFast`,
-    #2638): single round, no length-code boundary scan, shallower cache — near the
-    crown's ratio at ~2× its speed, measured ~20% outside the L8↔L9 mixing frontier
-    on Silesia (a genuine new Pareto point; L10 ≤ L9 < L8 in output size, L9 > L8 in
-    speed). On the
+    (`deflateDynamicBlocksOptimal`) — the max-ratio ceiling. Below the 5 MiB
+    adaptive gate, **level 9** retains the cheaper **L9-fast**
+    approximate-optimal parse (`deflateDynamicBlocksOptimalFast`, #2638):
+    single round, no length-code boundary scan, shallower cache. On larger
+    inputs, level 9 instead classifies the content once with `l7ProfileFor` and
+    selects an exact existing endpoint: L10 for `chain128LongProbe32`, `h3Fast`,
+    and `deep`; L10 for `h3Balanced` below 20 MiB and L8 at or above it; L8 for
+    every other profile. The selector adds no nested `deflateRaw`, second
+    profile scan, or extra candidate emission.
+
+    On the
     Canterbury (11) and Silesia (12) corpora this fixed-cadence optimal candidate is
     measured strictly smaller than base, the self-contained split, *and* the
     arbitrated shared-window split on every file — including the binary
     `kennedy.xls`, where the self-contained split is the best of the three
     non-optimal candidates yet still loses to optimal — so `min(base, optimal) ==
     min(base, SC, shared, optimal)` byte-for-byte across both corpora (#2640). On that measured evidence
-    the SC and shared candidates are dropped at L9: each costs a full independent
+    the SC and shared candidates are dropped from the L9-fast source point: each costs a full independent
     match/split pass (~24% of L9 wall-clock together) for output `pickSmaller`
     always discarded. This is a measured speed/ratio tradeoff over those corpora,
     **not** a proven dominance invariant: the optimal parse minimizes an estimated
     per-token cost, not the final DEFLATE size across block partitions, so a
     pathological input whose statistics shift badly against the 8192-token cadence
     could in principle let an arbitrated split win. `base` stays as a near-free
-    safety floor (it reuses the already-computed `ptokens`), so the emitted
+    safety floor (it reuses the already-computed `ptokens`), so its emitted
     `pickSmaller(base, optimal)` is never worse than the lazy single-block baseline
     on any input — the only residual risk is forfeiting a split-only win, which the
     corpus gate found nowhere. The split candidates remain at level 8, where optimal
@@ -3863,30 +3949,18 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- held-out-safe direct-split profiles selected by `l7OutputRouteFor`.
       let profile := l7ProfileFor data
       deflateRawL7P data profile
+    else if level == 9 then
+      -- Large L9 is a content-selected point on the exact production L8/L10
+      -- envelope.  Keep the 5 MiB gate before the classifier so smaller inputs
+      -- retain both the established L9-fast bytes and its former cost.
+      if l9AdaptiveMinSize ≤ data.size then
+        let profile := l7ProfileFor data
+        deflateRawL9AdaptiveP data profile
+      else
+        deflateRawL9P data
     else
       let ptokens := lzMatchP data level
-      if level == 9 then
-        -- Level 9 (#2638): the cheaper **L9-fast** approximate-optimal parse — near
-        -- the crown's ratio at ~2× its speed, measured ~20% outside the L8↔L9
-        -- mixing frontier on Silesia (a genuine new Pareto point). As with the
-        -- exact candidate below, the split candidates are dropped on measured
-        -- evidence; keep `base` (reuses `ptokens`, ~free) as the safety floor and
-        -- emit `pickSmaller(base, fast-optimal)`. Above the `optimalMaxSize` memory
-        -- gate the same parse runs *windowed* (#2787): region-capped choice storage
-        -- gives byte-identical tokens in bounded memory, so the crown survives on
-        -- streams larger than 64 MiB instead of collapsing to the split ratio.
-        -- #2782 follow-up: size the floor (`deflateRawBasePPrep`, the #2753
-        -- tree-capturing prep) instead of emitting it — the optimal candidate is
-        -- strictly smaller on every corpus file (#2640), so the emit-both
-        -- `pickSmaller` paid a full discarded freq+tree+BitWriter pass. Same
-        -- winner, same bytes (prep size = flushed size, the #2753 invariant).
-        let opt := if data.size ≤ optimalMaxSize then
-          deflateDynamicBlocksOptimalFast data sharedTokChunk
-        else
-          deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk
-        let bp := deflateRawBasePPrep data ptokens
-        emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
-      else if 10 ≤ level then
+      if 10 ≤ level then
         -- Level ≥ 10: the exact backward-DP crown (the former level-9 behaviour,
         -- #2640) — the max-ratio ceiling, kept reachable per the #2638 directive.
         -- The fixed-cadence optimal candidate measured strictly smallest on every
@@ -3894,14 +3968,13 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
         -- `pickSmaller(base, optimal)` is never worse than the lazy baseline. As at
         -- level 9, above the memory gate the exact parse runs windowed (#2787).
         -- Sized floor here too — see the level-9 arm.
-        let opt := if data.size ≤ optimalMaxSize then
-          deflateDynamicBlocksOptimal data sharedTokChunk
-        else
-          deflateDynamicBlocksOptimalWindowed data sharedTokChunk
-        let bp := deflateRawBasePPrep data ptokens
-        emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
+        deflateRawL10TokensP data ptokens
+      else if level == 8 then
+        -- Preserve the exact production L8 split pipeline as a named source
+        -- point for adaptive L9.
+        deflateRawL8TokensP data ptokens
       else
-        -- Level 8: base vs cross-block shared-window split at the
+        -- Levels 5 and 6: base vs cross-block shared-window split at the
         -- observation-divergence boundaries (#2737),
         -- **size-arbitrated** (#2753). Both candidates are *prepared* — sized to
         -- their flushed byte count with per-block trees captured

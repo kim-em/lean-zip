@@ -142,9 +142,10 @@ def Row.toJson (r : Row) : String :=
     `deflateInit2` accepts only 0–9. -/
 def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-/-- Native lean-zip's level range. Wider than the zlib/miniz FFI cap of 9: since
-    #2638, level 9 is the L9-fast approximate-optimal tier and **level 10 is the
-    exact-DP crown** (the max-ratio ceiling). The dashboard must always sweep
+/-- Native lean-zip's level range. Wider than the zlib/miniz FFI cap of 9:
+    level 9 is adaptive on large inputs (selecting the exact L8 or L10 source
+    point) and retains L9-fast below its size gate; **level 10 is the exact-DP
+    crown** (the max-ratio ceiling). The dashboard must always sweep
     native through 10 so the crown stays on the Pareto — otherwise the headline
     graph loses our best-ratio point. `runWorkloads` already omits the decode
     timing for `level > 9` (no zlib-FFI raw-deflate reference exists there), so

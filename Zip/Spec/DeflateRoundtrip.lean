@@ -178,9 +178,9 @@ set_option maxRecDepth 8000 in
     `maxOutputSize` large enough to hold the input. The incompressible pre-scan
     and the level-0 path both dispatch to `deflateStoredPure` directly; the
     cost-model stored fallback is covered by `deflateRawBase`; every adaptive
-    L2–L6 constituent, the pre-adaptive L5/L6 and level-8 size-arbitrated split
-    (`emitSmallerBy`, #2753), and the level-9/10 optimal candidates each emit
-    concretely-roundtripping blocks.
+    L2–L6 constituent, the level-8 size-arbitrated split (`emitSmallerBy`,
+    #2753), retained L9-fast source, adaptive L9 endpoint, and level-10 optimal
+    candidate each emit concretely-roundtripping blocks.
 
     The whole inductive proof is built on the reference decoder; the capstone
     stated against the decoder we actually ship, `Inflate.inflate`, is
@@ -223,18 +223,18 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
       lzMatchP_map, deflateDynamicBlocksSharedAt_def]
     exact inflate_deflateDynamicBlocksSharedAt data _ l' _ hsize
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
-  have hwithObs : ∀ (l' : UInt8) (p : Nat × (Unit → ByteArray)),
+  have hwithObs : ∀ (l' checkLevel : UInt8) (p : Nat × (Unit → ByteArray)),
       p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
-              splitSoftMaxBlockBytes (splitCheckTokensFor data l')).isEmpty then
+              splitSoftMaxBlockBytes (splitCheckTokensFor data checkLevel)).isEmpty then
             deflateRawBasePPrep data (lzMatchP data l')
           else
             let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data l')
               (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
-                splitSoftMaxBlockBytes (splitCheckTokensFor data l'))
+                splitSoftMaxBlockBytes (splitCheckTokensFor data checkLevel))
             let basePrep := deflateRawBasePPrepF data (lzMatchP data l') obsFreqs.2
             if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       Zip.Native.Inflate.inflateReference (p.2 ()) maxOutputSize = .ok data := by
-    intro l' p hp; subst hp
+    intro l' checkLevel p hp; subst hp
     dsimp only []
     rw [deflateRawBasePPrepF_obsFreqs, deflateObsSplitSizedFreqsP_fst]
     split
@@ -252,7 +252,7 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
     simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq,
       chooseSplitsHeuristicPU_eq, ite_self]
     unfold deflateRawSplitTierP
-    exact hwithObs l' _ rfl
+    exact hwithObs l' l' _ rfl
   have hl7 : Zip.Native.Inflate.inflateReference
       (deflateRawL7P data (l7ProfileFor data)) maxOutputSize = .ok data := by
     change Zip.Native.Inflate.inflateReference
@@ -263,7 +263,7 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
     · dsimp only
       rw [hcheck7, chooseSplitsHeuristicPUPacked_lzMatchP_eq]
       unfold deflateRawSplitTierP
-      exact hwithObs 7 _ rfl
+      exact hwithObs 7 7 _ rfl
     · exact hbaseDirect 7
     · dsimp only
       rw [hcheck7, chooseSplitsHeuristicPUPacked_lzMatchP_eq]
@@ -322,6 +322,39 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
       · exact hfast
       · exact hsplitLevel 5
       · exact hl7
+  have hl8 : Zip.Native.Inflate.inflateReference
+      (deflateRawL8P data) maxOutputSize = .ok data := by
+    unfold deflateRawL8P deflateRawL8TokensP
+    rw [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+    unfold deflateRawSplitTierP
+    exact hwithObs 8 8 _ rfl
+  have hl9 : Zip.Native.Inflate.inflateReference
+      (deflateRawL9P data) maxOutputSize = .ok data := by
+    unfold deflateRawL9P deflateRawL9TokensP
+    dsimp only []
+    split <;>
+      first
+      | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase 9)
+          (inflate_deflateDynamicBlocksOptimalFast data sharedTokChunk _ hsize)
+      | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase 9)
+          (inflate_deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk _ hsize)
+  have hl10 : Zip.Native.Inflate.inflateReference
+      (deflateRawL10P data) maxOutputSize = .ok data := by
+    unfold deflateRawL10P deflateRawL10TokensP
+    dsimp only []
+    split <;>
+      first
+      | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase 10)
+          (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
+      | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase 10)
+          (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
+  have hadaptive : Zip.Native.Inflate.inflateReference
+      (deflateRawL9AdaptiveP data (l7ProfileFor data)) maxOutputSize = .ok data := by
+    unfold deflateRawL9AdaptiveP deflateRawL9RouteP
+    split
+    · exact hl9
+    · exact hl8
+    · exact hl10
   split
   · exact inflate_deflateStoredPure data _ (by omega)
   -- The incompressible pre-scan routes straight to the same stored block.
@@ -335,25 +368,29 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
           · split
             · exact hl7
             · split
-              · -- level 9 (L9-fast, #2638): sized floor + optimal via
-                -- `emitSmallerBy`.
-                split <;>
-                  first
-                  | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
-                      (inflate_deflateDynamicBlocksOptimalFast data sharedTokChunk _ hsize)
-                  | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
-                      (inflate_deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk _ hsize)
               · split
-                · -- level ≥ 10: exact-DP crown, sized floor + optimal
+                · exact hadaptive
+                · exact hl9
+              · split
+                · -- level ≥ 10: exact-DP crown, sized floor + optimal.
+                  unfold deflateRawL10TokensP
+                  dsimp only []
                   split <;>
                     first
                     | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
                         (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
                     | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
                         (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
-                · change Zip.Native.Inflate.inflateReference
-                    (deflateRawSplitLevelP data level) maxOutputSize = .ok data
-                  exact hsplitLevel level
+                · split
+                  · -- level 8: exact named source point used by adaptive L9.
+                    have hlevel : level = 8 := by
+                      simpa only [beq_iff_eq] using
+                        (show (level == 8) = true by assumption)
+                    subst level
+                    exact hl8
+                  · change Zip.Native.Inflate.inflateReference
+                      (deflateRawSplitLevelP data level) maxOutputSize = .ok data
+                    exact hsplitLevel level
       · split
         · exact hl2
         · split
@@ -518,19 +555,19 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       lzMatchP_map, deflateDynamicBlocksSharedAt_def]
     exact deflateDynamicBlocksSharedAt_pad data _ l'
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
-  have hwithObs : ∀ (l' : UInt8) (p : Nat × (Unit → ByteArray)),
+  have hwithObs : ∀ (l' checkLevel : UInt8) (p : Nat × (Unit → ByteArray)),
       p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
-              splitSoftMaxBlockBytes (splitCheckTokensFor data l')).isEmpty then
+              splitSoftMaxBlockBytes (splitCheckTokensFor data checkLevel)).isEmpty then
             deflateRawBasePPrep data (lzMatchP data l')
           else
             let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data l')
               (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
-                splitSoftMaxBlockBytes (splitCheckTokensFor data l'))
+                splitSoftMaxBlockBytes (splitCheckTokensFor data checkLevel))
             let basePrep := deflateRawBasePPrepF data (lzMatchP data l') obsFreqs.2
             if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       ∃ (contentBits padding : List Bool),
         Deflate.Spec.bytesToBits (p.2 ()) = contentBits ++ padding ∧ padding.length < 8 := by
-    intro l' p hp; subst hp
+    intro l' checkLevel p hp; subst hp
     dsimp only []
     rw [deflateRawBasePPrepF_obsFreqs, deflateObsSplitSizedFreqsP_fst]
     split
@@ -549,7 +586,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
     simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq,
       chooseSplitsHeuristicPU_eq, ite_self]
     unfold deflateRawSplitTierP
-    exact hwithObs l' _ rfl
+    exact hwithObs l' l' _ rfl
   have hl7 : ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (deflateRawL7P data (l7ProfileFor data)) =
         contentBits ++ padding ∧ padding.length < 8 := by
@@ -562,7 +599,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
     · dsimp only
       rw [hcheck7, chooseSplitsHeuristicPUPacked_lzMatchP_eq]
       unfold deflateRawSplitTierP
-      exact hwithObs 7 _ rfl
+      exact hwithObs 7 7 _ rfl
     · exact hbaseDirect 7
     · dsimp only
       rw [hcheck7, chooseSplitsHeuristicPUPacked_lzMatchP_eq]
@@ -628,6 +665,56 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       · exact hfast
       · exact hsplitLevel 5
       · exact hl7
+  have hl8 : ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (deflateRawL8P data) =
+        contentBits ++ padding ∧ padding.length < 8 := by
+    unfold deflateRawL8P deflateRawL8TokensP
+    rw [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+    unfold deflateRawSplitTierP
+    exact hwithObs 8 8 _ rfl
+  have hl9 : ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (deflateRawL9P data) =
+        contentBits ++ padding ∧ padding.length < 8 := by
+    unfold deflateRawL9P deflateRawL9TokensP
+    dsimp only []
+    split <;>
+      first
+      | exact emitSmallerBy_bytesToBits
+          (P := fun bits => ∃ (contentBits padding : List Bool),
+            bits = contentBits ++ padding ∧ padding.length < 8)
+          _ _ _ _ (hbase 9)
+          (deflateDynamicBlocksOptimalFast_pad data sharedTokChunk)
+      | exact emitSmallerBy_bytesToBits
+          (P := fun bits => ∃ (contentBits padding : List Bool),
+            bits = contentBits ++ padding ∧ padding.length < 8)
+          _ _ _ _ (hbase 9)
+          (deflateDynamicBlocksOptimalWindowedFast_pad data sharedTokChunk)
+  have hl10 : ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (deflateRawL10P data) =
+        contentBits ++ padding ∧ padding.length < 8 := by
+    unfold deflateRawL10P deflateRawL10TokensP
+    dsimp only []
+    split <;>
+      first
+      | exact emitSmallerBy_bytesToBits
+          (P := fun bits => ∃ (contentBits padding : List Bool),
+            bits = contentBits ++ padding ∧ padding.length < 8)
+          _ _ _ _ (hbase 10)
+          (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
+      | exact emitSmallerBy_bytesToBits
+          (P := fun bits => ∃ (contentBits padding : List Bool),
+            bits = contentBits ++ padding ∧ padding.length < 8)
+          _ _ _ _ (hbase 10)
+          (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
+  have hadaptive : ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits
+          (deflateRawL9AdaptiveP data (l7ProfileFor data)) =
+        contentBits ++ padding ∧ padding.length < 8 := by
+    unfold deflateRawL9AdaptiveP deflateRawL9RouteP
+    split
+    · exact hl9
+    · exact hl8
+    · exact hl10
   split
   · -- Level 0: stored blocks — all byte-aligned, padding = []
     exact hstored
@@ -642,20 +729,14 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
           · split
             · exact hl7
             · split
-              · split <;>
-                  first
-                  | exact emitSmallerBy_bytesToBits
-                      (P := fun bits => ∃ (contentBits padding : List Bool),
-                        bits = contentBits ++ padding ∧ padding.length < 8)
-                      _ _ _ _ (hbase _)
-                      (deflateDynamicBlocksOptimalFast_pad data sharedTokChunk)
-                  | exact emitSmallerBy_bytesToBits
-                      (P := fun bits => ∃ (contentBits padding : List Bool),
-                        bits = contentBits ++ padding ∧ padding.length < 8)
-                      _ _ _ _ (hbase _)
-                      (deflateDynamicBlocksOptimalWindowedFast_pad data sharedTokChunk)
               · split
-                · split <;>
+                · exact hadaptive
+                · exact hl9
+              · split
+                · -- level ≥ 10: exact-DP crown, sized floor.
+                  unfold deflateRawL10TokensP
+                  dsimp only []
+                  split <;>
                     first
                     | exact emitSmallerBy_bytesToBits
                         (P := fun bits => ∃ (contentBits padding : List Bool),
@@ -667,10 +748,17 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
                           bits = contentBits ++ padding ∧ padding.length < 8)
                         _ _ _ _ (hbase _)
                         (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
-                · change ∃ (contentBits padding : List Bool),
-                    Deflate.Spec.bytesToBits (deflateRawSplitLevelP data level) =
-                      contentBits ++ padding ∧ padding.length < 8
-                  exact hsplitLevel level
+                · split
+                  · -- level 8: exact named source point used by adaptive L9.
+                    have hlevel : level = 8 := by
+                      simpa only [beq_iff_eq] using
+                        (show (level == 8) = true by assumption)
+                    subst level
+                    exact hl8
+                  · change ∃ (contentBits padding : List Bool),
+                      Deflate.Spec.bytesToBits (deflateRawSplitLevelP data level) =
+                        contentBits ++ padding ∧ padding.length < 8
+                    exact hsplitLevel level
       · split
         · exact hl2
         · split
@@ -896,20 +984,20 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
       lzMatchP_map, deflateDynamicBlocksSharedAt_def]
     exact deflateDynamicBlocksSharedAt_goR_pad data _ l'
   -- `withObs`: base, or the eagerly-selected smaller of base and the obs-split.
-  have hwithObs : ∀ (l' : UInt8) (p : Nat × (Unit → ByteArray)),
+  have hwithObs : ∀ (l' checkLevel : UInt8) (p : Nat × (Unit → ByteArray)),
       p = (if (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
-              splitSoftMaxBlockBytes (splitCheckTokensFor data l')).isEmpty then
+              splitSoftMaxBlockBytes (splitCheckTokensFor data checkLevel)).isEmpty then
             deflateRawBasePPrep data (lzMatchP data l')
           else
             let obsFreqs := deflateObsSplitSizedFreqsP data (lzMatchP data l')
               (chooseSplitsHeuristicP (lzMatchP data l') data.size splitMinBlockBytes
-                splitSoftMaxBlockBytes (splitCheckTokensFor data l'))
+                splitSoftMaxBlockBytes (splitCheckTokensFor data checkLevel))
             let basePrep := deflateRawBasePPrepF data (lzMatchP data l') obsFreqs.2
             if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1) →
       ∃ remaining,
         Deflate.Spec.decode.goR (Deflate.Spec.bytesToBits (p.2 ())) []
           = some (data.data.toList, remaining) ∧ remaining.length < 8 := by
-    intro l' p hp; subst hp
+    intro l' checkLevel p hp; subst hp
     dsimp only []
     rw [deflateRawBasePPrepF_obsFreqs, deflateObsSplitSizedFreqsP_fst]
     split
@@ -929,7 +1017,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
     simp only [chooseSplitsHeuristicPUPacked_lzMatchP_eq,
       chooseSplitsHeuristicPU_eq, ite_self]
     unfold deflateRawSplitTierP
-    exact hwithObs l' _ rfl
+    exact hwithObs l' l' _ rfl
   have hl7 : ∃ remaining,
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits
@@ -945,7 +1033,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
     · dsimp only
       rw [hcheck7, chooseSplitsHeuristicPUPacked_lzMatchP_eq]
       unfold deflateRawSplitTierP
-      exact hwithObs 7 _ rfl
+      exact hwithObs 7 7 _ rfl
     · exact hbaseDirect 7
     · dsimp only
       rw [hcheck7, chooseSplitsHeuristicPUPacked_lzMatchP_eq]
@@ -1017,6 +1105,64 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
       · exact hfast
       · exact hsplitLevel 5
       · exact hl7
+  have hl8 : ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (deflateRawL8P data)) [] =
+        some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+    unfold deflateRawL8P deflateRawL8TokensP
+    rw [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+    unfold deflateRawSplitTierP
+    exact hwithObs 8 8 _ rfl
+  have hl9 : ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (deflateRawL9P data)) [] =
+        some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+    unfold deflateRawL9P deflateRawL9TokensP
+    dsimp only []
+    split <;>
+      first
+      | exact emitSmallerBy_bytesToBits
+          (P := fun bits => ∃ remaining,
+            Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+              remaining.length < 8)
+          _ _ _ _ (hbase 9)
+          (deflateDynamicBlocksOptimalFast_goR_pad data sharedTokChunk)
+      | exact emitSmallerBy_bytesToBits
+          (P := fun bits => ∃ remaining,
+            Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+              remaining.length < 8)
+          _ _ _ _ (hbase 9)
+          (deflateDynamicBlocksOptimalWindowedFast_goR_pad data sharedTokChunk)
+  have hl10 : ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (deflateRawL10P data)) [] =
+        some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+    unfold deflateRawL10P deflateRawL10TokensP
+    dsimp only []
+    split <;>
+      first
+      | exact emitSmallerBy_bytesToBits
+          (P := fun bits => ∃ remaining,
+            Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+              remaining.length < 8)
+          _ _ _ _ (hbase 10)
+          (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
+      | exact emitSmallerBy_bytesToBits
+          (P := fun bits => ∃ remaining,
+            Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+              remaining.length < 8)
+          _ _ _ _ (hbase 10)
+          (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
+  have hadaptive : ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits
+            (deflateRawL9AdaptiveP data (l7ProfileFor data))) [] =
+        some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+    unfold deflateRawL9AdaptiveP deflateRawL9RouteP
+    split
+    · exact hl9
+    · exact hl8
+    · exact hl10
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
     exact hstored
@@ -1031,22 +1177,14 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
           · split
             · exact hl7
             · split
-              · split <;>
-                  first
-                  | exact emitSmallerBy_bytesToBits
-                      (P := fun bits => ∃ remaining,
-                        Deflate.Spec.decode.goR bits [] =
-                          some (data.data.toList, remaining) ∧ remaining.length < 8)
-                      _ _ _ _ (hbase _)
-                      (deflateDynamicBlocksOptimalFast_goR_pad data sharedTokChunk)
-                  | exact emitSmallerBy_bytesToBits
-                      (P := fun bits => ∃ remaining,
-                        Deflate.Spec.decode.goR bits [] =
-                          some (data.data.toList, remaining) ∧ remaining.length < 8)
-                      _ _ _ _ (hbase _)
-                      (deflateDynamicBlocksOptimalWindowedFast_goR_pad data sharedTokChunk)
               · split
-                · split <;>
+                · exact hadaptive
+                · exact hl9
+              · split
+                · -- level ≥ 10: exact-DP crown, sized floor.
+                  unfold deflateRawL10TokensP
+                  dsimp only []
+                  split <;>
                     first
                     | exact emitSmallerBy_bytesToBits
                         (P := fun bits => ∃ remaining,
@@ -1060,12 +1198,19 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
                             some (data.data.toList, remaining) ∧ remaining.length < 8)
                         _ _ _ _ (hbase _)
                         (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
-                · change ∃ remaining,
-                    Deflate.Spec.decode.goR
-                        (Deflate.Spec.bytesToBits
-                          (deflateRawSplitLevelP data level)) [] =
-                      some (data.data.toList, remaining) ∧ remaining.length < 8
-                  exact hsplitLevel level
+                · split
+                  · -- level 8: exact named source point used by adaptive L9.
+                    have hlevel : level = 8 := by
+                      simpa only [beq_iff_eq] using
+                        (show (level == 8) = true by assumption)
+                    subst level
+                    exact hl8
+                  · change ∃ remaining,
+                      Deflate.Spec.decode.goR
+                          (Deflate.Spec.bytesToBits
+                            (deflateRawSplitLevelP data level)) [] =
+                        some (data.data.toList, remaining) ∧ remaining.length < 8
+                    exact hsplitLevel level
       · split
         · exact hl2
         · split
