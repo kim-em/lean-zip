@@ -3166,14 +3166,32 @@ theorem deflateRawBaseFU64Level1_eq (data : ByteArray) :
   rw [lz77ChainIterPMergedF1U64_eq]
   simp
 
+/-- Parameterized greedy matcher with a native-word outer loop and one unboxed
+    wide histogram.  Used by levels two through four; the matcher owns its
+    addressability guards and exact generic fallback. -/
+def deflateRawBaseFU64Greedy (data : ByteArray) (level : UInt8) : ByteArray :=
+  let (ptokens, litF, distF) :=
+    lz77ChainIterPMergedFNU64 data (chainDepth level) (insertCap level) (niceLen level)
+  deflateRawBasePF data ptokens (litF, distF)
+
+/-- Away from level one, the parameterized wide matcher is byte-identical to
+    the established boxed-histogram fused implementation. -/
+theorem deflateRawBaseFU64Greedy_eq (data : ByteArray) (level : UInt8)
+    (hlevel : level ≠ 1) :
+    deflateRawBaseFU64Greedy data level = deflateRawBaseFLevel1Impl data level := by
+  unfold deflateRawBaseFU64Greedy deflateRawBaseFLevel1Impl
+  rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+  rw [lz77ChainIterPMergedFNU64_eq, lz77ChainIterPMergedFNU_eq]
+
 /-- The greedy-tier (levels 1–4) base candidate computed from **one fused pass**.
-    Level 1 uses the guarded wide-counter matcher; levels 2–4 use the established
-    boxed fused matcher.  Both produce the packed tokens and `tokenFreqsP`
-    histograms together, so base sizing/emission avoids a second token walk.
+    Level 1 uses its fixed-policy guarded matcher; levels 2–4 use the guarded
+    parameterized native-word matcher.  All four keep their histograms in one
+    unboxed wide buffer and materialize the two arrays only once after matching,
+    so base sizing/emission avoids a second token walk.
     Byte-identical to `deflateRawBase` on the greedy tier (`deflateRawBaseF_eq`). -/
 def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
   if level == 1 then deflateRawBaseFU64Level1 data
-  else deflateRawBaseFLevel1Impl data level
+  else deflateRawBaseFU64Greedy data level
 
 /-- On the greedy tier (`level ≤ 4`, i.e. `¬ 5 ≤ level`) the fused base candidate
     is byte-identical to `deflateRawBase`: the fused matcher returns exactly the
@@ -3197,6 +3215,7 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (5 ≤ lev
       show (1 : UInt8) ≤ 1 by decide, show (1 : UInt8) ≤ 4 by decide,
       show ¬((1 : UInt8) == 7) = true by decide, Bool.false_eq_true, ↓reduceIte]
   · rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+    rw [deflateRawBaseFU64Greedy_eq data level hlevel]
     unfold deflateRawBaseFLevel1Impl
     rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
     simp only [lz77ChainIterPMergedF_eq]

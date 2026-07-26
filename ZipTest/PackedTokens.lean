@@ -116,6 +116,46 @@ private def checkL1WideFused (label : String) (data : ByteArray) : IO Unit := do
       s!"{label}: deflateRawBaseFU64Level1 ({production.size} bytes) ≠ \
          established deflateRawBase L1 ({established.size} bytes)")
 
+/-- Compiled-path gate for the parameterized level-two through level-four
+    specialization.  Compare native-wide, native-boxed, and generic fused token
+    streams and histograms, then compare both the specialized and production
+    byte output with the established packed base path. -/
+private def checkL2To4WideFused (label : String) (data : ByteArray) : IO Unit := do
+  for level in [(2 : UInt8), 3, 4] do
+    let maxChain := chainDepth level
+    let cap := insertCap level
+    let nice := niceLen level
+    let (wideTokens, wideLit, wideDist) :=
+      lz77ChainIterPMergedFNU64 data maxChain cap nice
+    let (boxedTokens, boxedLit, boxedDist) :=
+      lz77ChainIterPMergedFNU data maxChain cap nice
+    let (genericTokens, genericLit, genericDist) :=
+      lz77ChainIterPMergedF data maxChain 32768 cap nice
+    unless wideTokens.toArray == boxedTokens.toArray do
+      throw (IO.userError
+        s!"{label} L{level}: parameterized wide/native-boxed token mismatch \
+           ({wideTokens.size} vs {boxedTokens.size} tokens)")
+    unless wideLit == boxedLit.val && wideDist == boxedDist.val do
+      throw (IO.userError s!"{label} L{level}: parameterized wide/native-boxed histogram mismatch")
+    unless wideTokens.toArray == genericTokens.toArray do
+      throw (IO.userError
+        s!"{label} L{level}: parameterized wide/generic token mismatch \
+           ({wideTokens.size} vs {genericTokens.size} tokens)")
+    unless wideLit == genericLit.val && wideDist == genericDist.val do
+      throw (IO.userError s!"{label} L{level}: parameterized wide/generic histogram mismatch")
+    let counted := tokenFreqsPTA wideTokens
+    unless wideLit == counted.1 && wideDist == counted.2 do
+      throw (IO.userError s!"{label} L{level}: parameterized wide histogram ≠ token recount")
+    let specialized := deflateRawBaseFU64Greedy data level
+    let production := deflateRawBaseF data level
+    let boxedOut := deflateRawBaseFLevel1Impl data level
+    let established := deflateRawBase data level
+    unless specialized == production && specialized == boxedOut &&
+        specialized == established do
+      throw (IO.userError
+        s!"{label} L{level}: parameterized production output mismatch \
+           ({specialized.size}/{production.size}/{boxedOut.size}/{established.size} bytes)")
+
 /-- Direct compiled conformance for the narrowly routed flat token emitter and
     its single-block core.  Canonical tables built from a real L1 token stream
     satisfy the production route's bounds.  Starting the two emitters at every
@@ -350,6 +390,7 @@ def tests : IO Unit := do
        ("window-edge64k", l1WindowEdge), ("text64k", l1Text64k),
        ("alice29", alice)] do
     checkL1WideFused label data
+    checkL2To4WideFused label data
 
   -- Force the flat emitter independently of stored/fixed/dynamic arbitration.
   -- The three nonempty shapes cover reference-heavy, literal-heavy, and mixed
