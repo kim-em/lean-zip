@@ -33,32 +33,80 @@ theorem lzMatch_encodable (data : ByteArray) (level : UInt8) :
       | .literal _ => True
       | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   unfold lzMatch
-  split
-  · exact lz77ChainLazyIter_encodable data (lazyChainDepthFor data level) 32768
-      (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-      (useH3For data level) (lazy2StepsLevel level)
+  by_cases h7 : (level == 7) = true
+  · simp only [h7, ↓reduceIte]
+    unfold l7MatchFor
+    exact lz77ChainLazyIter_encodable data
+      (l7MatchConfig data (l7ProfileFor data)).chainDepth 32768 1000000000
+      (l7MatchConfig data (l7ProfileFor data)).goodMatch
+      (l7MatchConfig data (l7ProfileFor data)).niceLen
+      (l7MatchConfig data (l7ProfileFor data)).lazyDepth
+      (l7MatchConfig data (l7ProfileFor data)).useH3
+      (l7MatchConfig data (l7ProfileFor data)).lazy2Steps
       (by omega) (by omega)
-  · exact lz77ChainIter_encodable data (chainDepth level) 32768 (insertCap level) (niceLen level)
-      (by omega) (by omega)
+  · have h7f : (level == 7) = false := by
+      cases hb : level == 7 with
+      | false => rfl
+      | true => exact (h7 hb).elim
+    simp only [h7f, Bool.false_eq_true, ↓reduceIte]
+    split
+    · exact lz77ChainLazyIter_encodable data (lazyChainDepthFor data level) 32768
+        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+        (useH3For data level) (lazy2StepsLevel level)
+        (by omega) (by omega)
+    · exact lz77ChainIter_encodable data (chainDepth level) 32768
+        (insertCap level) (niceLen level) (by omega) (by omega)
 
 theorem lzMatch_empty (data : ByteArray) (level : UInt8) (hz : data.size = 0) :
     lzMatch data level = #[] := by
   unfold lzMatch
-  split
-  · exact lz77ChainLazyIter_empty data (lazyChainDepthFor data level) 32768
-      (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-      (useH3For data level) (lazy2StepsLevel level) hz
-  · exact lz77ChainIter_empty data (chainDepth level) 32768 (insertCap level) (niceLen level) hz
+  by_cases h7 : (level == 7) = true
+  · simp only [h7, ↓reduceIte]
+    unfold l7MatchFor
+    exact lz77ChainLazyIter_empty data
+      (l7MatchConfig data (l7ProfileFor data)).chainDepth 32768 1000000000
+      (l7MatchConfig data (l7ProfileFor data)).goodMatch
+      (l7MatchConfig data (l7ProfileFor data)).niceLen
+      (l7MatchConfig data (l7ProfileFor data)).lazyDepth
+      (l7MatchConfig data (l7ProfileFor data)).useH3
+      (l7MatchConfig data (l7ProfileFor data)).lazy2Steps hz
+  · have h7f : (level == 7) = false := by
+      cases hb : level == 7 with
+      | false => rfl
+      | true => exact (h7 hb).elim
+    simp only [h7f, Bool.false_eq_true, ↓reduceIte]
+    split
+    · exact lz77ChainLazyIter_empty data (lazyChainDepthFor data level) 32768
+        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+        (useH3For data level) (lazy2StepsLevel level) hz
+    · exact lz77ChainIter_empty data (chainDepth level) 32768
+        (insertCap level) (niceLen level) hz
 
 theorem lzMatch_resolves (data : ByteArray) (level : UInt8) :
     Deflate.Spec.resolveLZ77 (tokensToSymbols (lzMatch data level)) [] =
       some data.data.toList := by
   unfold lzMatch
-  split
-  · exact lz77ChainLazyIter_resolves data (lazyChainDepthFor data level) 32768
-      (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-      (useH3For data level) (lazy2StepsLevel level) (by omega)
-  · exact lz77ChainIter_resolves data (chainDepth level) 32768 (insertCap level) (niceLen level) (by omega)
+  by_cases h7 : (level == 7) = true
+  · simp only [h7, ↓reduceIte]
+    unfold l7MatchFor
+    exact lz77ChainLazyIter_resolves data
+      (l7MatchConfig data (l7ProfileFor data)).chainDepth 32768 1000000000
+      (l7MatchConfig data (l7ProfileFor data)).goodMatch
+      (l7MatchConfig data (l7ProfileFor data)).niceLen
+      (l7MatchConfig data (l7ProfileFor data)).lazyDepth
+      (l7MatchConfig data (l7ProfileFor data)).useH3
+      (l7MatchConfig data (l7ProfileFor data)).lazy2Steps (by omega)
+  · have h7f : (level == 7) = false := by
+      cases hb : level == 7 with
+      | false => rfl
+      | true => exact (h7 hb).elim
+    simp only [h7f, Bool.false_eq_true, ↓reduceIte]
+    split
+    · exact lz77ChainLazyIter_resolves data (lazyChainDepthFor data level) 32768
+        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+        (useH3For data level) (lazy2StepsLevel level) (by omega)
+    · exact lz77ChainIter_resolves data (chainDepth level) 32768
+        (insertCap level) (niceLen level) (by omega)
 
 set_option maxHeartbeats 800000 in
 /-- One self-contained chunk block: its bits append to `bw`, it preserves `wf`,

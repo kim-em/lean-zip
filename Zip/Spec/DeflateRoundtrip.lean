@@ -191,26 +191,37 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
     · exact inflate_deflateStoredPure data _ (by omega)
     · split
       · split
-        · -- level 9 (L9-fast, #2638): sized floor + optimal via `emitSmallerBy`.
-          -- Two nested ites (the floor-level choice and the memory gate) give
-          -- four leaves; each is the same `inflate_emitSmallerBy` with the
-          -- matching optimal roundtrip and the level-generalized floor.
-          split <;>
-            first
-            | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
-                (inflate_deflateDynamicBlocksOptimalFast data sharedTokChunk _ hsize)
-            | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
-                (inflate_deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk _ hsize)
+        · -- Adaptive level 7: expose the shared split tail, then transport the
+          -- packed walker to the reference cut list used by `hwithObs`.
+          change Zip.Native.Inflate.inflateReference
+              (deflateRawSplitTierP data (lzMatchP data 7)
+                (chooseSplitsHeuristicPUPacked (lzMatchP data 7) data.size
+                  (splitCheckTokensFor data 7))) maxOutputSize = .ok data
+          rw [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+          unfold deflateRawSplitTierP
+          exact hwithObs 7 _ rfl
         · split
-          · -- level ≥ 10: exact-DP crown, sized floor + optimal (see level 9)
+          · -- level 9 (L9-fast, #2638): sized floor + optimal via `emitSmallerBy`.
+            -- Two nested ites (the floor-level choice and the memory gate) give
+            -- four leaves; each is the same `inflate_emitSmallerBy` with the
+            -- matching optimal roundtrip and the level-generalized floor.
             split <;>
               first
               | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
-                  (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
+                  (inflate_deflateDynamicBlocksOptimalFast data sharedTokChunk _ hsize)
               | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
-                  (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
-          · -- levels 5–8: obs-split candidate, `hwithObs`
-            exact hwithObs _ _ rfl
+                  (inflate_deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk _ hsize)
+          · split
+            · -- level ≥ 10: exact-DP crown, sized floor + optimal (see level 9)
+              split <;>
+                first
+                | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
+                    (inflate_deflateDynamicBlocksOptimal data sharedTokChunk _ hsize)
+                | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
+                    (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
+            · -- levels 5–6 and 8: obs-split candidate, `hwithObs`
+              unfold deflateRawSplitTierP
+              exact hwithObs _ _ rfl
       · -- levels 1–4: fused greedy base candidate, byte-identical to
         -- `deflateRawBase` (`deflateRawBaseF_eq`)
         rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
@@ -337,36 +348,48 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
     · exact hstored
     · split
       · split
-        · -- level 9 (L9-fast, #2638): sized floor, four ite leaves (see the
-          -- roundtrip theorem's level-9 arm)
-          split <;>
-            first
-            | exact emitSmallerBy_bytesToBits
-                (P := fun bits => ∃ (contentBits padding : List Bool),
-                  bits = contentBits ++ padding ∧ padding.length < 8)
-                _ _ _ _ (hbase _)
-                (deflateDynamicBlocksOptimalFast_pad data sharedTokChunk)
-            | exact emitSmallerBy_bytesToBits
-                (P := fun bits => ∃ (contentBits padding : List Bool),
-                  bits = contentBits ++ padding ∧ padding.length < 8)
-                _ _ _ _ (hbase _)
-                (deflateDynamicBlocksOptimalWindowedFast_pad data sharedTokChunk)
+        · -- Adaptive level 7: expose the common packed split tail.
+          change ∃ (contentBits padding : List Bool),
+            Deflate.Spec.bytesToBits
+                (deflateRawSplitTierP data (lzMatchP data 7)
+                  (chooseSplitsHeuristicPUPacked (lzMatchP data 7) data.size
+                    (splitCheckTokensFor data 7))) =
+              contentBits ++ padding ∧ padding.length < 8
+          rw [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+          unfold deflateRawSplitTierP
+          exact hwithObs 7 _ rfl
         · split
-          · -- level ≥ 10: exact-DP crown, sized floor (see level 9)
+          · -- level 9 (L9-fast, #2638): sized floor, four ite leaves (see the
+            -- roundtrip theorem's level-9 arm)
             split <;>
               first
               | exact emitSmallerBy_bytesToBits
                   (P := fun bits => ∃ (contentBits padding : List Bool),
                     bits = contentBits ++ padding ∧ padding.length < 8)
                   _ _ _ _ (hbase _)
-                  (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
+                  (deflateDynamicBlocksOptimalFast_pad data sharedTokChunk)
               | exact emitSmallerBy_bytesToBits
                   (P := fun bits => ∃ (contentBits padding : List Bool),
                     bits = contentBits ++ padding ∧ padding.length < 8)
                   _ _ _ _ (hbase _)
-                  (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
-          · -- levels 5–8
-            exact hwithObs _ _ rfl
+                  (deflateDynamicBlocksOptimalWindowedFast_pad data sharedTokChunk)
+          · split
+            · -- level ≥ 10: exact-DP crown, sized floor (see level 9)
+              split <;>
+                first
+                | exact emitSmallerBy_bytesToBits
+                    (P := fun bits => ∃ (contentBits padding : List Bool),
+                      bits = contentBits ++ padding ∧ padding.length < 8)
+                    _ _ _ _ (hbase _)
+                    (deflateDynamicBlocksOptimal_pad data sharedTokChunk)
+                | exact emitSmallerBy_bytesToBits
+                    (P := fun bits => ∃ (contentBits padding : List Bool),
+                      bits = contentBits ++ padding ∧ padding.length < 8)
+                    _ _ _ _ (hbase _)
+                    (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
+            · -- levels 5–6 and 8
+              unfold deflateRawSplitTierP
+              exact hwithObs _ _ rfl
       · -- levels 1–4: fused greedy base (`deflateRawBaseF_eq`)
         rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
         exact deflateRawBase_pad data level
@@ -567,23 +590,19 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
     · exact hstored
     · split
       · split
-        · -- level 9 (L9-fast, #2638): sized floor, four ite leaves
-          split <;>
-            first
-            | exact emitSmallerBy_bytesToBits
-                (P := fun bits => ∃ remaining,
-                  Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
-                    remaining.length < 8)
-                _ _ _ _ (hbase _)
-                (deflateDynamicBlocksOptimalFast_goR_pad data sharedTokChunk)
-            | exact emitSmallerBy_bytesToBits
-                (P := fun bits => ∃ remaining,
-                  Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
-                    remaining.length < 8)
-                _ _ _ _ (hbase _)
-                (deflateDynamicBlocksOptimalWindowedFast_goR_pad data sharedTokChunk)
+        · -- Adaptive level 7: expose the common packed split tail.
+          change ∃ remaining,
+            Deflate.Spec.decode.goR
+                (Deflate.Spec.bytesToBits
+                  (deflateRawSplitTierP data (lzMatchP data 7)
+                    (chooseSplitsHeuristicPUPacked (lzMatchP data 7) data.size
+                      (splitCheckTokensFor data 7)))) [] =
+              some (data.data.toList, remaining) ∧ remaining.length < 8
+          rw [chooseSplitsHeuristicPUPacked_lzMatchP_eq]
+          unfold deflateRawSplitTierP
+          exact hwithObs 7 _ rfl
         · split
-          · -- level ≥ 10: exact-DP crown, sized floor (see level 9)
+          · -- level 9 (L9-fast, #2638): sized floor, four ite leaves
             split <;>
               first
               | exact emitSmallerBy_bytesToBits
@@ -591,15 +610,32 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
                     Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
                       remaining.length < 8)
                   _ _ _ _ (hbase _)
-                  (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
+                  (deflateDynamicBlocksOptimalFast_goR_pad data sharedTokChunk)
               | exact emitSmallerBy_bytesToBits
                   (P := fun bits => ∃ remaining,
                     Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
                       remaining.length < 8)
                   _ _ _ _ (hbase _)
-                  (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
-          · -- levels 5–8
-            exact hwithObs _ _ rfl
+                  (deflateDynamicBlocksOptimalWindowedFast_goR_pad data sharedTokChunk)
+          · split
+            · -- level ≥ 10: exact-DP crown, sized floor (see level 9)
+              split <;>
+                first
+                | exact emitSmallerBy_bytesToBits
+                    (P := fun bits => ∃ remaining,
+                      Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+                        remaining.length < 8)
+                    _ _ _ _ (hbase _)
+                    (deflateDynamicBlocksOptimal_goR_pad data sharedTokChunk)
+                | exact emitSmallerBy_bytesToBits
+                    (P := fun bits => ∃ remaining,
+                      Deflate.Spec.decode.goR bits [] = some (data.data.toList, remaining) ∧
+                        remaining.length < 8)
+                    _ _ _ _ (hbase _)
+                    (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
+            · -- levels 5–6 and 8
+              unfold deflateRawSplitTierP
+              exact hwithObs _ _ rfl
       · -- levels 1–4: fused greedy base (`deflateRawBaseF_eq`)
         rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
         exact deflateRawBase_goR_pad data level

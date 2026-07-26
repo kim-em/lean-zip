@@ -233,32 +233,88 @@ theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap
 
 /-! ## Dispatch boundary -/
 
+/-- The packed matcher at an already-selected level-7 profile is the exact
+    packed image of its boxed twin.  The large shallow arm uses the specialized
+    merged L5 loop; its existing equality theorem pins that loop to the same
+    chain-22/depth-5 generic matcher. -/
+theorem l7MatchPFor_eq (data : ByteArray) (profile : L7Profile) :
+    (l7MatchPFor data profile).toArray = (l7MatchFor data profile).map packTok := by
+  unfold l7MatchPFor l7MatchFor
+  by_cases hs : l7UseLargeShallow data profile = true
+  · rw [if_pos hs, lz77ChainLazyIterPMergedL5Large_eq]
+    have hs' : (profile == .shallow) = true ∧
+        decide (l5LargeInputMinSize ≤ data.size) = true := by
+      simpa only [l7UseLargeShallow, Bool.and_eq_true] using hs
+    have hp : profile = .shallow := LawfulBEq.eq_of_beq hs'.1
+    have hsize : l5LargeInputMinSize ≤ data.size := of_decide_eq_true hs'.2
+    subst profile
+    simp only [l7MatchConfig]
+    rw [if_pos hsize]
+    exact lz77ChainLazyIterP_eq data 22 32768 1000000000 64 65 5 false 1
+  · rw [if_neg hs, lz77ChainLazyIterPMerged_eq]
+    exact lz77ChainLazyIterP_eq data (l7MatchConfig data profile).chainDepth 32768
+      1000000000 (l7MatchConfig data profile).goodMatch
+      (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+      (l7MatchConfig data profile).useH3 (l7MatchConfig data profile).lazy2Steps
+
+/-- The boxed view of an already-selected packed level-7 profile is its boxed
+    matcher. -/
+theorem l7MatchPFor_map (data : ByteArray) (profile : L7Profile) :
+    (l7MatchPFor data profile).toArray.map unpackTok = l7MatchFor data profile := by
+  unfold l7MatchPFor l7MatchFor
+  by_cases hs : l7UseLargeShallow data profile = true
+  · rw [if_pos hs, lz77ChainLazyIterPMergedL5Large_eq]
+    have hs' : (profile == .shallow) = true ∧
+        decide (l5LargeInputMinSize ≤ data.size) = true := by
+      simpa only [l7UseLargeShallow, Bool.and_eq_true] using hs
+    have hp : profile = .shallow := LawfulBEq.eq_of_beq hs'.1
+    have hsize : l5LargeInputMinSize ≤ data.size := of_decide_eq_true hs'.2
+    subst profile
+    simp only [l7MatchConfig]
+    rw [if_pos hsize]
+    exact lz77ChainLazyIterP_map data 22 32768 1000000000 64 65 5 false 1
+      (by omega) (by omega)
+  · rw [if_neg hs, lz77ChainLazyIterPMerged_eq]
+    exact lz77ChainLazyIterP_map data (l7MatchConfig data profile).chainDepth 32768
+      1000000000 (l7MatchConfig data profile).goodMatch
+      (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+      (l7MatchConfig data profile).useH3 (l7MatchConfig data profile).lazy2Steps
+      (by omega) (by omega)
+
 /-- `lzMatchP` is the `packTok` image of `lzMatch` at every level. -/
 theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).toArray = (lzMatch data level).map packTok := by
   unfold lzMatchP lzMatch
-  by_cases h5 : 5 ≤ level
-  · simp only [if_pos h5]
-    by_cases hlarge : useL5LargeInputPolicy data level = true
-    · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
-      have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
-        simpa [useL5LargeInputPolicy] using hlarge
-      obtain ⟨rfl, _hsize⟩ := hp
-      have hchain : lazyChainDepthFor data 5 = 22 := by
-        unfold lazyChainDepthFor
-        rw [if_pos hlarge]
-      rw [hchain]
-      simpa [lazyDepthFor, hlarge,
-        useH3For, useH3Level, lazy2StepsLevel] using
-        (lz77ChainLazyIterP_eq data 22 32768 (insertCap 5) (goodMatch 5)
-          (niceLen 5) 5 false 1)
-    · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
-      exact lz77ChainLazyIterP_eq data (lazyChainDepthFor data level) 32768
-        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-        (useH3For data level) (lazy2StepsLevel level)
-  · simp only [if_neg h5]
-    rw [lz77ChainIterPMerged_eq]
-    exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  by_cases h7 : (level == 7) = true
+  · simp only [h7, ↓reduceIte]
+    exact l7MatchPFor_eq data (l7ProfileFor data)
+  · have h7f : (level == 7) = false := by
+      cases hb : level == 7 with
+      | false => rfl
+      | true => exact (h7 hb).elim
+    simp only [h7f, Bool.false_eq_true, ↓reduceIte]
+    by_cases h5 : 5 ≤ level
+    · simp only [if_pos h5]
+      by_cases hlarge : useL5LargeInputPolicy data level = true
+      · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
+        have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
+          simpa [useL5LargeInputPolicy] using hlarge
+        obtain ⟨rfl, _hsize⟩ := hp
+        have hchain : lazyChainDepthFor data 5 = 22 := by
+          unfold lazyChainDepthFor
+          rw [if_pos hlarge]
+        rw [hchain]
+        simpa [lazyDepthFor, hlarge,
+          useH3For, useH3Level, lazy2StepsLevel] using
+          (lz77ChainLazyIterP_eq data 22 32768 (insertCap 5) (goodMatch 5)
+            (niceLen 5) 5 false 1)
+      · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
+        exact lz77ChainLazyIterP_eq data (lazyChainDepthFor data level) 32768
+          (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+          (useH3For data level) (lazy2StepsLevel level)
+    · simp only [if_neg h5]
+      rw [lz77ChainIterPMerged_eq]
+      exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- The boxed view of the packed token stream is exactly `lzMatch`'s stream:
     stage B+ consumers of `lzMatchP` inherit every `lzMatch` contract through
@@ -266,30 +322,38 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
 theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).toArray.map unpackTok = lzMatch data level := by
   unfold lzMatchP lzMatch
-  by_cases h5 : 5 ≤ level
-  · simp only [if_pos h5]
-    by_cases hlarge : useL5LargeInputPolicy data level = true
-    · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
-      have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
-        simpa [useL5LargeInputPolicy] using hlarge
-      obtain ⟨rfl, _hsize⟩ := hp
-      have hchain : lazyChainDepthFor data 5 = 22 := by
-        unfold lazyChainDepthFor
-        rw [if_pos hlarge]
-      rw [hchain]
-      simpa [lazyDepthFor, hlarge,
-        useH3For, useH3Level, lazy2StepsLevel] using
-        (lz77ChainLazyIterP_map data 22 32768 (insertCap 5) (goodMatch 5)
-          (niceLen 5) 5 false 1 (by omega) (by omega))
-    · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
-      exact lz77ChainLazyIterP_map data (lazyChainDepthFor data level) 32768
-        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-        (useH3For data level) (lazy2StepsLevel level)
+  by_cases h7 : (level == 7) = true
+  · simp only [h7, ↓reduceIte]
+    exact l7MatchPFor_map data (l7ProfileFor data)
+  · have h7f : (level == 7) = false := by
+      cases hb : level == 7 with
+      | false => rfl
+      | true => exact (h7 hb).elim
+    simp only [h7f, Bool.false_eq_true, ↓reduceIte]
+    by_cases h5 : 5 ≤ level
+    · simp only [if_pos h5]
+      by_cases hlarge : useL5LargeInputPolicy data level = true
+      · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
+        have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
+          simpa [useL5LargeInputPolicy] using hlarge
+        obtain ⟨rfl, _hsize⟩ := hp
+        have hchain : lazyChainDepthFor data 5 = 22 := by
+          unfold lazyChainDepthFor
+          rw [if_pos hlarge]
+        rw [hchain]
+        simpa [lazyDepthFor, hlarge,
+          useH3For, useH3Level, lazy2StepsLevel] using
+          (lz77ChainLazyIterP_map data 22 32768 (insertCap 5) (goodMatch 5)
+            (niceLen 5) 5 false 1 (by omega) (by omega))
+      · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
+        exact lz77ChainLazyIterP_map data (lazyChainDepthFor data level) 32768
+          (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+          (useH3For data level) (lazy2StepsLevel level)
+          (by omega) (by omega)
+    · simp only [if_neg h5]
+      rw [lz77ChainIterPMerged_eq]
+      exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
         (by omega) (by omega)
-  · simp only [if_neg h5]
-    rw [lz77ChainIterPMerged_eq]
-    exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
-      (by omega) (by omega)
 
 /-! ## Stages B+C: the packed base candidate equals the boxed one
 
