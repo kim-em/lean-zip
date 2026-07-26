@@ -29,6 +29,7 @@
  */
 
 #include <lean/lean.h>
+#include <limits.h>
 #include <stdint.h>
 
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -139,7 +140,13 @@ LEAN_EXPORT uint32_t lean_zip_uint32_log2_clz(uint32_t x) {
     _BitScanReverse(&index, (unsigned long)x);
     return (uint32_t)index;
 #elif defined(__clang__) || defined(__GNUC__)
-    return 31u - (uint32_t)__builtin_clz((unsigned int)x);
+    /*
+     * Do not assume `unsigned int` is 32 bits.  `uint32_t` guarantees the
+     * input width, while the sizeof term adjusts for any wider
+     * `unsigned long long` accepted by __builtin_clzll.
+     */
+    return (uint32_t)(sizeof(unsigned long long) * CHAR_BIT - 1u)
+        - (uint32_t)__builtin_clzll((unsigned long long)x);
 #else
     uint32_t result = 0;
     while (x >= 2) {
