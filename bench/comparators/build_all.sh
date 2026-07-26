@@ -1,14 +1,28 @@
 #!/usr/bin/env bash
-# Build the external-language DEFLATE comparators for the Track D dashboard.
+# Build the standalone external DEFLATE comparators for the Track D dashboard.
 #
 # Each comparator uses its own nix toolchain; a build failure warns and continues
 # (the driver, run_external.py, then skips any comparator whose binary is absent),
 # so the dashboard degrades gracefully when a toolchain or package is unavailable.
 #
 # Produces, when successful:
+#   rust_codecs/target/release/bench-zlib-rs
+#   rust_codecs/target/release/bench-zlib-ng
 #   go/bench-go      js/node_modules/  zig/bench-zig      ocaml/bench-ocaml
 set -uo pipefail
 cd "$(dirname "$0")"
+
+echo "[zlib-rs] building (pure-Rust zlib implementation via flate2)…"
+( cd rust_codecs && nix-shell -p cargo rustc --run \
+    "cargo build --release --locked --no-default-features --features zlib-rs-backend \
+     && cp -f target/release/lean-zip-rust-codec-bench target/release/bench-zlib-rs" ) \
+  && echo "[zlib-rs] ok" || echo "[zlib-rs] FAILED — skipping"
+
+echo "[zlib-ng] building (optimized C zlib implementation via flate2)…"
+( cd rust_codecs && nix-shell -p cargo rustc cmake perl pkg-config --run \
+    "cargo build --release --locked --no-default-features --features zlib-ng-backend \
+     && cp -f target/release/lean-zip-rust-codec-bench target/release/bench-zlib-ng" ) \
+  && echo "[zlib-ng] ok" || echo "[zlib-ng] FAILED — skipping"
 
 echo "[go] building (pure-Go compress/flate)…"
 ( cd go && nix-shell -p go --run "go build -o bench-go main.go" ) \

@@ -54,6 +54,14 @@ class ParetoHistoryTimingTests(unittest.TestCase):
             "legacy Silesia single-rep → median-of-5 at migration",
         )
 
+    def test_reference_only_tail_refresh_is_dropped_after_stable_protocol(self):
+        frames = [
+            frame("first", "median-of-5", True),
+            frame("native", "median-of-5", True),
+            frame("reference-only", "median-of-5", True),
+        ]
+        self.assertEqual(pareto_history.drop_noise(frames), frames[:-1])
+
     def test_ticker_preserves_protocol_while_bounding_width(self):
         text = pareto_history.ticker_text(
             frame("migration", "median-of-5", True), 42, 43

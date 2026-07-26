@@ -23,13 +23,16 @@ keep it there (both measured on silesia.tar, same-worktree sandwich):
   `ByteArray` never grows by doubling — the doubling transient (up to ~2× the
   live token bytes) is what regressed *peak* RSS in the un-presized first
   attempt (`#2866`/`#2867`);
-* `push`/`get` compile (`@[implemented_by]`) to the single-call wide primitives
-  `ByteArray.pushUInt64LE` / `ByteArray.ugetUInt32LE` (`Zip/Native/Wide.lean`)
-  rather than four `ByteArray.push` / `getElem` calls each.  The 4→1 call-count
-  reduction matches the boxed one-call-per-token cost; without it the byte
-  layout costs ~+3–13% compress CPU (worst on the greedy tier, where the token
-  stream is longest).  The reference bodies stay the four-op forms, so every
-  bridge/refinement proof below is unchanged — only the compiled runtime swaps.
+* `push`/`get` compile (via `@[csimp]`, not the unverified `@[implemented_by]`)
+  to the single-call wide primitives `ByteArray.pushUInt64LE` /
+  `ByteArray.ugetUInt32LE` (`Zip/Native/Wide.lean`) rather than four
+  `ByteArray.push` / `getElem` calls each.  The 4→1 call-count reduction matches
+  the boxed one-call-per-token cost; without it the byte layout costs ~+3–13%
+  compress CPU (worst on the greedy tier, where the token stream is longest).
+  The reference bodies stay the four-op forms, and `pushUInt32LE_eq_impl` /
+  `get_eq_impl` prove the wide forms equal them, so the compiled runtime swaps
+  under a kernel-checked proof and every bridge/refinement proof below is
+  unchanged.
 
 Net on silesia.tar: peak RSS −25% to −30% (L1–L6) with compress wall neutral to
 ~3% faster and byte-identical output.
@@ -74,13 +77,27 @@ namespace ByteArray
 
 /-- Append a `UInt32` as four little-endian bytes (low byte first), matching
     `Binary.writeUInt32LE` / `Binary.readUInt32LE`.  The reference body (four
-    `push`es) is the trusted specification; the compiled path
-    (`pushUInt32LEImpl`) does it in one wide FFI call.
+    `push`es) is the specification; the compiled path (`pushUInt32LEImpl`) does it
+    in one wide FFI call, and `pushUInt32LE_eq_impl` (a `@[csimp]` theorem, below)
+    *proves* the two agree — so the runtime swap carries no trust of its own; the
+    only trusted edge left is the wide-store `@[extern]` on `pushUInt64LE` itself.
 
     TODO upstream to lean-zip-common (alongside `Binary.writeUInt32LE`). -/
-@[implemented_by pushUInt32LEImpl]
 def pushUInt32LE (b : ByteArray) (v : UInt32) : ByteArray :=
   (((b.push v.toUInt8).push (v >>> 8).toUInt8).push (v >>> 16).toUInt8).push (v >>> 24).toUInt8
+
+/-- The wide-store implementation computes exactly the four-`push` reference body,
+    so `@[csimp]` justifies compiling `pushUInt32LE` as `pushUInt32LEImpl` with a
+    kernel-checked proof instead of an unverified `@[implemented_by]` assertion. -/
+@[csimp] theorem pushUInt32LE_eq_impl : @pushUInt32LE = @pushUInt32LEImpl := by
+  funext b v
+  have e0 : (v.toUInt64).toUInt8 = v.toUInt8 := by bv_decide
+  have e1 : (v.toUInt64 >>> 8).toUInt8 = (v >>> 8).toUInt8 := by bv_decide
+  have e2 : (v.toUInt64 >>> 8 >>> 8).toUInt8 = (v >>> 16).toUInt8 := by bv_decide
+  have e3 : (v.toUInt64 >>> 8 >>> 8 >>> 8).toUInt8 = (v >>> 24).toUInt8 := by bv_decide
+  have h4 : (4 : USize).toNat = 4 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (show (4:Nat) < 2 ^ 32 by omega) USize.le_size)
+  simp only [pushUInt32LEImpl, pushUInt64LE, h4, pushLEBytes, pushUInt32LE, e0, e1, e2, e3]
 
 @[simp] theorem size_pushUInt32LE (b : ByteArray) (v : UInt32) :
     (b.pushUInt32LE v).size = b.size + 4 := by
@@ -210,13 +227,31 @@ private theorem toUSize_toNat_of_lt {n : Nat} (h : n < USize.size) : n.toUSize.t
       ||| ((ta.bytes[4 * i + 3]'(by omega)).toUInt32 <<< 24)
 
 /-- Read the `i`-th token as a little-endian `UInt32` (proven-in-bounds). -/
-@[implemented_by getImpl]
 def get (ta : TokenArray) (i : Nat) (h : i < ta.size) : UInt32 :=
   have hb := ta.byte_bound h
   (ta.bytes[4 * i]'(by omega)).toUInt32
     ||| ((ta.bytes[4 * i + 1]'(by omega)).toUInt32 <<< 8)
     ||| ((ta.bytes[4 * i + 2]'(by omega)).toUInt32 <<< 16)
     ||| ((ta.bytes[4 * i + 3]'(by omega)).toUInt32 <<< 24)
+
+/-- The wide-load implementation returns exactly the byte-recombination reference
+    body on both branches of its `USize`-addressability guard, so `@[csimp]`
+    compiles `get` as `getImpl` under a kernel-checked proof rather than an
+    unverified `@[implemented_by]`; the only trusted edge left is the wide-load
+    `@[extern]` on `ugetUInt32LE`. -/
+@[csimp] theorem get_eq_impl : @get = @getImpl := by
+  funext ta i h
+  have hb := ta.byte_bound h
+  rw [getImpl]
+  split
+  · rename_i hsz
+    have hds : ta.bytes.size < USize.size := by
+      rw [← hsz]; exact USize.toNat_lt_two_pow_numBits _
+    have hidx : ((4 * i : Nat).toUSize).toNat = 4 * i :=
+      toUSize_toNat_of_lt (show 4 * i < USize.size by omega)
+    rw [get, ByteArray.ugetUInt32LE]
+    simp only [hidx]
+  · rw [get]
 
 /-- The `Array UInt32` model: the token at each index. -/
 def toArray (ta : TokenArray) : Array UInt32 :=

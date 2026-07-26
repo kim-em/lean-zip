@@ -73,8 +73,8 @@ Comparing at matched compression ratios, the Lean implementation:
   ahead — and compressing further — at fflate's densest settings;
 - runs **within ~20% of Rust's miniz_oxide and C's zlib around their default
   levels**, widening to ~1.4–1.7× at their fast and dense extremes; the
-  optimal-parse levels 9/10 reach ratios that zlib, miniz_oxide, Go, Zig, and
-  fflate cannot produce at any setting;
+  optimal-parse levels 9/10 reach ratios that zlib, zlib-rs, zlib-ng,
+  miniz_oxide, Go, Zig, and fflate cannot produce at any setting;
 - trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 3.5–11×, as
   expected for the format.
 

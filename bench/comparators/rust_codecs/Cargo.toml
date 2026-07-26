@@ -1,0 +1,19 @@
+[package]
+name = "lean-zip-rust-codec-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "zlib-rs and zlib-ng raw-DEFLATE comparators for lean-zip"
+
+[features]
+zlib-rs-backend = ["flate2/zlib-rs"]
+zlib-ng-backend = ["flate2/zlib-ng"]
+
+[dependencies]
+flate2 = { version = "1.1", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

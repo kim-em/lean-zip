@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Run the external-language decoders over the fixed libdeflate streams and merge
+"""Run the standalone external decoders over fixed libdeflate streams and merge
 their rows into the decode-density results JSON.
 
 The decode-density experiment (see ZipBenchReport.runDecodeDensity) fixes the
 encoder to libdeflate and measures every decoder on byte-identical raw-DEFLATE
 streams. The in-process decoders (native/zlib/miniz/libdeflate) and the memcpy
 ceiling are timed on the Lean side; this driver covers the external comparators
-(Go / JS / Zig / OCaml) via their `decode` mode:
+(zlib-rs / zlib-ng / Go / JS / Zig / OCaml) via their `decode` mode:
 
     <cmd...> decode <stream.deflate>   ->   stdout JSON
     {"decompress_mbps": Y, "decoded_size": N,
@@ -30,6 +30,8 @@ from benchmark_json import load_routine, require_routine_timing
 
 # key -> (display label, decode-command prefix)
 COMPARATORS = {
+    "zlib_rs": ("Rust zlib-rs",            ["bench/comparators/rust_codecs/target/release/bench-zlib-rs", "decode"]),
+    "zlib_ng": ("zlib-ng",                 ["bench/comparators/rust_codecs/target/release/bench-zlib-ng", "decode"]),
     "go":    ("Go compress/flate",      ["bench/comparators/go/bench-go", "decode"]),
     "js":    ("JS fflate (Node)",       ["node", "bench/comparators/js/bench.mjs", "decode"]),
     "zig":   ("Zig std.compress.flate", ["bench/comparators/zig/bench-zig", "decode"]),
@@ -120,7 +122,9 @@ def main():
     for rows in added.values():
         results.extend(rows)
     doc["results"] = results
-    results_path.write_text(json.dumps(doc, indent=0))
+    # Match the zero-space indentation of the committed decode artifact so
+    # adding one decoder does not rewrite every pre-existing row.
+    results_path.write_text(json.dumps(doc, indent=0) + "\n")
     total = sum(len(r) for r in added.values())
     print(f"merged {total} external decode rows from {list(added)} -> {results_path}", file=sys.stderr)
 
