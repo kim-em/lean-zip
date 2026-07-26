@@ -1341,8 +1341,8 @@ structure L7MatchConfig where
 
 /-- Matcher knobs for each level-7 content profile.  The shallow profile keeps
     level 5's size-aware chain-22 retune on inputs of at least 4 MiB.  Split
-    cadence is intentionally separate (`l7SplitCheckTokensFor`): most profiles
-    use 512 tokens, with four explicitly measured exceptions. -/
+    cadence is intentionally separate (`l7SplitCheckTokensFor`), with its own
+    measured profile-and-size policy. -/
 def l7MatchConfig (data : ByteArray) : L7Profile → L7MatchConfig
   | .shallow =>
       let chain := if l5LargeInputMinSize ≤ data.size then 22 else 24
@@ -1736,21 +1736,53 @@ def splitNumClasses : Nat := 10
     `NUM_OBSERVATIONS_PER_BLOCK_CHECK`): the recent-window size in tokens. -/
 def splitCheckTokens : Nat := 512
 
-/-- Observation-window cadence paired with a selected level-7 profile.
+/-- Lower edge of the shallow-profile band that benefits from a 4096-token
+    split-check cadence. -/
+def l7ShallowCoarseMinSize : Nat := 384 * 1024
 
-    The 2016-token shallow cadence is part of the measured large-L5 point, not
-    merely an emitter detail.  Three 1024-token rows are measured dual wins:
-    fewer prepared blocks and smaller output on x-ray (`h3Fast`), nci
-    (`chain128LongProbe32`), and small ptt5-like inputs (`chain128Probe16`).
-    Other profiles retain level 7's established 512-token cadence. -/
-def l7SplitCheckTokensFor (data : ByteArray) (profile : L7Profile) : Nat :=
-  if l7UseLargeShallow data profile then 2016
+/-- Upper edge of the shallow-profile 4096-token split-check band, and lower
+    edge of its 1024-token band. -/
+def l7ShallowCoarseMaxSize : Nat := 448 * 1024
+
+/-- Upper edge of the shallow-profile 1024-token split-check band. -/
+def l7ShallowMediumMaxSize : Nat := 512 * 1024
+
+/-- Upper input-size edge for the moderate-size `h3Balanced` 1024-token
+    split-check specialization. -/
+def l7BalancedMediumMaxSize : Nat := 7 * 1000 * 1000
+
+/-- Observation-window cadence paired with a selected level-7 profile and
+    input size.
+
+    This policy keeps the established 512-token default and the large-shallow
+    2016-token point.  A median-of-five Canterbury + Silesia production sweep
+    selected coarser checks where the saved boundary work repeated end to end:
+    4096 for medium-small shallow text, small `chain128Probe16`, and
+    `chain96Probe16`/`chain128LongProbe32`; 1024 for the next shallow size band,
+    moderate-size `h3Balanced`, large `chain64Probe16`, and large `h3Fast`.
+    The selector changes only a heuristic cut list; the emitter clamps arbitrary
+    cuts, so these size/profile choices add no roundtrip proof obligation. -/
+def l7SplitCheckTokensForSize (size : Nat) (profile : L7Profile) : Nat :=
+  if profile == .shallow && l5LargeInputMinSize ≤ size then 2016
   else
     match profile with
-    | .h3Fast => if h3ProbeMinSize ≤ data.size then 1024 else splitCheckTokens
-    | .chain128LongProbe32 => 1024
-    | .chain128Probe16 => if data.size < h3ProbeMinSize then 1024 else splitCheckTokens
+    | .shallow =>
+        if l7ShallowCoarseMinSize ≤ size && size < l7ShallowCoarseMaxSize then 4096
+        else if l7ShallowCoarseMaxSize ≤ size && size < l7ShallowMediumMaxSize then 1024
+        else splitCheckTokens
+    | .h3Fast => if h3ProbeMinSize ≤ size then 1024 else splitCheckTokens
+    | .h3Balanced =>
+        if h3ProbeMinSize ≤ size && size < l7BalancedMediumMaxSize then 1024
+        else splitCheckTokens
+    | .chain64Probe16 => if h3ProbeMinSize ≤ size then 1024 else splitCheckTokens
+    | .chain96Probe16 => 4096
+    | .chain128LongProbe32 => 4096
+    | .chain128Probe16 => if size < h3ProbeMinSize then 4096 else splitCheckTokens
     | _ => splitCheckTokens
+
+/-- `l7SplitCheckTokensForSize` at the input's actual size. -/
+def l7SplitCheckTokensFor (data : ByteArray) (profile : L7Profile) : Nat :=
+  l7SplitCheckTokensForSize data.size profile
 
 /-- Per-level observation-window cadence for the shared-block split heuristic.
     Large-stream L5 uses a coarser window: at its shallow chain, checking every
