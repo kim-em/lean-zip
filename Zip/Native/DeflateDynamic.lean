@@ -1507,8 +1507,8 @@ def l7MatchPFor (data : ByteArray) (profile : L7Profile) : TokenArray :=
   else
     let cfg := l7MatchConfig data profile
     if cfg.useH3 then
-      lz77ChainLazyIterPMerged data cfg.chainDepth 32768 1000000000 cfg.goodMatch cfg.niceLen
-        cfg.lazyDepth true cfg.lazy2Steps
+      lz77ChainLazyIterPMergedH3 data cfg.chainDepth 32768 1000000000 cfg.goodMatch
+        cfg.niceLen cfg.lazyDepth cfg.lazy2Steps
     else
       lz77ChainLazyIterPMergedNoH3 data cfg.chainDepth 32768 1000000000 cfg.goodMatch
         cfg.niceLen cfg.lazyDepth cfg.lazy2Steps

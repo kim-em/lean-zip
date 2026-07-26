@@ -253,7 +253,8 @@ theorem l7MatchPFor_eq (data : ByteArray) (profile : L7Profile) :
     exact lz77ChainLazyIterP_eq data 22 32768 1000000000 64 65 5 false 1
   · rw [if_neg hs]
     by_cases hh : (l7MatchConfig data profile).useH3 = true
-    · simp only [hh, ↓reduceIte, lz77ChainLazyIterPMerged_eq]
+    · simp only [hh, ↓reduceIte, lz77ChainLazyIterPMergedH3,
+        lz77ChainLazyIterPMerged_eq]
       exact lz77ChainLazyIterP_eq data (l7MatchConfig data profile).chainDepth 32768
         1000000000 (l7MatchConfig data profile).goodMatch
         (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
@@ -288,7 +289,8 @@ theorem l7MatchPFor_map (data : ByteArray) (profile : L7Profile) :
       (by omega) (by omega)
   · rw [if_neg hs]
     by_cases hh : (l7MatchConfig data profile).useH3 = true
-    · simp only [hh, ↓reduceIte, lz77ChainLazyIterPMerged_eq]
+    · simp only [hh, ↓reduceIte, lz77ChainLazyIterPMergedH3,
+        lz77ChainLazyIterPMerged_eq]
       exact lz77ChainLazyIterP_map data (l7MatchConfig data profile).chainDepth 32768
         1000000000 (l7MatchConfig data profile).goodMatch
         (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
