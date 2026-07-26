@@ -42,8 +42,8 @@ notes.
    The question mark appears half a beat after the rest of the title.
 2. Replace the title with a split terminal. The left pane is labelled
    `miniz_oxide (Rust)`, and the right pane is labelled `lean-zip (Lean)`.
-   Type the two commands from `blog.md`, but do not wait through five seconds of
-   footage.
+   Type the two commands from the blog post, but do not wait through five
+   seconds of footage.
 3. Reveal the dated result cards together. Use the committed nine-run medians
    from `bench/results/whole_tar_l6.json` at `696ce7f2` on `chungus2`: 5.777 s
    and 68,112,144 bytes for Rust, then 5.629 s and 67,943,851 bytes for Lean.
@@ -499,8 +499,10 @@ contains the length-limiter fix and an unisolated tuning baseline.
 
 Three complete benchmark snapshots are available for the opening cards:
 
-- the current `blog.md` shell block: 5.75 s and 68,112,444 bytes for Rust,
-  then 5.67 s and 67,944,300 bytes for Lean
+- the published blog post's shell block (https://kim-em.github.io/blog/2026-7-24-why-lean-is-faster-than-rust/),
+  which is re-measured whenever the codec moves and so is the freshest of the
+  three; at the time of writing, 5.78 s and 68,112,144 bytes for Rust, then
+  4.97 s and 67,944,712 bytes for Lean
 - the reproducible committed `bench/results/whole_tar_l6.json`: nine
   alternating runs on `chungus2` at commit `696ce7f2`, with medians of 5.777 s
   and 68,112,144 bytes for Rust, then 5.629 s and 67,943,851 bytes for Lean
@@ -509,9 +511,10 @@ Three complete benchmark snapshots are available for the opening cards:
 
 They disagree slightly because the builds, crate versions, machines, and timing
 summaries are not identical. The present Scene 1 storyboard chooses the
-committed nine-run source. At picture lock, choose one complete source and
-update both the `blog.md` shell block and the cards together; never combine a
-time from one snapshot with a size from another. The spoken narration
+committed nine-run source. At picture lock, choose one complete source; never combine a
+time from one snapshot with a size from another. The blog post's block now
+lives in the kim-em.github.io repository, so keeping it in step with the cards
+is a cross-repository edit. The spoken narration
 deliberately avoids exact values.
 
 Use these repository assets:
