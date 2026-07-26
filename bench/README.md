@@ -18,7 +18,7 @@ bench/run.sh --history-only  # render tracked animations from that committed his
 
 That runs [`lake -d bench exe bench-report`](ZipBenchReport.lean) (writes
 [`results/latest.json`](results/latest.json) and dumps the exact payloads), then
-the external-language comparators (see below), then [`plot.py`](plot.py) (writes
+the standalone external comparators (see below), then [`plot.py`](plot.py) (writes
 the static SVGs) and local animation previews. Ratios are deterministic;
 throughput is a **median-of-5 snapshot of the machine recorded in the JSON
 `meta`, for every corpus**. The producer records `meta.timing_aggregation =
@@ -55,14 +55,19 @@ implementations (no SIMD/asm, or GC'd, or JIT'd) — not just the C + SIMD ceili
 | `native` | lean-zip pure-Lean DEFLATE | the thing we are improving; swept **levels 1–10** — since #2638 level 9 is the L9-fast tier and level 10 is the exact-DP crown (always sweep through 10 so the crown stays on the Pareto) |
 | `zlib` | system zlib (FFI) | the ubiquitous baseline |
 | `miniz_oxide` | Rust miniz_oxide (FFI) | widely-used Rust reimplementation |
+| `zlib_rs` | [zlib-rs](https://github.com/trifectatechfoundation/zlib-rs) via Rust `flate2` | optimized pure-Rust zlib implementation; the comparator enables only flate2's zlib-rs backend and emits raw DEFLATE |
+| `zlib_ng` | [zlib-ng](https://github.com/zlib-ng/zlib-ng) via Rust `flate2` | optimized C zlib implementation; built from the same comparator source as zlib-rs so only the backend changes |
 | `libdeflate` | libdeflate (FFI) | optimized C + SIMD — the runtime speed bar; swept over its full **levels 1–12** (native caps at 10, the zlib/miniz FFI at 9), so its densest points (10–12) appear on the Pareto |
 | `zopfli` | zopfli (FFI) | maximum-ratio ceiling — **frozen** (see below); never in the routine matrix |
 
-**Language-native peers** (each a self-verifying CLI under
+**Standalone peers** (each a self-verifying CLI under
 [`comparators/`](comparators), built by
 [`comparators/build_all.sh`](comparators/build_all.sh), timed with the *same*
 methodology as the Lean matrix — median-of-5, `itersFor(size)` iters, throughput
-vs uncompressed bytes — and run over byte-identical dumped payloads):
+vs uncompressed bytes — and run over byte-identical dumped payloads). zlib-rs
+and zlib-ng use the same standalone harness but are listed above because their
+zlib/zlib-ng lineage and platform SIMD make them optimized references rather
+than peers in the no-SIMD language-native comparison group:
 
 | Key | Implementation | Notes |
 |-----|----------------|-------|
@@ -70,6 +75,11 @@ vs uncompressed bytes — and run over byte-identical dumped payloads):
 | `js` | [`fflate`](https://github.com/101arrowz/fflate) on Node | pure JS on V8's JIT (not node's C-zlib binding) |
 | `zig` | Zig stdlib `std.compress.flate` (0.14.1) | pure Zig; **levels 1–3 not implemented upstream** → mapped to the fastest real level, so L1–L4 coincide. 0.15's encoder is an unimplemented `@panic("TODO")`, hence 0.14.1. |
 | `ocaml` | [`decompress`](https://github.com/mirage/decompress) (mirage) | pure OCaml, MirageOS pedigree; slightly different LZ77/Huffman ⇒ a hair worse ratio |
+
+The shared Rust comparator's tracked
+[`Cargo.lock`](comparators/rust_codecs/Cargo.lock) currently pins flate2 1.1.9,
+zlib-rs 0.6.6, and libz-ng-sys 1.1.29, so dashboard refreshes do not silently
+change either backend.
 
 zopfli is the maximum-ratio reference, but it is compress-only, level-less, and
 ~100× slower than zlib — at default iteration count it dominated the wall-clock
@@ -260,7 +270,8 @@ Pipeline (wired into `bench/run.sh` step 3b):
 #    the slow zopfli pass is paid once.
 lake -d bench env bench/.lake/build/bin/bench-report --decode-density \
   bench/results/decode_density.json bench/payloads-deflate
-# 2. time the external decoders (Go / JS / Zig / OCaml) on the same streams
+# 2. time the external decoders (zlib-rs / zlib-ng / Go / JS / Zig / OCaml)
+#    on the same streams
 python3 bench/decode_density.py bench/payloads-deflate bench/results/decode_density.json
 # 3. plot.py auto-detects decode_density.json → graphs/<corpus>_decode_{density,ranking}.svg
 ```
@@ -353,10 +364,11 @@ The #2799 verdict from this A/B is recorded in `plans/track-d-state.md`.
   gives up a little ratio (different LZ77/Huffman). zopfli is the floor (0.279).
 - **Compression speed is the gap — but it's a language-native gap, not a chasm.**
   Throughput stratifies by implementation maturity: libdeflate (C+SIMD) on top,
-  then Zig / miniz_oxide, then Go / zlib, then the JIT'd JS, then OCaml, then
-  `native`. lean-zip is in the pack and at the back, but the distance to the
-  *other pure-language* codecs is a small single-digit factor, not the
-  order-of-magnitude that the C+SIMD ceiling alone suggests.
+  then the optimized zlib-ng / zlib-rs pair, then Zig / miniz_oxide, then Go /
+  zlib, then the JIT'd JS, then OCaml, then `native`. lean-zip is in the pack
+  and at the back, but the distance to the *other pure-language* codecs is a
+  small single-digit factor, not the order-of-magnitude that the C+SIMD ceiling
+  alone suggests.
 - **Decompression is behind too on real data** — native ~94 MB/s vs zlib ~692
   (≈7×) on Canterbury, ~100 vs ~365 (≈4×) on Silesia. (The earlier "competitive"
   read came from the synthetic match-heavy text, which decoded as near-pure

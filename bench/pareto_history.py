@@ -208,7 +208,19 @@ def drop_spikes(frames):
 
 def drop_noise(frames):
     """Drop frames that move only within throughput noise vs the last
-    kept frame; first/last frames and level-set changes always stay."""
+    kept frame; the first frame and level-set changes always stay. The last
+    distinct native frame stays too. Exactly identical snapshots at the tail
+    are removed first: a reference-only dashboard refresh must not masquerade
+    as native progress merely because it committed a new `latest.json`."""
+    if len(frames) <= 2:
+        return frames
+    while len(frames) > 2 \
+            and frames[-1]["points"] == frames[-2]["points"] \
+            and frames[-1].get("timing") == frames[-2].get("timing") \
+            and frames[-2].get("timing") == frames[-3].get("timing"):
+        print(f"duplicate: drop {frames[-1]['commit']} (native points unchanged)",
+              file=sys.stderr)
+        frames = frames[:-1]
     if len(frames) <= 1:
         return frames
     out = [frames[0]]

@@ -240,10 +240,10 @@ def shell (cmd : String) (args : List String) : IO String := do
   catch _ => pure "unknown"
 
 /-- Write the exact bytes of every real-corpus payload to a per-corpus subdir as
-    `dir/<corpus>/<file>.bin`, so external-language comparators (Go, Zig, OCaml,
-    JS) compress byte-identical input and their ratios line up with the native
-    rows. `run_external.py` reconstructs the `<corpus>/<file>` pattern from the
-    path. -/
+    `dir/<corpus>/<file>.bin`, so standalone external comparators (zlib-rs,
+    zlib-ng, Go, Zig, OCaml, JS) compress byte-identical input and their ratios
+    line up with the native rows. `run_external.py` reconstructs the
+    `<corpus>/<file>` pattern from the path. -/
 def dumpPayloads (dir : String) : IO Unit := do
   IO.FS.createDirAll dir
   let corpora ← loadCorpora

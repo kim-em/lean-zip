@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the external-language DEFLATE comparators and merge their rows into the
+"""Run the standalone external DEFLATE comparators and merge their rows into the
 Track D results JSON.
 
 Each comparator is a prebuilt CLI (see build_all.sh) honouring the contract:
@@ -31,6 +31,8 @@ from benchmark_json import load_routine, require_routine_timing
 
 # key -> (display label for warnings, run-command prefix, levels to sample)
 COMPARATORS = {
+    "zlib_rs": ("Rust zlib-rs",              ["bench/comparators/rust_codecs/target/release/bench-zlib-rs"], range(1, 10)),
+    "zlib_ng": ("zlib-ng",                   ["bench/comparators/rust_codecs/target/release/bench-zlib-ng"], range(1, 10)),
     "go":    ("Go compress/flate",        ["bench/comparators/go/bench-go"],          range(1, 10)),
     "js":    ("JS fflate (Node)",         ["node", "bench/comparators/js/bench.mjs"],  range(1, 10)),
     "zig":   ("Zig std.compress.flate",   ["bench/comparators/zig/bench-zig"],         range(1, 10)),
@@ -118,7 +120,9 @@ def main():
     for rows in added.values():
         results.extend(rows)
     doc["results"] = results
-    results_path.write_text(json.dumps(doc, indent=0))
+    # Match the one-space indentation of the committed benchmark artifacts so
+    # adding one comparator does not rewrite every pre-existing row.
+    results_path.write_text(json.dumps(doc, indent=1) + "\n")
     total = sum(len(r) for r in added.values())
     print(f"merged {total} external rows from {list(added)} -> {results_path}", file=sys.stderr)
 

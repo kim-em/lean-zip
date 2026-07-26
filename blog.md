@@ -8,12 +8,12 @@ Let me show you something:
 # silesia.tar: the 212 MB standard corpus. Each tool compresses at level 6
 # and prints the resulting size in bytes; `time` reports wall-clock.
 $ time deflate-rust silesia.tar   # miniz_oxide (pure Rust, no 'unsafe')
-68112444
-real    0m5.75s
+68112144
+real    0m5.77s
 
 $ time deflate-lean silesia.tar   # lean-zip
-67944300
-real    0m5.67s
+67944712
+real    0m5.24s
 ```
 
 What's going on here? This is the [`lean-zip`](https://github.com/kim-em/lean-zip) implementation of [`DEFLATE`](https://www.rfc-editor.org/rfc/rfc1951)
@@ -39,7 +39,7 @@ These graphs show the "Pareto frontier", describing the compression ratio vs thr
 
 (Note these graphs are measuring the geometric mean of the compression ratios across the constituent files in `silesia.tar`, so it's a slightly different measurement than our first measurement.)
 
-We're not nearly as fast as `miniz_oxide`'s L1 (the least compression, fastest throughput setting). For `miniz_oxide`'s L2-L5, at the corresponding compression ratio we're a bit slower (worst is L4, 28% slower). But then for L6-L9, `miniz_oxide` is dominated: `lean-zip` is capable of compressing faster and better. The headline numbers in this post are taken from L6, the typical default for zip algorithms. At `miniz_oxide`'s L9 we're a full 58% faster.
+We're not nearly as fast as `miniz_oxide`'s L1 (the least compression, fastest throughput setting). At its L2 we now win outright: very slightly better compression, at 20% higher throughput. For `miniz_oxide`'s L3 and L4, at the corresponding compression ratio we're a bit slower (worst is L4, 22% slower), and at L5 we've drawn level. But then for L6-L9, `miniz_oxide` is dominated: `lean-zip` is capable of compressing faster and better. The headline numbers in this post are taken from L6, the typical default for zip algorithms. At `miniz_oxide`'s L9 we're a full 62% faster.
 
 I still can't quite believe that!
 
@@ -57,7 +57,7 @@ There are also some caveats that are worth thinking about:
 * There are some trust gaps because we use Lean's `@[extern]` annotation
 to provide a few low-level functions (e.g. word-sized reads from a `ByteArray`) that are currently missing from the Lean runtime. We're pushing Lean's readiness as a general purpose programming language, so these will probably be added to the runtime soon.
 * Proving that our implementation round-trips, produces a valid DEFLATE stream, and accepts any valid stream, is a good start, but doesn't address other interesting questions, e.g. absence of side channels or verified performance guarantees.
-* Our decompression implementation is still quite a bit slower: `miniz_oxide` decompresses about 1.7x faster.
+* Our decompression implementation is still slower: `miniz_oxide` decompresses about 1.45x faster.
 
 I'm not **really** claiming that "Lean is faster than Rust". It's still much easier to sit down and produce a performant implementation in Rust than it is in Lean!
 This experiment merely shows that:

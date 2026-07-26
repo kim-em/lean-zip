@@ -2,7 +2,8 @@
 # Regenerate the Track D benchmark dashboard end to end:
 #   1. build + run the matrix    → bench/results/latest.json  (lake exe bench-report)
 #   2. dump the exact payloads    → bench/payloads/<corpus>/*.bin
-#   3. build + run the external-language comparators (Go / JS / Zig / OCaml),
+#   3. build + run the external comparators
+#      (zlib-rs / zlib-ng / Go / JS / Zig / OCaml),
 #      merging their rows into the same JSON
 #   4. render the static SVGs and untracked animation previews
 #

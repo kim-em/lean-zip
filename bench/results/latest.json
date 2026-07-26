@@ -17488,6 +17488,4146 @@
    "ratio": 0.1317,
    "compress_mbps": 56.44,
    "decompress_mbps": 180.91
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 1,
+   "out_size": 84229,
+   "ratio": 0.5538,
+   "compress_mbps": 349.33,
+   "decompress_mbps": 567.58
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 2,
+   "out_size": 61116,
+   "ratio": 0.4018,
+   "compress_mbps": 168.96,
+   "decompress_mbps": 715.75
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 3,
+   "out_size": 57300,
+   "ratio": 0.3768,
+   "compress_mbps": 136.95,
+   "decompress_mbps": 837.99
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 4,
+   "out_size": 55763,
+   "ratio": 0.3666,
+   "compress_mbps": 98.24,
+   "decompress_mbps": 845.72
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 5,
+   "out_size": 54940,
+   "ratio": 0.3612,
+   "compress_mbps": 88.82,
+   "decompress_mbps": 845.47
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 6,
+   "out_size": 54637,
+   "ratio": 0.3592,
+   "compress_mbps": 67.97,
+   "decompress_mbps": 849.99
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 7,
+   "out_size": 54041,
+   "ratio": 0.3553,
+   "compress_mbps": 43.51,
+   "decompress_mbps": 781.08
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 8,
+   "out_size": 54014,
+   "ratio": 0.3551,
+   "compress_mbps": 37.82,
+   "decompress_mbps": 779.2
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 9,
+   "out_size": 54220,
+   "ratio": 0.3565,
+   "compress_mbps": 32.85,
+   "decompress_mbps": 890.57
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 1,
+   "out_size": 73728,
+   "ratio": 0.589,
+   "compress_mbps": 322.62,
+   "decompress_mbps": 522.44
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 2,
+   "out_size": 53390,
+   "ratio": 0.4265,
+   "compress_mbps": 156.14,
+   "decompress_mbps": 659.07
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 3,
+   "out_size": 50676,
+   "ratio": 0.4048,
+   "compress_mbps": 127.67,
+   "decompress_mbps": 759.36
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 4,
+   "out_size": 49834,
+   "ratio": 0.3981,
+   "compress_mbps": 93.76,
+   "decompress_mbps": 778.67
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 5,
+   "out_size": 49357,
+   "ratio": 0.3943,
+   "compress_mbps": 85.89,
+   "decompress_mbps": 780.91
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 6,
+   "out_size": 49196,
+   "ratio": 0.393,
+   "compress_mbps": 71.7,
+   "decompress_mbps": 773.5
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 7,
+   "out_size": 48531,
+   "ratio": 0.3877,
+   "compress_mbps": 45.86,
+   "decompress_mbps": 698.49
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 8,
+   "out_size": 48531,
+   "ratio": 0.3877,
+   "compress_mbps": 44.87,
+   "decompress_mbps": 703.15
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 9,
+   "out_size": 48850,
+   "ratio": 0.3902,
+   "compress_mbps": 31.08,
+   "decompress_mbps": 802.49
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 1,
+   "out_size": 10980,
+   "ratio": 0.4463,
+   "compress_mbps": 633.83,
+   "decompress_mbps": 1130.27
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 2,
+   "out_size": 8627,
+   "ratio": 0.3506,
+   "compress_mbps": 386.53,
+   "decompress_mbps": 1098.72
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 3,
+   "out_size": 8260,
+   "ratio": 0.3357,
+   "compress_mbps": 287.21,
+   "decompress_mbps": 1120.02
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 4,
+   "out_size": 8064,
+   "ratio": 0.3278,
+   "compress_mbps": 249.57,
+   "decompress_mbps": 1151.12
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 5,
+   "out_size": 7967,
+   "ratio": 0.3238,
+   "compress_mbps": 233.51,
+   "decompress_mbps": 1168.26
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 6,
+   "out_size": 7949,
+   "ratio": 0.3231,
+   "compress_mbps": 175.94,
+   "decompress_mbps": 1158.22
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 7,
+   "out_size": 7895,
+   "ratio": 0.3209,
+   "compress_mbps": 125.26,
+   "decompress_mbps": 1180.96
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 8,
+   "out_size": 7896,
+   "ratio": 0.3209,
+   "compress_mbps": 112.34,
+   "decompress_mbps": 1194.73
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 9,
+   "out_size": 7969,
+   "ratio": 0.3239,
+   "compress_mbps": 80.53,
+   "decompress_mbps": 1232.38
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 1,
+   "out_size": 4549,
+   "ratio": 0.408,
+   "compress_mbps": 607.84,
+   "decompress_mbps": 1069.77
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 2,
+   "out_size": 3525,
+   "ratio": 0.3161,
+   "compress_mbps": 346.8,
+   "decompress_mbps": 1002.87
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 3,
+   "out_size": 3278,
+   "ratio": 0.294,
+   "compress_mbps": 276.26,
+   "decompress_mbps": 1049.29
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 4,
+   "out_size": 3194,
+   "ratio": 0.2865,
+   "compress_mbps": 240.23,
+   "decompress_mbps": 1080.31
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 5,
+   "out_size": 3135,
+   "ratio": 0.2812,
+   "compress_mbps": 225.61,
+   "decompress_mbps": 1093.98
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 6,
+   "out_size": 3123,
+   "ratio": 0.2801,
+   "compress_mbps": 187.49,
+   "decompress_mbps": 1103.17
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 7,
+   "out_size": 3111,
+   "ratio": 0.279,
+   "compress_mbps": 134.14,
+   "decompress_mbps": 1108.92
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 8,
+   "out_size": 3111,
+   "ratio": 0.279,
+   "compress_mbps": 120.25,
+   "decompress_mbps": 1113.22
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 9,
+   "out_size": 3112,
+   "ratio": 0.2791,
+   "compress_mbps": 157.04,
+   "decompress_mbps": 1101.69
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 1,
+   "out_size": 1678,
+   "ratio": 0.451,
+   "compress_mbps": 446.42,
+   "decompress_mbps": 775.49
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 2,
+   "out_size": 1286,
+   "ratio": 0.3456,
+   "compress_mbps": 218.52,
+   "decompress_mbps": 651.36
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 3,
+   "out_size": 1226,
+   "ratio": 0.3295,
+   "compress_mbps": 184.7,
+   "decompress_mbps": 685.99
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 4,
+   "out_size": 1220,
+   "ratio": 0.3279,
+   "compress_mbps": 177.65,
+   "decompress_mbps": 688.79
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 5,
+   "out_size": 1211,
+   "ratio": 0.3255,
+   "compress_mbps": 169.14,
+   "decompress_mbps": 681.25
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 6,
+   "out_size": 1211,
+   "ratio": 0.3255,
+   "compress_mbps": 165.09,
+   "decompress_mbps": 679.42
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 7,
+   "out_size": 1206,
+   "ratio": 0.3241,
+   "compress_mbps": 136.68,
+   "decompress_mbps": 683.48
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 8,
+   "out_size": 1206,
+   "ratio": 0.3241,
+   "compress_mbps": 135.06,
+   "decompress_mbps": 687.32
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 9,
+   "out_size": 1216,
+   "ratio": 0.3268,
+   "compress_mbps": 134.11,
+   "decompress_mbps": 688.92
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 1,
+   "out_size": 349423,
+   "ratio": 0.3393,
+   "compress_mbps": 663.0,
+   "decompress_mbps": 1420.1
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 2,
+   "out_size": 235105,
+   "ratio": 0.2283,
+   "compress_mbps": 349.2,
+   "decompress_mbps": 1458.66
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 3,
+   "out_size": 221441,
+   "ratio": 0.215,
+   "compress_mbps": 276.94,
+   "decompress_mbps": 1661.91
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 4,
+   "out_size": 218758,
+   "ratio": 0.2124,
+   "compress_mbps": 222.36,
+   "decompress_mbps": 1717.03
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 5,
+   "out_size": 217435,
+   "ratio": 0.2112,
+   "compress_mbps": 217.83,
+   "decompress_mbps": 1721.33
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 6,
+   "out_size": 217429,
+   "ratio": 0.2111,
+   "compress_mbps": 188.11,
+   "decompress_mbps": 1723.29
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 7,
+   "out_size": 208770,
+   "ratio": 0.2027,
+   "compress_mbps": 70.62,
+   "decompress_mbps": 1690.68
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 8,
+   "out_size": 207007,
+   "ratio": 0.201,
+   "compress_mbps": 7.94,
+   "decompress_mbps": 1744.0
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 9,
+   "out_size": 207025,
+   "ratio": 0.201,
+   "compress_mbps": 7.11,
+   "decompress_mbps": 1746.05
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 1,
+   "out_size": 224093,
+   "ratio": 0.5251,
+   "compress_mbps": 330.68,
+   "decompress_mbps": 602.21
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 2,
+   "out_size": 163564,
+   "ratio": 0.3833,
+   "compress_mbps": 175.83,
+   "decompress_mbps": 709.26
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 3,
+   "out_size": 151962,
+   "ratio": 0.3561,
+   "compress_mbps": 140.58,
+   "decompress_mbps": 804.11
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 4,
+   "out_size": 148192,
+   "ratio": 0.3473,
+   "compress_mbps": 101.34,
+   "decompress_mbps": 832.82
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 5,
+   "out_size": 146218,
+   "ratio": 0.3426,
+   "compress_mbps": 92.41,
+   "decompress_mbps": 820.55
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 6,
+   "out_size": 145647,
+   "ratio": 0.3413,
+   "compress_mbps": 73.43,
+   "decompress_mbps": 825.58
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 7,
+   "out_size": 144126,
+   "ratio": 0.3377,
+   "compress_mbps": 46.99,
+   "decompress_mbps": 776.51
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 8,
+   "out_size": 144081,
+   "ratio": 0.3376,
+   "compress_mbps": 42.84,
+   "decompress_mbps": 778.22
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 9,
+   "out_size": 144375,
+   "ratio": 0.3383,
+   "compress_mbps": 33.85,
+   "decompress_mbps": 866.36
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 1,
+   "out_size": 301321,
+   "ratio": 0.6253,
+   "compress_mbps": 255.47,
+   "decompress_mbps": 475.62
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 2,
+   "out_size": 213993,
+   "ratio": 0.4441,
+   "compress_mbps": 145.27,
+   "decompress_mbps": 568.8
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 3,
+   "out_size": 203289,
+   "ratio": 0.4219,
+   "compress_mbps": 122.31,
+   "decompress_mbps": 631.83
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 4,
+   "out_size": 199296,
+   "ratio": 0.4136,
+   "compress_mbps": 84.99,
+   "decompress_mbps": 643.74
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 5,
+   "out_size": 197230,
+   "ratio": 0.4093,
+   "compress_mbps": 79.17,
+   "decompress_mbps": 644.29
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 6,
+   "out_size": 196119,
+   "ratio": 0.407,
+   "compress_mbps": 60.71,
+   "decompress_mbps": 649.79
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 7,
+   "out_size": 193220,
+   "ratio": 0.401,
+   "compress_mbps": 36.21,
+   "decompress_mbps": 591.14
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 8,
+   "out_size": 193205,
+   "ratio": 0.401,
+   "compress_mbps": 34.14,
+   "decompress_mbps": 587.27
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 9,
+   "out_size": 194769,
+   "ratio": 0.4042,
+   "compress_mbps": 27.25,
+   "decompress_mbps": 668.79
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 1,
+   "out_size": 81531,
+   "ratio": 0.1589,
+   "compress_mbps": 1084.77,
+   "decompress_mbps": 1916.91
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 2,
+   "out_size": 59878,
+   "ratio": 0.1167,
+   "compress_mbps": 553.9,
+   "decompress_mbps": 2086.42
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 3,
+   "out_size": 57903,
+   "ratio": 0.1128,
+   "compress_mbps": 428.78,
+   "decompress_mbps": 2159.56
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 4,
+   "out_size": 57086,
+   "ratio": 0.1112,
+   "compress_mbps": 360.51,
+   "decompress_mbps": 2232.54
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 5,
+   "out_size": 54102,
+   "ratio": 0.1054,
+   "compress_mbps": 308.84,
+   "decompress_mbps": 2297.75
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 6,
+   "out_size": 53771,
+   "ratio": 0.1048,
+   "compress_mbps": 214.22,
+   "decompress_mbps": 2351.52
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 7,
+   "out_size": 54669,
+   "ratio": 0.1065,
+   "compress_mbps": 146.43,
+   "decompress_mbps": 2351.75
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 8,
+   "out_size": 52596,
+   "ratio": 0.1025,
+   "compress_mbps": 53.23,
+   "decompress_mbps": 2439.56
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 9,
+   "out_size": 52683,
+   "ratio": 0.1027,
+   "compress_mbps": 30.99,
+   "decompress_mbps": 2299.98
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 1,
+   "out_size": 17222,
+   "ratio": 0.4504,
+   "compress_mbps": 624.36,
+   "decompress_mbps": 1115.42
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 2,
+   "out_size": 14350,
+   "ratio": 0.3753,
+   "compress_mbps": 355.35,
+   "decompress_mbps": 1062.45
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 3,
+   "out_size": 13871,
+   "ratio": 0.3627,
+   "compress_mbps": 210.0,
+   "decompress_mbps": 1089.46
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 4,
+   "out_size": 13739,
+   "ratio": 0.3593,
+   "compress_mbps": 171.24,
+   "decompress_mbps": 1104.84
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 5,
+   "out_size": 13398,
+   "ratio": 0.3504,
+   "compress_mbps": 154.28,
+   "decompress_mbps": 1145.98
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 6,
+   "out_size": 13388,
+   "ratio": 0.3501,
+   "compress_mbps": 129.75,
+   "decompress_mbps": 1146.63
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 7,
+   "out_size": 13242,
+   "ratio": 0.3463,
+   "compress_mbps": 69.1,
+   "decompress_mbps": 1169.69
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 8,
+   "out_size": 13232,
+   "ratio": 0.346,
+   "compress_mbps": 25.98,
+   "decompress_mbps": 1166.28
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 9,
+   "out_size": 12876,
+   "ratio": 0.3367,
+   "compress_mbps": 15.09,
+   "decompress_mbps": 1187.74
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 1,
+   "out_size": 2394,
+   "ratio": 0.5664,
+   "compress_mbps": 399.48,
+   "decompress_mbps": 664.66
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 2,
+   "out_size": 1810,
+   "ratio": 0.4282,
+   "compress_mbps": 205.41,
+   "decompress_mbps": 576.46
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 3,
+   "out_size": 1749,
+   "ratio": 0.4138,
+   "compress_mbps": 180.67,
+   "decompress_mbps": 599.25
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 4,
+   "out_size": 1739,
+   "ratio": 0.4114,
+   "compress_mbps": 174.48,
+   "decompress_mbps": 599.88
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 5,
+   "out_size": 1729,
+   "ratio": 0.409,
+   "compress_mbps": 169.65,
+   "decompress_mbps": 598.81
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 6,
+   "out_size": 1729,
+   "ratio": 0.409,
+   "compress_mbps": 169.87,
+   "decompress_mbps": 605.19
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 7,
+   "out_size": 1721,
+   "ratio": 0.4071,
+   "compress_mbps": 149.36,
+   "decompress_mbps": 599.08
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 8,
+   "out_size": 1721,
+   "ratio": 0.4071,
+   "compress_mbps": 145.23,
+   "decompress_mbps": 606.83
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 9,
+   "out_size": 1730,
+   "ratio": 0.4093,
+   "compress_mbps": 140.61,
+   "decompress_mbps": 603.2
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 1,
+   "out_size": 6023620,
+   "ratio": 0.591,
+   "compress_mbps": 284.55,
+   "decompress_mbps": 544.76
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 2,
+   "out_size": 4303512,
+   "ratio": 0.4222,
+   "compress_mbps": 155.76,
+   "decompress_mbps": 664.21
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 3,
+   "out_size": 4053195,
+   "ratio": 0.3977,
+   "compress_mbps": 128.32,
+   "decompress_mbps": 750.78
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 4,
+   "out_size": 3958360,
+   "ratio": 0.3884,
+   "compress_mbps": 89.95,
+   "decompress_mbps": 776.03
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 5,
+   "out_size": 3916998,
+   "ratio": 0.3843,
+   "compress_mbps": 81.5,
+   "decompress_mbps": 774.87
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 6,
+   "out_size": 3895451,
+   "ratio": 0.3822,
+   "compress_mbps": 63.6,
+   "decompress_mbps": 779.67
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 7,
+   "out_size": 3840989,
+   "ratio": 0.3768,
+   "compress_mbps": 38.89,
+   "decompress_mbps": 712.39
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 8,
+   "out_size": 3840386,
+   "ratio": 0.3768,
+   "compress_mbps": 36.02,
+   "decompress_mbps": 708.92
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 9,
+   "out_size": 3859102,
+   "ratio": 0.3786,
+   "compress_mbps": 29.33,
+   "decompress_mbps": 826.75
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 1,
+   "out_size": 23990827,
+   "ratio": 0.4684,
+   "compress_mbps": 321.71,
+   "decompress_mbps": 668.04
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 2,
+   "out_size": 20547087,
+   "ratio": 0.4011,
+   "compress_mbps": 162.24,
+   "decompress_mbps": 632.44
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 3,
+   "out_size": 19902272,
+   "ratio": 0.3886,
+   "compress_mbps": 133.76,
+   "decompress_mbps": 647.77
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 4,
+   "out_size": 19682090,
+   "ratio": 0.3843,
+   "compress_mbps": 115.36,
+   "decompress_mbps": 654.37
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 5,
+   "out_size": 19459674,
+   "ratio": 0.3799,
+   "compress_mbps": 107.72,
+   "decompress_mbps": 671.03
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 6,
+   "out_size": 19419263,
+   "ratio": 0.3791,
+   "compress_mbps": 88.34,
+   "decompress_mbps": 674.0
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 7,
+   "out_size": 19352619,
+   "ratio": 0.3778,
+   "compress_mbps": 51.64,
+   "decompress_mbps": 682.72
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 8,
+   "out_size": 19340718,
+   "ratio": 0.3776,
+   "compress_mbps": 22.75,
+   "decompress_mbps": 683.39
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 9,
+   "out_size": 19031967,
+   "ratio": 0.3716,
+   "compress_mbps": 28.45,
+   "decompress_mbps": 678.51
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 1,
+   "out_size": 5285467,
+   "ratio": 0.5301,
+   "compress_mbps": 358.79,
+   "decompress_mbps": 747.22
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 2,
+   "out_size": 3775727,
+   "ratio": 0.3787,
+   "compress_mbps": 189.01,
+   "decompress_mbps": 792.43
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 3,
+   "out_size": 3682017,
+   "ratio": 0.3693,
+   "compress_mbps": 161.05,
+   "decompress_mbps": 822.77
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 4,
+   "out_size": 3623194,
+   "ratio": 0.3634,
+   "compress_mbps": 117.73,
+   "decompress_mbps": 848.6
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 5,
+   "out_size": 3610006,
+   "ratio": 0.3621,
+   "compress_mbps": 102.63,
+   "decompress_mbps": 839.9
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 6,
+   "out_size": 3596306,
+   "ratio": 0.3607,
+   "compress_mbps": 73.14,
+   "decompress_mbps": 845.21
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 7,
+   "out_size": 3605712,
+   "ratio": 0.3616,
+   "compress_mbps": 49.29,
+   "decompress_mbps": 810.61
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 8,
+   "out_size": 3605125,
+   "ratio": 0.3616,
+   "compress_mbps": 38.34,
+   "decompress_mbps": 811.85
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 9,
+   "out_size": 3656164,
+   "ratio": 0.3667,
+   "compress_mbps": 29.95,
+   "decompress_mbps": 864.93
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 1,
+   "out_size": 5394705,
+   "ratio": 0.1608,
+   "compress_mbps": 968.76,
+   "decompress_mbps": 1509.51
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 2,
+   "out_size": 4129398,
+   "ratio": 0.1231,
+   "compress_mbps": 568.27,
+   "decompress_mbps": 1661.35
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 3,
+   "out_size": 3687336,
+   "ratio": 0.1099,
+   "compress_mbps": 403.88,
+   "decompress_mbps": 1760.71
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 4,
+   "out_size": 3448167,
+   "ratio": 0.1028,
+   "compress_mbps": 341.05,
+   "decompress_mbps": 1843.33
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 5,
+   "out_size": 3211116,
+   "ratio": 0.0957,
+   "compress_mbps": 283.11,
+   "decompress_mbps": 1760.29
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 6,
+   "out_size": 3143330,
+   "ratio": 0.0937,
+   "compress_mbps": 218.86,
+   "decompress_mbps": 1852.26
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 7,
+   "out_size": 3083618,
+   "ratio": 0.0919,
+   "compress_mbps": 158.13,
+   "decompress_mbps": 1823.32
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 8,
+   "out_size": 2981829,
+   "ratio": 0.0889,
+   "compress_mbps": 71.07,
+   "decompress_mbps": 1815.0
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 9,
+   "out_size": 2998518,
+   "ratio": 0.0894,
+   "compress_mbps": 74.59,
+   "decompress_mbps": 1841.77
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 1,
+   "out_size": 3897216,
+   "ratio": 0.6335,
+   "compress_mbps": 226.33,
+   "decompress_mbps": 523.38
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 2,
+   "out_size": 3315552,
+   "ratio": 0.5389,
+   "compress_mbps": 109.1,
+   "decompress_mbps": 477.85
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 3,
+   "out_size": 3233371,
+   "ratio": 0.5256,
+   "compress_mbps": 92.86,
+   "decompress_mbps": 490.4
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 4,
+   "out_size": 3211925,
+   "ratio": 0.5221,
+   "compress_mbps": 83.3,
+   "decompress_mbps": 496.41
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 5,
+   "out_size": 3191351,
+   "ratio": 0.5187,
+   "compress_mbps": 79.56,
+   "decompress_mbps": 505.56
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 6,
+   "out_size": 3187658,
+   "ratio": 0.5181,
+   "compress_mbps": 74.14,
+   "decompress_mbps": 503.47
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 7,
+   "out_size": 3168780,
+   "ratio": 0.5151,
+   "compress_mbps": 54.03,
+   "decompress_mbps": 523.7
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 8,
+   "out_size": 3167582,
+   "ratio": 0.5149,
+   "compress_mbps": 43.81,
+   "decompress_mbps": 523.96
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 9,
+   "out_size": 3078267,
+   "ratio": 0.5004,
+   "compress_mbps": 32.37,
+   "decompress_mbps": 486.3
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 1,
+   "out_size": 4568313,
+   "ratio": 0.453,
+   "compress_mbps": 418.41,
+   "decompress_mbps": 983.18
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 2,
+   "out_size": 3904433,
+   "ratio": 0.3871,
+   "compress_mbps": 211.34,
+   "decompress_mbps": 868.14
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 3,
+   "out_size": 3825199,
+   "ratio": 0.3793,
+   "compress_mbps": 154.38,
+   "decompress_mbps": 897.03
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 4,
+   "out_size": 3774735,
+   "ratio": 0.3743,
+   "compress_mbps": 132.38,
+   "decompress_mbps": 897.0
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 5,
+   "out_size": 3678300,
+   "ratio": 0.3647,
+   "compress_mbps": 128.15,
+   "decompress_mbps": 967.7
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 6,
+   "out_size": 3676108,
+   "ratio": 0.3645,
+   "compress_mbps": 126.23,
+   "decompress_mbps": 970.57
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 7,
+   "out_size": 3663157,
+   "ratio": 0.3632,
+   "compress_mbps": 107.58,
+   "decompress_mbps": 966.75
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 8,
+   "out_size": 3663159,
+   "ratio": 0.3632,
+   "compress_mbps": 103.57,
+   "decompress_mbps": 969.06
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 9,
+   "out_size": 3667502,
+   "ratio": 0.3636,
+   "compress_mbps": 67.57,
+   "decompress_mbps": 913.44
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 1,
+   "out_size": 3185858,
+   "ratio": 0.4807,
+   "compress_mbps": 380.0,
+   "decompress_mbps": 764.64
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 2,
+   "out_size": 2272542,
+   "ratio": 0.3429,
+   "compress_mbps": 207.2,
+   "decompress_mbps": 939.91
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 3,
+   "out_size": 2077027,
+   "ratio": 0.3134,
+   "compress_mbps": 163.4,
+   "decompress_mbps": 1062.26
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 4,
+   "out_size": 1972118,
+   "ratio": 0.2976,
+   "compress_mbps": 107.91,
+   "decompress_mbps": 1139.95
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 5,
+   "out_size": 1919142,
+   "ratio": 0.2896,
+   "compress_mbps": 91.02,
+   "decompress_mbps": 1140.13
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 6,
+   "out_size": 1876526,
+   "ratio": 0.2832,
+   "compress_mbps": 52.19,
+   "decompress_mbps": 1167.76
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 7,
+   "out_size": 1827382,
+   "ratio": 0.2757,
+   "compress_mbps": 29.36,
+   "decompress_mbps": 1016.49
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 8,
+   "out_size": 1820698,
+   "ratio": 0.2747,
+   "compress_mbps": 19.01,
+   "decompress_mbps": 1001.73
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 9,
+   "out_size": 1826397,
+   "ratio": 0.2756,
+   "compress_mbps": 25.56,
+   "decompress_mbps": 1082.96
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 1,
+   "out_size": 7543749,
+   "ratio": 0.3491,
+   "compress_mbps": 462.21,
+   "decompress_mbps": 858.12
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 2,
+   "out_size": 6102427,
+   "ratio": 0.2824,
+   "compress_mbps": 242.45,
+   "decompress_mbps": 911.33
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 3,
+   "out_size": 5736964,
+   "ratio": 0.2655,
+   "compress_mbps": 193.93,
+   "decompress_mbps": 976.86
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 4,
+   "out_size": 5610373,
+   "ratio": 0.2597,
+   "compress_mbps": 156.48,
+   "decompress_mbps": 969.37
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 5,
+   "out_size": 5519771,
+   "ratio": 0.2555,
+   "compress_mbps": 143.34,
+   "decompress_mbps": 988.62
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 6,
+   "out_size": 5501141,
+   "ratio": 0.2546,
+   "compress_mbps": 114.16,
+   "decompress_mbps": 955.9
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 7,
+   "out_size": 5420718,
+   "ratio": 0.2509,
+   "compress_mbps": 76.63,
+   "decompress_mbps": 968.6
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 8,
+   "out_size": 5409347,
+   "ratio": 0.2504,
+   "compress_mbps": 55.1,
+   "decompress_mbps": 988.61
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 9,
+   "out_size": 5406346,
+   "ratio": 0.2502,
+   "compress_mbps": 52.64,
+   "decompress_mbps": 1037.57
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 1,
+   "out_size": 6267384,
+   "ratio": 0.8642,
+   "compress_mbps": 172.71,
+   "decompress_mbps": 489.38
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 2,
+   "out_size": 5549280,
+   "ratio": 0.7652,
+   "compress_mbps": 88.26,
+   "decompress_mbps": 500.67
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 3,
+   "out_size": 5497477,
+   "ratio": 0.7581,
+   "compress_mbps": 76.82,
+   "decompress_mbps": 506.48
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 4,
+   "out_size": 5461348,
+   "ratio": 0.7531,
+   "compress_mbps": 63.86,
+   "decompress_mbps": 498.19
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 5,
+   "out_size": 5441963,
+   "ratio": 0.7504,
+   "compress_mbps": 59.76,
+   "decompress_mbps": 492.08
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 6,
+   "out_size": 5437924,
+   "ratio": 0.7499,
+   "compress_mbps": 57.48,
+   "decompress_mbps": 497.84
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 7,
+   "out_size": 5427910,
+   "ratio": 0.7485,
+   "compress_mbps": 47.32,
+   "decompress_mbps": 498.39
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 8,
+   "out_size": 5427657,
+   "ratio": 0.7484,
+   "compress_mbps": 46.21,
+   "decompress_mbps": 498.38
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 9,
+   "out_size": 5318080,
+   "ratio": 0.7333,
+   "compress_mbps": 37.3,
+   "decompress_mbps": 476.62
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 1,
+   "out_size": 18913196,
+   "ratio": 0.4562,
+   "compress_mbps": 345.38,
+   "decompress_mbps": 617.17
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 2,
+   "out_size": 14152942,
+   "ratio": 0.3414,
+   "compress_mbps": 184.08,
+   "decompress_mbps": 687.45
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 3,
+   "out_size": 13004993,
+   "ratio": 0.3137,
+   "compress_mbps": 150.68,
+   "decompress_mbps": 763.19
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 4,
+   "out_size": 12551202,
+   "ratio": 0.3027,
+   "compress_mbps": 119.15,
+   "decompress_mbps": 783.32
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 5,
+   "out_size": 12295652,
+   "ratio": 0.2966,
+   "compress_mbps": 108.78,
+   "decompress_mbps": 771.78
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 6,
+   "out_size": 12198396,
+   "ratio": 0.2942,
+   "compress_mbps": 79.49,
+   "decompress_mbps": 781.69
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 7,
+   "out_size": 12042221,
+   "ratio": 0.2905,
+   "compress_mbps": 53.3,
+   "decompress_mbps": 736.9
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 8,
+   "out_size": 12008961,
+   "ratio": 0.2897,
+   "compress_mbps": 42.66,
+   "decompress_mbps": 737.06
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 9,
+   "out_size": 12114312,
+   "ratio": 0.2922,
+   "compress_mbps": 45.19,
+   "decompress_mbps": 854.71
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 1,
+   "out_size": 7872341,
+   "ratio": 0.929,
+   "compress_mbps": 156.48,
+   "decompress_mbps": 451.45
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 2,
+   "out_size": 6329428,
+   "ratio": 0.7469,
+   "compress_mbps": 79.85,
+   "decompress_mbps": 427.25
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 3,
+   "out_size": 6282849,
+   "ratio": 0.7414,
+   "compress_mbps": 70.55,
+   "decompress_mbps": 427.35
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 4,
+   "out_size": 6282760,
+   "ratio": 0.7414,
+   "compress_mbps": 70.54,
+   "decompress_mbps": 428.21
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 5,
+   "out_size": 6281076,
+   "ratio": 0.7412,
+   "compress_mbps": 69.23,
+   "decompress_mbps": 427.09
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 6,
+   "out_size": 6281057,
+   "ratio": 0.7412,
+   "compress_mbps": 69.26,
+   "decompress_mbps": 427.65
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 7,
+   "out_size": 6254304,
+   "ratio": 0.738,
+   "compress_mbps": 71.41,
+   "decompress_mbps": 436.33
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 8,
+   "out_size": 6254302,
+   "ratio": 0.738,
+   "compress_mbps": 71.86,
+   "decompress_mbps": 438.21
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 9,
+   "out_size": 5957201,
+   "ratio": 0.703,
+   "compress_mbps": 46.68,
+   "decompress_mbps": 483.0
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 1,
+   "out_size": 1183174,
+   "ratio": 0.2213,
+   "compress_mbps": 778.62,
+   "decompress_mbps": 1569.3
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 2,
+   "out_size": 897536,
+   "ratio": 0.1679,
+   "compress_mbps": 420.22,
+   "decompress_mbps": 1741.5
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 3,
+   "out_size": 813568,
+   "ratio": 0.1522,
+   "compress_mbps": 311.56,
+   "decompress_mbps": 1915.91
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 4,
+   "out_size": 742252,
+   "ratio": 0.1389,
+   "compress_mbps": 250.73,
+   "decompress_mbps": 2030.02
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 5,
+   "out_size": 701126,
+   "ratio": 0.1312,
+   "compress_mbps": 219.84,
+   "decompress_mbps": 2012.26
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 6,
+   "out_size": 681876,
+   "ratio": 0.1276,
+   "compress_mbps": 161.94,
+   "decompress_mbps": 2063.69
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 7,
+   "out_size": 670651,
+   "ratio": 0.1255,
+   "compress_mbps": 115.6,
+   "decompress_mbps": 1976.39
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 8,
+   "out_size": 659186,
+   "ratio": 0.1233,
+   "compress_mbps": 72.96,
+   "decompress_mbps": 1990.89
+  },
+  {
+   "compressor": "zlib_rs",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 9,
+   "out_size": 661881,
+   "ratio": 0.1238,
+   "compress_mbps": 83.89,
+   "decompress_mbps": 2104.3
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 1,
+   "out_size": 84229,
+   "ratio": 0.5538,
+   "compress_mbps": 321.17,
+   "decompress_mbps": 532.32
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 2,
+   "out_size": 61116,
+   "ratio": 0.4018,
+   "compress_mbps": 166.75,
+   "decompress_mbps": 657.9
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 3,
+   "out_size": 57300,
+   "ratio": 0.3768,
+   "compress_mbps": 136.94,
+   "decompress_mbps": 781.11
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 4,
+   "out_size": 55763,
+   "ratio": 0.3666,
+   "compress_mbps": 100.65,
+   "decompress_mbps": 787.04
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 5,
+   "out_size": 54940,
+   "ratio": 0.3612,
+   "compress_mbps": 89.04,
+   "decompress_mbps": 785.53
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 6,
+   "out_size": 54637,
+   "ratio": 0.3592,
+   "compress_mbps": 67.7,
+   "decompress_mbps": 776.94
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 7,
+   "out_size": 54041,
+   "ratio": 0.3553,
+   "compress_mbps": 44.16,
+   "decompress_mbps": 734.83
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 8,
+   "out_size": 54014,
+   "ratio": 0.3551,
+   "compress_mbps": 38.49,
+   "decompress_mbps": 721.86
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/alice29.txt",
+   "size": 152089,
+   "level": 9,
+   "out_size": 54220,
+   "ratio": 0.3565,
+   "compress_mbps": 28.86,
+   "decompress_mbps": 803.27
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 1,
+   "out_size": 73728,
+   "ratio": 0.589,
+   "compress_mbps": 295.83,
+   "decompress_mbps": 489.25
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 2,
+   "out_size": 53390,
+   "ratio": 0.4265,
+   "compress_mbps": 156.85,
+   "decompress_mbps": 616.38
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 3,
+   "out_size": 50676,
+   "ratio": 0.4048,
+   "compress_mbps": 129.31,
+   "decompress_mbps": 708.82
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 4,
+   "out_size": 49834,
+   "ratio": 0.3981,
+   "compress_mbps": 96.74,
+   "decompress_mbps": 710.68
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 5,
+   "out_size": 49357,
+   "ratio": 0.3943,
+   "compress_mbps": 86.4,
+   "decompress_mbps": 708.42
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 6,
+   "out_size": 49196,
+   "ratio": 0.393,
+   "compress_mbps": 71.14,
+   "decompress_mbps": 709.4
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 7,
+   "out_size": 48531,
+   "ratio": 0.3877,
+   "compress_mbps": 46.7,
+   "decompress_mbps": 656.65
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 8,
+   "out_size": 48531,
+   "ratio": 0.3877,
+   "compress_mbps": 45.59,
+   "decompress_mbps": 650.68
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/asyoulik.txt",
+   "size": 125179,
+   "level": 9,
+   "out_size": 48850,
+   "ratio": 0.3902,
+   "compress_mbps": 27.76,
+   "decompress_mbps": 731.6
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 1,
+   "out_size": 10980,
+   "ratio": 0.4463,
+   "compress_mbps": 650.71,
+   "decompress_mbps": 1082.4
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 2,
+   "out_size": 8627,
+   "ratio": 0.3506,
+   "compress_mbps": 509.13,
+   "decompress_mbps": 1045.23
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 3,
+   "out_size": 8260,
+   "ratio": 0.3357,
+   "compress_mbps": 366.42,
+   "decompress_mbps": 1096.72
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 4,
+   "out_size": 8064,
+   "ratio": 0.3278,
+   "compress_mbps": 301.78,
+   "decompress_mbps": 1124.96
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 5,
+   "out_size": 7967,
+   "ratio": 0.3238,
+   "compress_mbps": 274.03,
+   "decompress_mbps": 1105.51
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 6,
+   "out_size": 7949,
+   "ratio": 0.3231,
+   "compress_mbps": 203.25,
+   "decompress_mbps": 1130.87
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 7,
+   "out_size": 7895,
+   "ratio": 0.3209,
+   "compress_mbps": 158.05,
+   "decompress_mbps": 1139.05
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 8,
+   "out_size": 7896,
+   "ratio": 0.3209,
+   "compress_mbps": 139.21,
+   "decompress_mbps": 1138.5
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/cp.html",
+   "size": 24603,
+   "level": 9,
+   "out_size": 7969,
+   "ratio": 0.3239,
+   "compress_mbps": 72.26,
+   "decompress_mbps": 1142.71
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 1,
+   "out_size": 4549,
+   "ratio": 0.408,
+   "compress_mbps": 657.77,
+   "decompress_mbps": 1042.6
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 2,
+   "out_size": 3525,
+   "ratio": 0.3161,
+   "compress_mbps": 488.63,
+   "decompress_mbps": 990.17
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 3,
+   "out_size": 3278,
+   "ratio": 0.294,
+   "compress_mbps": 373.52,
+   "decompress_mbps": 1042.39
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 4,
+   "out_size": 3194,
+   "ratio": 0.2865,
+   "compress_mbps": 308.54,
+   "decompress_mbps": 1072.03
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 5,
+   "out_size": 3135,
+   "ratio": 0.2812,
+   "compress_mbps": 281.54,
+   "decompress_mbps": 1099.63
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 6,
+   "out_size": 3123,
+   "ratio": 0.2801,
+   "compress_mbps": 229.71,
+   "decompress_mbps": 1104.55
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 7,
+   "out_size": 3111,
+   "ratio": 0.279,
+   "compress_mbps": 165.96,
+   "decompress_mbps": 1105.01
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 8,
+   "out_size": 3111,
+   "ratio": 0.279,
+   "compress_mbps": 152.16,
+   "decompress_mbps": 1108.81
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/fields.c",
+   "size": 11150,
+   "level": 9,
+   "out_size": 3112,
+   "ratio": 0.2791,
+   "compress_mbps": 165.01,
+   "decompress_mbps": 1086.82
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 1,
+   "out_size": 1678,
+   "ratio": 0.451,
+   "compress_mbps": 516.69,
+   "decompress_mbps": 862.99
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 2,
+   "out_size": 1286,
+   "ratio": 0.3456,
+   "compress_mbps": 350.31,
+   "decompress_mbps": 685.72
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 3,
+   "out_size": 1226,
+   "ratio": 0.3295,
+   "compress_mbps": 281.91,
+   "decompress_mbps": 709.87
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 4,
+   "out_size": 1220,
+   "ratio": 0.3279,
+   "compress_mbps": 259.59,
+   "decompress_mbps": 720.83
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 5,
+   "out_size": 1211,
+   "ratio": 0.3255,
+   "compress_mbps": 242.62,
+   "decompress_mbps": 719.22
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 6,
+   "out_size": 1211,
+   "ratio": 0.3255,
+   "compress_mbps": 228.12,
+   "decompress_mbps": 719.8
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 7,
+   "out_size": 1206,
+   "ratio": 0.3241,
+   "compress_mbps": 193.96,
+   "decompress_mbps": 716.46
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 8,
+   "out_size": 1206,
+   "ratio": 0.3241,
+   "compress_mbps": 194.71,
+   "decompress_mbps": 717.47
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/grammar.lsp",
+   "size": 3721,
+   "level": 9,
+   "out_size": 1216,
+   "ratio": 0.3268,
+   "compress_mbps": 160.43,
+   "decompress_mbps": 716.46
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 1,
+   "out_size": 349423,
+   "ratio": 0.3393,
+   "compress_mbps": 634.68,
+   "decompress_mbps": 1356.56
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 2,
+   "out_size": 235105,
+   "ratio": 0.2283,
+   "compress_mbps": 364.63,
+   "decompress_mbps": 1379.47
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 3,
+   "out_size": 221441,
+   "ratio": 0.215,
+   "compress_mbps": 305.64,
+   "decompress_mbps": 1594.46
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 4,
+   "out_size": 218758,
+   "ratio": 0.2124,
+   "compress_mbps": 242.92,
+   "decompress_mbps": 1642.07
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 5,
+   "out_size": 217435,
+   "ratio": 0.2112,
+   "compress_mbps": 226.34,
+   "decompress_mbps": 1630.8
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 6,
+   "out_size": 217429,
+   "ratio": 0.2111,
+   "compress_mbps": 196.76,
+   "decompress_mbps": 1634.73
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 7,
+   "out_size": 208770,
+   "ratio": 0.2027,
+   "compress_mbps": 74.77,
+   "decompress_mbps": 1639.46
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 8,
+   "out_size": 207007,
+   "ratio": 0.201,
+   "compress_mbps": 8.18,
+   "decompress_mbps": 1698.12
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/kennedy.xls",
+   "size": 1029744,
+   "level": 9,
+   "out_size": 207025,
+   "ratio": 0.201,
+   "compress_mbps": 7.07,
+   "decompress_mbps": 1678.11
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 1,
+   "out_size": 224093,
+   "ratio": 0.5251,
+   "compress_mbps": 298.97,
+   "decompress_mbps": 569.92
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 2,
+   "out_size": 163564,
+   "ratio": 0.3833,
+   "compress_mbps": 169.47,
+   "decompress_mbps": 667.6
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 3,
+   "out_size": 151962,
+   "ratio": 0.3561,
+   "compress_mbps": 138.64,
+   "decompress_mbps": 754.5
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 4,
+   "out_size": 148192,
+   "ratio": 0.3473,
+   "compress_mbps": 102.89,
+   "decompress_mbps": 764.99
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 5,
+   "out_size": 146218,
+   "ratio": 0.3426,
+   "compress_mbps": 91.53,
+   "decompress_mbps": 759.08
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 6,
+   "out_size": 145647,
+   "ratio": 0.3413,
+   "compress_mbps": 72.44,
+   "decompress_mbps": 762.68
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 7,
+   "out_size": 144126,
+   "ratio": 0.3377,
+   "compress_mbps": 47.52,
+   "decompress_mbps": 727.1
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 8,
+   "out_size": 144081,
+   "ratio": 0.3376,
+   "compress_mbps": 43.31,
+   "decompress_mbps": 725.78
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/lcet10.txt",
+   "size": 426754,
+   "level": 9,
+   "out_size": 144375,
+   "ratio": 0.3383,
+   "compress_mbps": 31.04,
+   "decompress_mbps": 791.47
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 1,
+   "out_size": 301321,
+   "ratio": 0.6253,
+   "compress_mbps": 250.2,
+   "decompress_mbps": 447.03
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 2,
+   "out_size": 213993,
+   "ratio": 0.4441,
+   "compress_mbps": 142.63,
+   "decompress_mbps": 528.08
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 3,
+   "out_size": 203289,
+   "ratio": 0.4219,
+   "compress_mbps": 121.09,
+   "decompress_mbps": 582.58
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 4,
+   "out_size": 199296,
+   "ratio": 0.4136,
+   "compress_mbps": 88.82,
+   "decompress_mbps": 596.59
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 5,
+   "out_size": 197230,
+   "ratio": 0.4093,
+   "compress_mbps": 78.57,
+   "decompress_mbps": 599.13
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 6,
+   "out_size": 196119,
+   "ratio": 0.407,
+   "compress_mbps": 59.94,
+   "decompress_mbps": 601.75
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 7,
+   "out_size": 193220,
+   "ratio": 0.401,
+   "compress_mbps": 36.67,
+   "decompress_mbps": 553.38
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 8,
+   "out_size": 193205,
+   "ratio": 0.401,
+   "compress_mbps": 34.65,
+   "decompress_mbps": 552.5
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/plrabn12.txt",
+   "size": 481861,
+   "level": 9,
+   "out_size": 194769,
+   "ratio": 0.4042,
+   "compress_mbps": 24.06,
+   "decompress_mbps": 614.65
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 1,
+   "out_size": 81531,
+   "ratio": 0.1589,
+   "compress_mbps": 922.7,
+   "decompress_mbps": 1930.77
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 2,
+   "out_size": 59878,
+   "ratio": 0.1167,
+   "compress_mbps": 550.6,
+   "decompress_mbps": 2020.1
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 3,
+   "out_size": 57903,
+   "ratio": 0.1128,
+   "compress_mbps": 433.22,
+   "decompress_mbps": 2104.33
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 4,
+   "out_size": 57086,
+   "ratio": 0.1112,
+   "compress_mbps": 360.98,
+   "decompress_mbps": 2159.98
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 5,
+   "out_size": 54102,
+   "ratio": 0.1054,
+   "compress_mbps": 309.05,
+   "decompress_mbps": 2263.62
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 6,
+   "out_size": 53771,
+   "ratio": 0.1048,
+   "compress_mbps": 217.7,
+   "decompress_mbps": 2291.75
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 7,
+   "out_size": 54669,
+   "ratio": 0.1065,
+   "compress_mbps": 149.49,
+   "decompress_mbps": 2284.93
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 8,
+   "out_size": 52596,
+   "ratio": 0.1025,
+   "compress_mbps": 54.78,
+   "decompress_mbps": 2426.71
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/ptt5",
+   "size": 513216,
+   "level": 9,
+   "out_size": 52683,
+   "ratio": 0.1027,
+   "compress_mbps": 29.99,
+   "decompress_mbps": 2258.15
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 1,
+   "out_size": 17222,
+   "ratio": 0.4504,
+   "compress_mbps": 664.73,
+   "decompress_mbps": 1066.05
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 2,
+   "out_size": 14350,
+   "ratio": 0.3753,
+   "compress_mbps": 318.88,
+   "decompress_mbps": 1012.34
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 3,
+   "out_size": 13871,
+   "ratio": 0.3627,
+   "compress_mbps": 208.67,
+   "decompress_mbps": 1047.19
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 4,
+   "out_size": 13739,
+   "ratio": 0.3593,
+   "compress_mbps": 172.24,
+   "decompress_mbps": 1059.98
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 5,
+   "out_size": 13398,
+   "ratio": 0.3504,
+   "compress_mbps": 149.07,
+   "decompress_mbps": 1104.91
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 6,
+   "out_size": 13388,
+   "ratio": 0.3501,
+   "compress_mbps": 124.74,
+   "decompress_mbps": 1110.02
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 7,
+   "out_size": 13242,
+   "ratio": 0.3463,
+   "compress_mbps": 71.06,
+   "decompress_mbps": 1138.04
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 8,
+   "out_size": 13232,
+   "ratio": 0.346,
+   "compress_mbps": 26.37,
+   "decompress_mbps": 1143.36
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/sum",
+   "size": 38240,
+   "level": 9,
+   "out_size": 12876,
+   "ratio": 0.3367,
+   "compress_mbps": 14.21,
+   "decompress_mbps": 1151.59
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 1,
+   "out_size": 2394,
+   "ratio": 0.5664,
+   "compress_mbps": 487.39,
+   "decompress_mbps": 704.01
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 2,
+   "out_size": 1810,
+   "ratio": 0.4282,
+   "compress_mbps": 317.22,
+   "decompress_mbps": 600.24
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 3,
+   "out_size": 1749,
+   "ratio": 0.4138,
+   "compress_mbps": 261.1,
+   "decompress_mbps": 614.88
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 4,
+   "out_size": 1739,
+   "ratio": 0.4114,
+   "compress_mbps": 253.45,
+   "decompress_mbps": 617.05
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 5,
+   "out_size": 1729,
+   "ratio": 0.409,
+   "compress_mbps": 241.63,
+   "decompress_mbps": 623.06
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 6,
+   "out_size": 1729,
+   "ratio": 0.409,
+   "compress_mbps": 234.67,
+   "decompress_mbps": 629.97
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 7,
+   "out_size": 1721,
+   "ratio": 0.4071,
+   "compress_mbps": 223.99,
+   "decompress_mbps": 624.51
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 8,
+   "out_size": 1721,
+   "ratio": 0.4071,
+   "compress_mbps": 224.4,
+   "decompress_mbps": 631.25
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "canterbury/xargs.1",
+   "size": 4227,
+   "level": 9,
+   "out_size": 1730,
+   "ratio": 0.4093,
+   "compress_mbps": 169.04,
+   "decompress_mbps": 616.39
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 1,
+   "out_size": 6023620,
+   "ratio": 0.591,
+   "compress_mbps": 272.32,
+   "decompress_mbps": 510.79
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 2,
+   "out_size": 4303512,
+   "ratio": 0.4222,
+   "compress_mbps": 153.35,
+   "decompress_mbps": 603.05
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 3,
+   "out_size": 4053195,
+   "ratio": 0.3977,
+   "compress_mbps": 127.04,
+   "decompress_mbps": 702.44
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 4,
+   "out_size": 3958360,
+   "ratio": 0.3884,
+   "compress_mbps": 91.65,
+   "decompress_mbps": 720.69
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 5,
+   "out_size": 3916998,
+   "ratio": 0.3843,
+   "compress_mbps": 81.02,
+   "decompress_mbps": 719.09
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 6,
+   "out_size": 3895451,
+   "ratio": 0.3822,
+   "compress_mbps": 62.81,
+   "decompress_mbps": 720.91
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 7,
+   "out_size": 3840989,
+   "ratio": 0.3768,
+   "compress_mbps": 39.2,
+   "decompress_mbps": 666.68
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 8,
+   "out_size": 3840386,
+   "ratio": 0.3768,
+   "compress_mbps": 36.28,
+   "decompress_mbps": 670.86
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/dickens",
+   "size": 10192446,
+   "level": 9,
+   "out_size": 3859102,
+   "ratio": 0.3786,
+   "compress_mbps": 26.15,
+   "decompress_mbps": 761.23
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 1,
+   "out_size": 23990827,
+   "ratio": 0.4684,
+   "compress_mbps": 298.02,
+   "decompress_mbps": 652.21
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 2,
+   "out_size": 20547087,
+   "ratio": 0.4011,
+   "compress_mbps": 165.63,
+   "decompress_mbps": 622.16
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 3,
+   "out_size": 19902272,
+   "ratio": 0.3886,
+   "compress_mbps": 139.59,
+   "decompress_mbps": 637.55
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 4,
+   "out_size": 19682090,
+   "ratio": 0.3843,
+   "compress_mbps": 120.36,
+   "decompress_mbps": 642.99
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 5,
+   "out_size": 19459674,
+   "ratio": 0.3799,
+   "compress_mbps": 109.7,
+   "decompress_mbps": 658.76
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 6,
+   "out_size": 19419263,
+   "ratio": 0.3791,
+   "compress_mbps": 90.65,
+   "decompress_mbps": 658.36
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 7,
+   "out_size": 19352619,
+   "ratio": 0.3778,
+   "compress_mbps": 53.01,
+   "decompress_mbps": 673.25
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 8,
+   "out_size": 19340718,
+   "ratio": 0.3776,
+   "compress_mbps": 23.36,
+   "decompress_mbps": 682.86
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mozilla",
+   "size": 51220480,
+   "level": 9,
+   "out_size": 19031967,
+   "ratio": 0.3716,
+   "compress_mbps": 26.49,
+   "decompress_mbps": 671.97
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 1,
+   "out_size": 5285467,
+   "ratio": 0.5301,
+   "compress_mbps": 350.17,
+   "decompress_mbps": 732.53
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 2,
+   "out_size": 3775727,
+   "ratio": 0.3787,
+   "compress_mbps": 192.66,
+   "decompress_mbps": 754.84
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 3,
+   "out_size": 3682017,
+   "ratio": 0.3693,
+   "compress_mbps": 167.66,
+   "decompress_mbps": 785.07
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 4,
+   "out_size": 3623194,
+   "ratio": 0.3634,
+   "compress_mbps": 125.91,
+   "decompress_mbps": 815.53
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 5,
+   "out_size": 3610006,
+   "ratio": 0.3621,
+   "compress_mbps": 105.41,
+   "decompress_mbps": 805.75
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 6,
+   "out_size": 3596306,
+   "ratio": 0.3607,
+   "compress_mbps": 74.49,
+   "decompress_mbps": 807.57
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 7,
+   "out_size": 3605712,
+   "ratio": 0.3616,
+   "compress_mbps": 50.89,
+   "decompress_mbps": 777.88
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 8,
+   "out_size": 3605125,
+   "ratio": 0.3616,
+   "compress_mbps": 39.53,
+   "decompress_mbps": 786.37
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/mr",
+   "size": 9970564,
+   "level": 9,
+   "out_size": 3656164,
+   "ratio": 0.3667,
+   "compress_mbps": 28.44,
+   "decompress_mbps": 822.17
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 1,
+   "out_size": 5394705,
+   "ratio": 0.1608,
+   "compress_mbps": 821.84,
+   "decompress_mbps": 1484.64
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 2,
+   "out_size": 4129398,
+   "ratio": 0.1231,
+   "compress_mbps": 546.17,
+   "decompress_mbps": 1581.75
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 3,
+   "out_size": 3687336,
+   "ratio": 0.1099,
+   "compress_mbps": 395.97,
+   "decompress_mbps": 1724.92
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 4,
+   "out_size": 3448167,
+   "ratio": 0.1028,
+   "compress_mbps": 330.91,
+   "decompress_mbps": 1813.0
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 5,
+   "out_size": 3211116,
+   "ratio": 0.0957,
+   "compress_mbps": 281.7,
+   "decompress_mbps": 1791.73
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 6,
+   "out_size": 3143330,
+   "ratio": 0.0937,
+   "compress_mbps": 221.47,
+   "decompress_mbps": 1803.61
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 7,
+   "out_size": 3083618,
+   "ratio": 0.0919,
+   "compress_mbps": 163.58,
+   "decompress_mbps": 1804.64
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 8,
+   "out_size": 2981829,
+   "ratio": 0.0889,
+   "compress_mbps": 73.18,
+   "decompress_mbps": 1810.79
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/nci",
+   "size": 33553445,
+   "level": 9,
+   "out_size": 2998518,
+   "ratio": 0.0894,
+   "compress_mbps": 72.13,
+   "decompress_mbps": 1804.25
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 1,
+   "out_size": 3897216,
+   "ratio": 0.6335,
+   "compress_mbps": 217.02,
+   "decompress_mbps": 509.88
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 2,
+   "out_size": 3315552,
+   "ratio": 0.5389,
+   "compress_mbps": 112.22,
+   "decompress_mbps": 471.39
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 3,
+   "out_size": 3233371,
+   "ratio": 0.5256,
+   "compress_mbps": 96.52,
+   "decompress_mbps": 482.39
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 4,
+   "out_size": 3211925,
+   "ratio": 0.5221,
+   "compress_mbps": 86.62,
+   "decompress_mbps": 487.54
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 5,
+   "out_size": 3191351,
+   "ratio": 0.5187,
+   "compress_mbps": 81.07,
+   "decompress_mbps": 499.34
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 6,
+   "out_size": 3187658,
+   "ratio": 0.5181,
+   "compress_mbps": 75.73,
+   "decompress_mbps": 490.47
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 7,
+   "out_size": 3168780,
+   "ratio": 0.5151,
+   "compress_mbps": 55.27,
+   "decompress_mbps": 513.95
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 8,
+   "out_size": 3167582,
+   "ratio": 0.5149,
+   "compress_mbps": 44.59,
+   "decompress_mbps": 513.09
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/ooffice",
+   "size": 6152192,
+   "level": 9,
+   "out_size": 3078267,
+   "ratio": 0.5004,
+   "compress_mbps": 28.93,
+   "decompress_mbps": 474.07
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 1,
+   "out_size": 4568313,
+   "ratio": 0.453,
+   "compress_mbps": 380.68,
+   "decompress_mbps": 947.23
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 2,
+   "out_size": 3904433,
+   "ratio": 0.3871,
+   "compress_mbps": 224.8,
+   "decompress_mbps": 847.78
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 3,
+   "out_size": 3825199,
+   "ratio": 0.3793,
+   "compress_mbps": 165.6,
+   "decompress_mbps": 869.37
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 4,
+   "out_size": 3774735,
+   "ratio": 0.3743,
+   "compress_mbps": 139.95,
+   "decompress_mbps": 875.61
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 5,
+   "out_size": 3678300,
+   "ratio": 0.3647,
+   "compress_mbps": 133.49,
+   "decompress_mbps": 950.24
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 6,
+   "out_size": 3676108,
+   "ratio": 0.3645,
+   "compress_mbps": 131.72,
+   "decompress_mbps": 947.33
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 7,
+   "out_size": 3663157,
+   "ratio": 0.3632,
+   "compress_mbps": 112.55,
+   "decompress_mbps": 948.01
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 8,
+   "out_size": 3663159,
+   "ratio": 0.3632,
+   "compress_mbps": 112.02,
+   "decompress_mbps": 952.94
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/osdb",
+   "size": 10085684,
+   "level": 9,
+   "out_size": 3667502,
+   "ratio": 0.3636,
+   "compress_mbps": 61.19,
+   "decompress_mbps": 889.51
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 1,
+   "out_size": 3185858,
+   "ratio": 0.4807,
+   "compress_mbps": 344.56,
+   "decompress_mbps": 715.21
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 2,
+   "out_size": 2272542,
+   "ratio": 0.3429,
+   "compress_mbps": 195.72,
+   "decompress_mbps": 876.29
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 3,
+   "out_size": 2077027,
+   "ratio": 0.3134,
+   "compress_mbps": 154.94,
+   "decompress_mbps": 988.48
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 4,
+   "out_size": 1972118,
+   "ratio": 0.2976,
+   "compress_mbps": 108.37,
+   "decompress_mbps": 1051.67
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 5,
+   "out_size": 1919142,
+   "ratio": 0.2896,
+   "compress_mbps": 90.19,
+   "decompress_mbps": 1064.39
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 6,
+   "out_size": 1876526,
+   "ratio": 0.2832,
+   "compress_mbps": 51.68,
+   "decompress_mbps": 1092.6
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 7,
+   "out_size": 1827382,
+   "ratio": 0.2757,
+   "compress_mbps": 29.51,
+   "decompress_mbps": 959.32
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 8,
+   "out_size": 1820698,
+   "ratio": 0.2747,
+   "compress_mbps": 19.19,
+   "decompress_mbps": 950.02
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/reymont",
+   "size": 6627202,
+   "level": 9,
+   "out_size": 1826397,
+   "ratio": 0.2756,
+   "compress_mbps": 23.44,
+   "decompress_mbps": 1021.35
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 1,
+   "out_size": 7543749,
+   "ratio": 0.3491,
+   "compress_mbps": 420.99,
+   "decompress_mbps": 851.16
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 2,
+   "out_size": 6102427,
+   "ratio": 0.2824,
+   "compress_mbps": 247.75,
+   "decompress_mbps": 896.89
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 3,
+   "out_size": 5736964,
+   "ratio": 0.2655,
+   "compress_mbps": 200.28,
+   "decompress_mbps": 956.56
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 4,
+   "out_size": 5610373,
+   "ratio": 0.2597,
+   "compress_mbps": 163.71,
+   "decompress_mbps": 978.72
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 5,
+   "out_size": 5519771,
+   "ratio": 0.2555,
+   "compress_mbps": 147.06,
+   "decompress_mbps": 976.51
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 6,
+   "out_size": 5501141,
+   "ratio": 0.2546,
+   "compress_mbps": 116.63,
+   "decompress_mbps": 983.38
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 7,
+   "out_size": 5420718,
+   "ratio": 0.2509,
+   "compress_mbps": 79.0,
+   "decompress_mbps": 972.93
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 8,
+   "out_size": 5409347,
+   "ratio": 0.2504,
+   "compress_mbps": 56.62,
+   "decompress_mbps": 975.71
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/samba",
+   "size": 21606400,
+   "level": 9,
+   "out_size": 5406346,
+   "ratio": 0.2502,
+   "compress_mbps": 48.96,
+   "decompress_mbps": 1010.32
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 1,
+   "out_size": 6267384,
+   "ratio": 0.8642,
+   "compress_mbps": 178.46,
+   "decompress_mbps": 468.23
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 2,
+   "out_size": 5549280,
+   "ratio": 0.7652,
+   "compress_mbps": 99.65,
+   "decompress_mbps": 481.9
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 3,
+   "out_size": 5497477,
+   "ratio": 0.7581,
+   "compress_mbps": 88.76,
+   "decompress_mbps": 489.98
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 4,
+   "out_size": 5461348,
+   "ratio": 0.7531,
+   "compress_mbps": 72.7,
+   "decompress_mbps": 484.46
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 5,
+   "out_size": 5441963,
+   "ratio": 0.7504,
+   "compress_mbps": 66.76,
+   "decompress_mbps": 482.19
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 6,
+   "out_size": 5437924,
+   "ratio": 0.7499,
+   "compress_mbps": 63.05,
+   "decompress_mbps": 482.13
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 7,
+   "out_size": 5427910,
+   "ratio": 0.7485,
+   "compress_mbps": 49.94,
+   "decompress_mbps": 486.41
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 8,
+   "out_size": 5427657,
+   "ratio": 0.7484,
+   "compress_mbps": 48.76,
+   "decompress_mbps": 485.21
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/sao",
+   "size": 7251944,
+   "level": 9,
+   "out_size": 5318080,
+   "ratio": 0.7333,
+   "compress_mbps": 34.52,
+   "decompress_mbps": 463.09
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 1,
+   "out_size": 18913196,
+   "ratio": 0.4562,
+   "compress_mbps": 315.88,
+   "decompress_mbps": 603.61
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 2,
+   "out_size": 14152942,
+   "ratio": 0.3414,
+   "compress_mbps": 181.82,
+   "decompress_mbps": 668.23
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 3,
+   "out_size": 13004993,
+   "ratio": 0.3137,
+   "compress_mbps": 150.65,
+   "decompress_mbps": 738.57
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 4,
+   "out_size": 12551202,
+   "ratio": 0.3027,
+   "compress_mbps": 120.15,
+   "decompress_mbps": 755.47
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 5,
+   "out_size": 12295652,
+   "ratio": 0.2966,
+   "compress_mbps": 98.0,
+   "decompress_mbps": 725.02
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 6,
+   "out_size": 12198396,
+   "ratio": 0.2942,
+   "compress_mbps": 79.03,
+   "decompress_mbps": 753.29
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 7,
+   "out_size": 12042221,
+   "ratio": 0.2905,
+   "compress_mbps": 53.99,
+   "decompress_mbps": 717.49
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 8,
+   "out_size": 12008961,
+   "ratio": 0.2897,
+   "compress_mbps": 43.04,
+   "decompress_mbps": 698.13
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/webster",
+   "size": 41458703,
+   "level": 9,
+   "out_size": 12114312,
+   "ratio": 0.2922,
+   "compress_mbps": 41.34,
+   "decompress_mbps": 807.62
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 1,
+   "out_size": 7872341,
+   "ratio": 0.929,
+   "compress_mbps": 158.69,
+   "decompress_mbps": 444.64
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 2,
+   "out_size": 6329428,
+   "ratio": 0.7469,
+   "compress_mbps": 91.61,
+   "decompress_mbps": 419.18
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 3,
+   "out_size": 6282849,
+   "ratio": 0.7414,
+   "compress_mbps": 82.81,
+   "decompress_mbps": 417.0
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 4,
+   "out_size": 6282760,
+   "ratio": 0.7414,
+   "compress_mbps": 82.26,
+   "decompress_mbps": 419.38
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 5,
+   "out_size": 6281076,
+   "ratio": 0.7412,
+   "compress_mbps": 79.3,
+   "decompress_mbps": 419.17
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 6,
+   "out_size": 6281057,
+   "ratio": 0.7412,
+   "compress_mbps": 79.32,
+   "decompress_mbps": 419.12
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 7,
+   "out_size": 6254304,
+   "ratio": 0.738,
+   "compress_mbps": 77.46,
+   "decompress_mbps": 428.01
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 8,
+   "out_size": 6254302,
+   "ratio": 0.738,
+   "compress_mbps": 77.65,
+   "decompress_mbps": 429.02
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/x-ray",
+   "size": 8474240,
+   "level": 9,
+   "out_size": 5957201,
+   "ratio": 0.703,
+   "compress_mbps": 41.72,
+   "decompress_mbps": 446.8
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 1,
+   "out_size": 1183174,
+   "ratio": 0.2213,
+   "compress_mbps": 656.19,
+   "decompress_mbps": 1509.64
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 2,
+   "out_size": 897536,
+   "ratio": 0.1679,
+   "compress_mbps": 408.77,
+   "decompress_mbps": 1666.55
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 3,
+   "out_size": 813568,
+   "ratio": 0.1522,
+   "compress_mbps": 312.77,
+   "decompress_mbps": 1822.56
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 4,
+   "out_size": 742252,
+   "ratio": 0.1389,
+   "compress_mbps": 250.26,
+   "decompress_mbps": 1935.92
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 5,
+   "out_size": 701126,
+   "ratio": 0.1312,
+   "compress_mbps": 217.61,
+   "decompress_mbps": 1938.25
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 6,
+   "out_size": 681876,
+   "ratio": 0.1276,
+   "compress_mbps": 162.7,
+   "decompress_mbps": 1987.64
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 7,
+   "out_size": 670651,
+   "ratio": 0.1255,
+   "compress_mbps": 117.96,
+   "decompress_mbps": 1904.39
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 8,
+   "out_size": 659186,
+   "ratio": 0.1233,
+   "compress_mbps": 74.31,
+   "decompress_mbps": 1933.47
+  },
+  {
+   "compressor": "zlib_ng",
+   "pattern": "silesia/xml",
+   "size": 5345280,
+   "level": 9,
+   "out_size": 661881,
+   "ratio": 0.1238,
+   "compress_mbps": 75.19,
+   "decompress_mbps": 2031.08
   }
  ]
 }

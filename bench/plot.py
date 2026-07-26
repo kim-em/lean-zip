@@ -26,12 +26,14 @@ import matplotlib.pyplot as plt
 from benchmark_json import load_frozen_zopfli, load_routine
 
 # Fixed plot order so colours/markers are stable across regenerations.
-# C / SIMD references and the pure-Lean subject, plus language-native peers
+# Optimized references and the pure-Lean subject, plus language-native peers
 # (Go / JS / Zig / OCaml) — the honest comparison group for a pure-Lean codec.
 COMPRESSORS = [
     ("native",      "lean-zip (native)", "#d62728", "o"),
     ("zlib",        "zlib",              "#1f77b4", "s"),
     ("miniz_oxide", "miniz_oxide",       "#2ca02c", "^"),
+    ("zlib_rs",     "zlib-rs",           "#7f7f7f", "<"),
+    ("zlib_ng",     "zlib-ng",           "#393b79", ">"),
     ("libdeflate",  "libdeflate",        "#9467bd", "D"),
     ("zopfli",      "zopfli",            "#ff7f0e", "v"),
     ("go",          "Go compress/flate", "#8c564b", "P"),
