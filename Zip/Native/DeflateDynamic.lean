@@ -1289,6 +1289,37 @@ inductive L7Profile where
   | deep
   deriving BEq, ReflBEq, LawfulBEq, Repr
 
+/-- Output-preparation policy for a retained level-7 content profile.
+
+    `arbitrate` is the conservative path: size both the whole-stream base and
+    observation-split candidates, then emit the smaller one.  The other two
+    constructors select a candidate whose winner was stable in the large-input
+    profile calibration, allowing production to skip preparation of the known
+    loser. -/
+inductive L7OutputRoute where
+  | arbitrate
+  | base
+  | split
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+/-- Select level 7's output-preparation route from input size and the already
+    retained content profile.
+
+    Inputs below the large-profile threshold keep exact size arbitration.  That
+    region uses a different, deliberately coarse adjacent-run classifier and
+    contains profiles whose winner changes between samples (notably
+    `chain128Probe16`), so a direct route would be overconfident.  On large
+    inputs, the shallow and chain-128/depth-32 profiles consistently selected
+    the whole-stream base during calibration; the remaining profiles selected
+    the observation split.  The fallback makes every uncalibrated small input
+    pay the old safe arbitration rather than extrapolating a corpus result. -/
+def l7OutputRouteFor (size : Nat) (profile : L7Profile) : L7OutputRoute :=
+  if size < h3ProbeMinSize then .arbitrate
+  else
+    match profile with
+    | .shallow | .chain128Probe32 => .base
+    | _ => .split
+
 /-- Concrete lazy-matcher knobs selected by an `L7Profile`. -/
 structure L7MatchConfig where
   chainDepth : Nat
@@ -2750,6 +2781,27 @@ theorem sharedPartitionSizedP_fst_toArray (toks : TokenArray) (cuts : List Nat) 
     (sharedPartitionSizedP toks cuts pos).1 = (sharedPartitionSizedPArray toks.toArray cuts pos).1 := by
   rw [sharedPartitionSizedP_toArray]
 
+/-- Trees-only twin of `sharedPartitionSizedP`.
+
+    A direct split route does not compare candidate sizes, so computing each
+    block's exact bit count and folding the whole-stream frequencies is wasted
+    work.  This walker retains only the per-block Huffman trees needed by
+    `emitSharedBlocksAtSizedP`, with exactly the same clamped partition.  Its
+    equality to `sharedPartitionSizedP`'s tree component is proved in
+    `Zip.Spec.LZ77PackedCorrect`. -/
+def sharedPartitionTreesP (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
+    List SizedTrees :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let f := tokenFreqsPTA (toks.extract pos j)
+  let t := sizedTrees f.1 f.2
+  if j ≥ toks.size then [t]
+  else t :: sharedPartitionTreesP toks cuts.tail j
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
 /-- Fused twin of `sharedPartitionSizedP` (#2772): one pass over the clamped
     partition yields the same `(bits, per-block trees)` **and** the whole-stream
     frequencies, accumulated as the EOB-corrected element-wise sum of the per-block
@@ -2813,6 +2865,21 @@ def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : TokenArray)
     ((sp.1 + 7) / 8,
       fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.2 0
         (BitWriter.emptyWithCapacity ((sp.1 + 7) / 8))).flush)
+
+/-- Emit a known-winning observation split after preparing only its per-block
+    trees.  Unlike `deflateDynamicBlocksSharedAtSizedP`, this does not compute an
+    exact candidate size; unlike `deflateObsSplitSizedFreqsP`, it also does not
+    merge per-block histograms for a base candidate that will not be emitted.
+    The emitted bytes equal `deflateDynamicBlocksSharedAtP` for every cut list
+    (`deflateDynamicBlocksSharedAtTreesP_eq`). -/
+def deflateDynamicBlocksSharedAtTreesP (data : ByteArray) (toks : TokenArray)
+    (cuts : List Nat) : ByteArray :=
+  if data.size == 0 then
+    deflateDynamicBlocksSharedAtP data toks cuts
+  else
+    let trees := sharedPartitionTreesP toks cuts 0
+    (emitSharedBlocksAtSizedP data toks cuts trees 0
+      (BitWriter.emptyWithCapacity data.size)).flush
 
 /-- The obs-split candidate prep **paired with** the whole-stream frequencies,
     both from one fused sizing pass (`sharedPartitionSizedFreqsP`, #2772).
@@ -3300,6 +3367,29 @@ def deflateRawSplitTierP (data : ByteArray) (ptokens : TokenArray)
       if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
   withObs.2 ()
 
+/-- Level-7 output dispatch at a retained content profile.
+
+    Ambiguous small inputs use the established exact-size arbitration.  A
+    calibrated large base route skips all split preparation, while a calibrated
+    large split route uses the trees-only preparation above.  An empty cut list
+    is definitionally a one-block split and therefore takes the base path,
+    preserving the old arbitration result without constructing redundant
+    trees.  Cut selection itself is below the route match, so direct-base inputs
+    also skip the observation walker entirely. -/
+def deflateRawL7RouteP (data : ByteArray) (profile : L7Profile)
+    (ptokens : TokenArray) : ByteArray :=
+  match l7OutputRouteFor data.size profile with
+  | .arbitrate =>
+      let checkTokens := l7SplitCheckTokensFor data profile
+      let cuts := chooseSplitsHeuristicPUPacked ptokens data.size checkTokens
+      deflateRawSplitTierP data ptokens cuts
+  | .base => deflateRawBaseP data ptokens
+  | .split =>
+      let checkTokens := l7SplitCheckTokensFor data profile
+      let cuts := chooseSplitsHeuristicPUPacked ptokens data.size checkTokens
+      if cuts.isEmpty then deflateRawBaseP data ptokens
+      else deflateDynamicBlocksSharedAtTreesP data ptokens cuts
+
 /-- Unified raw DEFLATE compression dispatch. The native level range is **0–10**
     (wider than zlib's 0–9). Since #2638 the top of the ladder is:
 
@@ -3441,14 +3531,13 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     -- EMIT, now a sized prep below.)
     if level == 7 then
       -- Level 7 selects one content profile and retains it through matching and
-      -- split-cadence selection.  In particular, the large shallow point needs
-      -- both the specialized L5 matcher and its 2016-token cadence; recomputing
-      -- `l7ProfileFor` here would pay the four-region sketch twice.
+      -- split-cadence/output-route selection.  In particular, the large shallow
+      -- point needs the specialized L5 matcher, its 2016-token cadence, and the
+      -- direct base route; recomputing `l7ProfileFor` would pay the four-region
+      -- sketch twice.  Small inputs conservatively retain size arbitration.
       let profile := l7ProfileFor data
       let ptokens := l7MatchPFor data profile
-      let checkTokens := l7SplitCheckTokensFor data profile
-      let cuts := chooseSplitsHeuristicPUPacked ptokens data.size checkTokens
-      deflateRawSplitTierP data ptokens cuts
+      deflateRawL7RouteP data profile ptokens
     else
       let ptokens := lzMatchP data level
       if level == 9 then

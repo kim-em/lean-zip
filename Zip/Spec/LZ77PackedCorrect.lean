@@ -496,6 +496,33 @@ the packed twin of `emitSharedBlocksAtSized_eq`. Each block's trees are
 is exactly what `emitSharedBlockP` recomputes; the `emitDynBlockP` calls then
 coincide (the alphabet-size proofs are proof-irrelevant). -/
 
+/-- Fuel form of the trees-only partition walker's equality to the tree
+    component of the exact-size walker. -/
+private theorem sharedPartitionTreesP_eq_fuel (toks : TokenArray) :
+    ∀ (fuel pos : Nat), toks.size - pos < fuel → ∀ (cuts : List Nat),
+      sharedPartitionTreesP toks cuts pos = (sharedPartitionSizedP toks cuts pos).2 := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos hf; omega
+  | succ fuel ih =>
+    intro pos hf cuts
+    by_cases hend : min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size
+    · conv => lhs; unfold sharedPartitionTreesP
+      conv => rhs; unfold sharedPartitionSizedP
+      simp only [if_pos hend]
+    · conv => lhs; unfold sharedPartitionTreesP
+      conv => rhs; unfold sharedPartitionSizedP
+      simp only [if_neg hend]
+      rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size)
+        (by omega) cuts.tail]
+
+/-- The trees-only partition walker produces exactly the tree list captured by
+    the established exact-size walker, for every packed token stream and cut
+    list. -/
+theorem sharedPartitionTreesP_eq (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
+    sharedPartitionTreesP toks cuts pos = (sharedPartitionSizedP toks cuts pos).2 :=
+  sharedPartitionTreesP_eq_fuel toks (toks.size - pos + 1) pos (by omega) cuts
+
 /-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
     reference packed emitter (fuel-quantified form for the induction). -/
 private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ta : TokenArray) :
@@ -556,6 +583,24 @@ theorem deflateDynamicBlocksSharedAtSizedP_emit (data : ByteArray) (ta : TokenAr
   · rename_i h
     show (emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts 0).2 0
       BitWriter.empty).flush = deflateDynamicBlocksSharedAtP data ta cuts
+    rw [emitSharedBlocksAtSizedP_eq]
+    unfold deflateDynamicBlocksSharedAtP
+    rw [if_neg h]
+
+/-- Trees-only split preparation emits byte-for-byte the established packed
+    shared-window split candidate, for every input, token stream, and cut list. -/
+theorem deflateDynamicBlocksSharedAtTreesP_eq (data : ByteArray) (ta : TokenArray)
+    (cuts : List Nat) :
+    deflateDynamicBlocksSharedAtTreesP data ta cuts =
+      deflateDynamicBlocksSharedAtP data ta cuts := by
+  unfold deflateDynamicBlocksSharedAtTreesP
+  split
+  · rfl
+  · rename_i h
+    rw [sharedPartitionTreesP_eq]
+    show (emitSharedBlocksAtSizedP data ta cuts
+      (sharedPartitionSizedP ta cuts 0).2 0 BitWriter.empty).flush =
+        deflateDynamicBlocksSharedAtP data ta cuts
     rw [emitSharedBlocksAtSizedP_eq]
     unfold deflateDynamicBlocksSharedAtP
     rw [if_neg h]
