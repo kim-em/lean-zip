@@ -157,9 +157,10 @@ def runMatcher (costAccept useLazy2 : Bool) (data : ByteArray)
     lazyGen costAccept useLazy2 data chain lazyD lazyD2 insertCap goodMatch niceLen 32768 hashSize
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size) 0 #[]
 
-/-- Compressed size of a packed token stream through the *exact* dispatch
-    `deflateRaw` uses at `level`: levels 4–5 emit a single `deflateRawBase`
-    block; levels 6–8 arbitrate base against the observation-divergence split. -/
+/-- Compressed size of a packed token stream through the historical dispatch
+    model used when this spike was recorded: levels 4–5 emit one base block,
+    while levels 6–8 arbitrate it against the observation-divergence split.
+    Production has since moved L4 to fused greedy and L5 into the split tier. -/
 def sizeAt (data : ByteArray) (level : UInt8) (ptoks : TokenArray) : Nat :=
   if level < 6 then
     (deflateRawBasePPrep data ptoks).1

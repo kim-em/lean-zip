@@ -968,8 +968,9 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     **L4 is chain 16 in the greedy tier**, paired with `insertCap = 128`.
     Pinned production median-of-5 measurements place its 0.340536 geometric-
     mean Silesia ratio above the proper L3↔L5 time-per-byte interpolation.
-    The former lazy chain-64 L4 measured only 57.61 MB/s at 0.331300 and sat
-    well inside that frontier.
+    The former lazy chain-64 L4 measured about 57.4 MB/s at 0.331300 and was
+    strictly dominated by L5 (about 59.0 MB/s at 0.327256) in the committed
+    baseline.
 
     **L5 = 24 since the L5 re-grid** (`gate-sweep`, run after the hash3 singleton #2824, gm/ld
     re-grid #2825, and greedy re-grid #2830 landings): the old L5 = (128,
@@ -998,7 +999,10 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     balance): with the `niceLen` cutoff disabled (see there), (chain 8, cap 8)
     matches the old L2's weighted-Silesia ratio exactly at +12% speed, and
     (chain 16, cap 32) beats the old L3 on both axes — the old rows sat ~10%
-    below the greedy-band mixing frontier.
+    below the greedy-band mixing frontier. After the L4 retune, the complete
+    median-of-5 refresh places L3 about 0.5% inside the direct L2↔L4 mixing
+    curve on both headline corpora; other matched runs straddled zero, so L3 is
+    a marginal point and the next natural ladder re-grid target.
 
     Level 1 is the `deflate_fast` corner (#2726): depth `4` is exactly zlib
     `-1`'s `max_chain`. A tokens-held-constant attribution on Silesia (see
@@ -2803,7 +2807,7 @@ theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseP data (lzMatchP data level) = deflateRawBase data level := rfl
 
 /-- Boxed-histogram fused base path. Level one uses the specialized native-word
-    outer loop; levels two and three retain the generic fused matcher. -/
+    outer loop; levels two through four retain the generic fused matcher. -/
 def deflateRawBaseFLevel1Impl (data : ByteArray) (level : UInt8) : ByteArray :=
   let fused :=
     if level == 1 then lz77ChainIterPMergedF1U data
@@ -3056,8 +3060,9 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     So callers pinning `level = 9` for absolute best ratio should now pass 10.
     (The zlib/FFI bindings are a separate 0–9 path and are unchanged.)
 
-    Level 0 = stored; levels 1–5 run the single-block cost-model dispatch
-    (`deflateRawBase`); levels 5–8 (#2737, L5 since the L5 re-grid) additionally try the cross-block
+    Level 0 = stored; levels 1–4 run the fused greedy single-block cost-model
+    dispatch (`deflateRawBaseF`). Levels 5–8 (#2737, L5 since the L5 re-grid)
+    size-arbitrate that level's packed base candidate against the cross-block
     (shared-window) split candidate — one whole-file match pass, token stream
     partitioned per block, references cross block boundaries — with the
     partition chosen by the scalar-native observation-divergence heuristic,
