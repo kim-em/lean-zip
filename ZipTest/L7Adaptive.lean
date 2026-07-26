@@ -1,13 +1,14 @@
 import ZipTest.Helpers
 import Zip.Native.DeflateDynamic
 
-/-! Golden tests for the level-7 content-profile and split-cadence selectors.
+/-! Golden tests for the adaptive level-2–7 content routes.
 
 The classifier inputs below are deterministic summaries of the eleven
 Canterbury and twelve Silesia files used to tune the policy.  Canterbury is
 tracked in the repository, so those files also exercise signal extraction.
 Silesia extraction is checked when the optional downloaded corpus is present;
-the summary goldens still cover all twelve files in ordinary CI.
+the summary goldens still cover all twelve files in ordinary CI.  A synthetic
+input above the adaptive gate exercises production L2–L6 in ordinary CI.
 -/
 
 open Zip.Native.Deflate
@@ -21,6 +22,59 @@ def assertProfile (name : String) (actual expected : L7Profile) : IO Unit :=
 def assertRoute (name : String) (actual expected : L7OutputRoute) : IO Unit :=
   unless actual == expected do
     throw (IO.userError s!"L7 route {name}: expected {repr expected}, got {repr actual}")
+
+def assertL2Route (name : String) (actual expected : L2AdaptiveRoute) : IO Unit :=
+  unless actual == expected do
+    throw (IO.userError s!"L2 route {name}: expected {repr expected}, got {repr actual}")
+
+def assertL3Route (name : String) (actual expected : L3AdaptiveRoute) : IO Unit :=
+  unless actual == expected do
+    throw (IO.userError s!"L3 route {name}: expected {repr expected}, got {repr actual}")
+
+def assertL4Route (name : String) (actual expected : L4AdaptiveRoute) : IO Unit :=
+  unless actual == expected do
+    throw (IO.userError s!"L4 route {name}: expected {repr expected}, got {repr actual}")
+
+def assertL5Route (name : String) (actual expected : L5AdaptiveRoute) : IO Unit :=
+  unless actual == expected do
+    throw (IO.userError s!"L5 route {name}: expected {repr expected}, got {repr actual}")
+
+def assertL6Route (name : String) (actual expected : L6AdaptiveRoute) : IO Unit :=
+  unless actual == expected do
+    throw (IO.userError s!"L6 route {name}: expected {repr expected}, got {repr actual}")
+
+def assertBytes (name : String) (actual expected : ByteArray) : IO Unit :=
+  unless actual == expected do
+    throw (IO.userError
+      s!"adaptive payload {name}: expected {expected.size} bytes, got {actual.size}")
+
+def assertOutputGolden (name : String) (actual : ByteArray)
+    (expectedSize : Nat) (expectedCrc : UInt32) : IO Unit := do
+  let actualCrc := Crc32.Native.crc32 0 actual
+  unless actual.size == expectedSize && actualCrc == expectedCrc do
+    throw (IO.userError s!"adaptive golden {name}: expected size/CRC {expectedSize}/{expectedCrc}, got {actual.size}/{actualCrc}")
+
+def checkAdaptiveRoutes (name : String) (size : Nat) (profile : L7Profile)
+    (expected2 : L2AdaptiveRoute) (expected3 : L3AdaptiveRoute)
+    (expected4 : L4AdaptiveRoute) (expected5 : L5AdaptiveRoute)
+    (expected6 : L6AdaptiveRoute) : IO Unit := do
+  assertL2Route name (l2AdaptiveRouteForProfile size profile) expected2
+  assertL3Route name (l3AdaptiveRouteForProfile size profile) expected3
+  assertL4Route name (l4AdaptiveRouteForProfile size profile) expected4
+  assertL5Route name (l5AdaptiveRouteForProfile size profile) expected5
+  assertL6Route name (l6AdaptiveRouteForProfile size profile) expected6
+
+/-- Deterministic restricted-alphabet data: compressible enough to bypass the
+    stored pre-scan, but with enough distinct four-grams to select h3-balanced. -/
+def mkAdaptiveAlphabetData (size : Nat) : ByteArray := Id.run do
+  let mut state : UInt32 := 2463534242
+  let mut result := ByteArray.empty
+  for _ in [:size] do
+    state := state ^^^ (state <<< 13)
+    state := state ^^^ (state >>> 17)
+    state := state ^^^ (state <<< 5)
+    result := result.push (state.toNat % 11).toUInt8
+  return result
 
 def checkSmall (name : String) (size runs : Nat) (expected : L7Profile) : IO Unit :=
   assertProfile name (l7ClassifySmall size runs) expected
@@ -37,7 +91,7 @@ def checkCadence (name : String) (size : Nat) (profile : L7Profile)
 
 def checkFileIfPresent (path : String) (expectedProfile : L7Profile)
     (expectedCadence : Nat) (expectedRoute : L7OutputRoute)
-    (expectedSize : Nat) : IO Unit := do
+    (expectedSize : Nat) : IO (Option (Array Nat)) := do
   if ← System.FilePath.pathExists path then
     let data ← IO.FS.readBinFile path
     let profile := l7ProfileFor data
@@ -57,6 +111,26 @@ def checkFileIfPresent (path : String) (expectedProfile : L7Profile)
     unless routed.size == expectedSize do
       throw (IO.userError
         s!"L7 route {path}: expected {expectedSize} bytes, got {routed.size}")
+    if adaptiveFastTierMinSize ≤ data.size then
+      assertL2Route path (l2AdaptiveRouteFor data)
+        (l2AdaptiveRouteForProfile data.size profile)
+      assertL3Route path (l3AdaptiveRouteFor data)
+        (l3AdaptiveRouteForProfile data.size profile)
+      assertL4Route path (l4AdaptiveRouteFor data)
+        (l4AdaptiveRouteForProfile data.size profile)
+      assertL5Route path (l5AdaptiveRouteFor data)
+        (l5AdaptiveRouteForProfile data.size profile)
+      assertL6Route path (l6AdaptiveRouteFor data)
+        (l6AdaptiveRouteForProfile data.size profile)
+      let mut sizes := #[]
+      for level in [2, 3, 4, 5, 6] do
+        sizes := sizes.push (deflateRaw data level.toUInt8).size
+      sizes := sizes.push production.size
+      for i in [:sizes.size - 1] do
+        unless sizes[i + 1]! ≤ sizes[i]! do
+          throw (IO.userError s!"{path} L{i + 2}→L{i + 3} size regressed: {sizes[i]!} → {sizes[i + 1]!}")
+      return some sizes
+  return none
 
 def tests : IO Unit := do
   IO.println "  L7 adaptive-selector tests..."
@@ -100,6 +174,153 @@ def tests : IO Unit := do
   checkLarge "webster" 461 511 564 .chain128Probe32
   checkLarge "x-ray" 726 917 1000 .h3Fast
   checkLarge "xml" 99 199 416 .deep
+
+  -- Every profile stays on its exact pre-adaptive pipeline below 5 MiB.
+  let profiles : List L7Profile := [
+    .shallow, .h3Fast, .h3Balanced, .chain64Probe8, .chain64Probe16,
+    .chain96Probe16, .chain128Probe16, .chain128Probe32,
+    .chain128LongProbe32, .deep
+  ]
+  for profile in profiles do
+    checkAdaptiveRoutes s!"below-gate/{repr profile}" (adaptiveFastTierMinSize - 1)
+      profile .current .current .current .current .current
+
+  -- Pin every profile's large-input route at the adaptive gate.
+  let gate := adaptiveFastTierMinSize
+  checkAdaptiveRoutes "gate/shallow" gate .shallow
+    .level1 .level2 .fast .fast .level7
+  checkAdaptiveRoutes "gate/h3Fast" gate .h3Fast
+    .level1 .level4 .current .level7 .level7
+  checkAdaptiveRoutes "gate/h3Balanced" gate .h3Balanced
+    .level1 .fast .fast .fast .level7
+  checkAdaptiveRoutes "gate/chain64Probe8" gate .chain64Probe8
+    .level1 .fast .fast .fast .fast
+  checkAdaptiveRoutes "gate/chain64Probe16" gate .chain64Probe16
+    .level1 .fast .level5 .current .level5
+  checkAdaptiveRoutes "gate/chain96Probe16" gate .chain96Probe16
+    .level1 .fast .fast .fast .fast
+  checkAdaptiveRoutes "gate/chain128Probe16" gate .chain128Probe16
+    .level1 .level4 .level5 .current .level7
+  checkAdaptiveRoutes "gate/chain128Probe32" gate .chain128Probe32
+    .current .level4 .level5 .current .level7
+  checkAdaptiveRoutes "gate/chain128LongProbe32" gate .chain128LongProbe32
+    .level1 .level4 .level5 .level7 .level7
+  checkAdaptiveRoutes "gate/deep" gate .deep
+    .level1 .level4 .level5 .level7 .level7
+
+  -- The L3 7,000,000-byte boundary is deliberately decimal.  The L4–L6
+  -- h3-balanced boundary remains binary 20 MiB, and L6's fast band starts at
+  -- the former decimal boundary.
+  assertL3Route "h3Balanced/6999999"
+    (l3AdaptiveRouteForProfile (l3AdaptiveBalancedMaxSize - 1) .h3Balanced) .fast
+  assertL3Route "h3Balanced/7000000"
+    (l3AdaptiveRouteForProfile l3AdaptiveBalancedMaxSize .h3Balanced) .level2
+  assertL4Route "h3Balanced/20MiB-1"
+    (l4AdaptiveRouteForProfile (adaptiveBalancedMaxSize - 1) .h3Balanced) .fast
+  assertL4Route "h3Balanced/20MiB"
+    (l4AdaptiveRouteForProfile adaptiveBalancedMaxSize .h3Balanced) .level5
+  assertL5Route "h3Balanced/20MiB-1"
+    (l5AdaptiveRouteForProfile (adaptiveBalancedMaxSize - 1) .h3Balanced) .fast
+  assertL5Route "h3Balanced/20MiB"
+    (l5AdaptiveRouteForProfile adaptiveBalancedMaxSize .h3Balanced) .current
+  assertL6Route "h3Balanced/gate"
+    (l6AdaptiveRouteForProfile adaptiveFastTierMinSize .h3Balanced) .level7
+  assertL6Route "h3Balanced/6999999"
+    (l6AdaptiveRouteForProfile (l3AdaptiveBalancedMaxSize - 1) .h3Balanced) .level7
+  assertL6Route "h3Balanced/7000000"
+    (l6AdaptiveRouteForProfile l3AdaptiveBalancedMaxSize .h3Balanced) .fast
+  assertL6Route "h3Balanced/20MiB-1"
+    (l6AdaptiveRouteForProfile (adaptiveBalancedMaxSize - 1) .h3Balanced) .fast
+  assertL6Route "h3Balanced/20MiB"
+    (l6AdaptiveRouteForProfile adaptiveBalancedMaxSize .h3Balanced) .level7
+
+  -- Pin the Silesia profile/size policies even when the optional files are not
+  -- downloaded.  These are route goldens, not recomputed sweep choices.
+  checkAdaptiveRoutes "silesia/dickens" 10192446 .chain96Probe16
+    .level1 .fast .fast .fast .fast
+  checkAdaptiveRoutes "silesia/mozilla" 51220480 .h3Balanced
+    .level1 .level2 .level5 .current .level7
+  checkAdaptiveRoutes "silesia/mr" 9970564 .chain64Probe8
+    .level1 .fast .fast .fast .fast
+  checkAdaptiveRoutes "silesia/nci" 33553445 .chain128LongProbe32
+    .level1 .level4 .level5 .level7 .level7
+  checkAdaptiveRoutes "silesia/ooffice" 6152192 .h3Balanced
+    .level1 .fast .fast .fast .level7
+  checkAdaptiveRoutes "silesia/osdb" 10085684 .shallow
+    .level1 .level2 .fast .fast .level7
+  checkAdaptiveRoutes "silesia/reymont" 6627202 .chain128Probe16
+    .level1 .level4 .level5 .current .level7
+  checkAdaptiveRoutes "silesia/samba" 21606400 .chain64Probe16
+    .level1 .fast .level5 .current .level5
+  checkAdaptiveRoutes "silesia/sao" 7251944 .h3Balanced
+    .level1 .level2 .fast .fast .fast
+  checkAdaptiveRoutes "silesia/webster" 41458703 .chain128Probe32
+    .current .level4 .level5 .current .level7
+  checkAdaptiveRoutes "silesia/x-ray" 8474240 .h3Fast
+    .level1 .level4 .current .level7 .level7
+  checkAdaptiveRoutes "silesia/xml" 5345280 .deep
+    .level1 .level4 .level5 .level7 .level7
+
+  -- A below-gate synthetic fixture pins the exact historical output bytes.
+  let smallText := mkTextData (64 * 1024)
+  unless !incompressiblePrescan smallText do
+    throw (IO.userError "small adaptive fixture unexpectedly hit the stored pre-scan")
+  assertBytes "small/L2" (deflateRaw smallText 2) (deflateRawBaseF smallText 2)
+  assertBytes "small/L3" (deflateRaw smallText 3) (deflateRawBaseF smallText 3)
+  assertBytes "small/L4" (deflateRaw smallText 4) (deflateRawBaseF smallText 4)
+  assertBytes "small/L5" (deflateRaw smallText 5) (deflateRawSplitLevelP smallText 5)
+  assertBytes "small/L6" (deflateRaw smallText 6) (deflateRawSplitLevelP smallText 6)
+
+  -- Literal historical-byte goldens within the bypass band.  Four MiB reaches
+  -- L5's chain-22/2016-token policy and L6's ≥1 MiB matcher/split policy while
+  -- remaining below the adaptive classifier gate.
+  let historicalText := mkTextData (4 * 1024 * 1024)
+  unless !incompressiblePrescan historicalText do
+    throw (IO.userError "historical adaptive fixture unexpectedly hit the stored pre-scan")
+  assertOutputGolden "historical/L5" (deflateRaw historicalText 5) 20496 1741195073
+  assertOutputGolden "historical/L6" (deflateRaw historicalText 6) 20496 1741195073
+
+  -- This normal-CI control sits above the gate and is independent of Silesia.
+  -- Its low-cardinality text profile traverses representative L1, L4, split-L5,
+  -- and retained-profile-L7 constituents through public L2–L6 dispatch.
+  let adaptiveText := mkTextData (adaptiveFastTierMinSize + 64 * 1024)
+  unless !incompressiblePrescan adaptiveText do
+    throw (IO.userError "large adaptive fixture unexpectedly hit the stored pre-scan")
+  let adaptiveProfile := l7ProfileFor adaptiveText
+  assertProfile "large synthetic text" adaptiveProfile .chain128LongProbe32
+  checkAdaptiveRoutes "large synthetic text" adaptiveText.size adaptiveProfile
+    .level1 .level4 .level5 .level7 .level7
+  assertL2Route "large synthetic text/production" (l2AdaptiveRouteFor adaptiveText) .level1
+  assertL3Route "large synthetic text/production" (l3AdaptiveRouteFor adaptiveText) .level4
+  assertL4Route "large synthetic text/production" (l4AdaptiveRouteFor adaptiveText) .level5
+  assertL5Route "large synthetic text/production" (l5AdaptiveRouteFor adaptiveText) .level7
+  assertL6Route "large synthetic text/production" (l6AdaptiveRouteFor adaptiveText) .level7
+  let expectedL1 := deflateRawBaseF adaptiveText 1
+  let expectedL4 := deflateRawBaseF adaptiveText 4
+  let expectedL5 := deflateRawSplitLevelP adaptiveText 5
+  let expectedL7 := deflateRawL7P adaptiveText adaptiveProfile
+  assertBytes "large/L2" (deflateRaw adaptiveText 2) expectedL1
+  assertBytes "large/L3" (deflateRaw adaptiveText 3) expectedL4
+  assertBytes "large/L4" (deflateRaw adaptiveText 4) expectedL5
+  assertBytes "large/L5" (deflateRaw adaptiveText 5) expectedL7
+  assertBytes "large/L6" (deflateRaw adaptiveText 6) expectedL7
+
+  -- A second normal-CI profile pins the shared c8/i12 payload itself and its
+  -- selection through three public adaptive levels.
+  let fastText := mkAdaptiveAlphabetData (adaptiveFastTierMinSize + 64 * 1024)
+  unless !incompressiblePrescan fastText do
+    throw (IO.userError "large fast fixture unexpectedly hit the stored pre-scan")
+  let fastProfile := l7ProfileFor fastText
+  assertProfile "large restricted-alphabet data" fastProfile .h3Balanced
+  checkAdaptiveRoutes "large restricted-alphabet data" fastText.size fastProfile
+    .level1 .fast .fast .fast .level7
+  assertL3Route "large fast/production" (l3AdaptiveRouteFor fastText) .fast
+  assertL4Route "large fast/production" (l4AdaptiveRouteFor fastText) .fast
+  assertL5Route "large fast/production" (l5AdaptiveRouteFor fastText) .fast
+  let expectedFast := deflateRawBaseFNU64 fastText 8 12 258
+  assertBytes "large-fast/L3" (deflateRaw fastText 3) expectedFast
+  assertBytes "large-fast/L4" (deflateRaw fastText 4) expectedFast
+  assertBytes "large-fast/L5" (deflateRaw fastText 5) expectedFast
 
   -- Silesia: cadence selected from the profile and exact input size.
   checkCadence "dickens" 10192446 .chain96Probe16 4096
@@ -165,8 +386,22 @@ def tests : IO Unit := do
     ("silesia/x-ray", 8474240, .h3Fast, 1024, .split, 6033708),
     ("silesia/xml", 5345280, .deep, 512, .split, 660492)
   ]
+  let mut adaptiveTotals : Array Nat := #[0, 0, 0, 0, 0, 0]
+  let mut adaptiveFileCount := 0
   for (file, size, profile, cadence, route, expectedSize) in files do
     assertRoute file (l7OutputRouteFor size profile) route
-    checkFileIfPresent ("bench/corpora/" ++ file) profile cadence route expectedSize
+    if let some sizes ←
+        checkFileIfPresent ("bench/corpora/" ++ file) profile cadence route expectedSize then
+      adaptiveFileCount := adaptiveFileCount + 1
+      for i in [:adaptiveTotals.size] do
+        adaptiveTotals := adaptiveTotals.set! i (adaptiveTotals[i]! + sizes[i]!)
+
+  -- With the complete optional corpus present, the aggregate production sizes
+  -- must remain monotone across L2–L7.  Partial downloads still exercise every
+  -- available file's classifier and selected public dispatch above.
+  if adaptiveFileCount == 12 then
+    for i in [:adaptiveTotals.size - 1] do
+      unless adaptiveTotals[i + 1]! ≤ adaptiveTotals[i]! do
+        throw (IO.userError s!"Silesia aggregate L{i + 2}→L{i + 3} regressed: {adaptiveTotals[i]!} → {adaptiveTotals[i + 1]!}")
 
 end ZipTest.L7Adaptive

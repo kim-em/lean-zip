@@ -394,20 +394,24 @@ packed stream is `lzMatch`). The three `deflateRawBase` spec lemmas in
 `Zip/Spec/DeflateRoundtrip.lean` keep their statements and rewrite through
 this equation. -/
 
+/-- The packed base dispatch is the boxed base dispatch over the packed
+    stream's `unpackTok` view, for an arbitrary token stream. -/
+theorem deflateRawBaseP_eq (data : ByteArray) (ptokens : TokenArray) :
+    deflateRawBaseTokens data (ptokens.toArray.map unpackTok) =
+      deflateRawBaseP data ptokens := by
+  unfold deflateRawBaseP deflateRawBaseTokens
+  simp only [dynBlockBytesWith_dynHeaderCodes,
+    deflateDynamicBlockCorePWithFlat_dynHeaderCodes,
+    deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq,
+    tokenFreqsPTA_toArray, tokenFreqsP_eq]
+
 /-- The boxed base dispatch over `lzMatch` is the (packed-pipeline)
     `deflateRawBase`. -/
 theorem deflateRawBase_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseTokens data (lzMatch data level) = deflateRawBase data level := by
-  unfold deflateRawBase deflateRawBaseP deflateRawBaseTokens
-  -- The packed dispatch shares one `dynHeaderCodes` plan across sizing and emit
-  -- (#2627); collapse the plan-taking variants back to the un-deduped forms, then
-  -- finish with the boxed/packed emitter and frequency equalities.  The
-  -- `TokenArray` frequency walk routes to the boxed model through
-  -- `tokenFreqsPTA_toArray` (the `.toArray` view) then `tokenFreqsP_eq`.
-  simp only [dynBlockBytesWith_dynHeaderCodes,
-    deflateDynamicBlockCorePWithFlat_dynHeaderCodes,
-    deflateFixedBlockP_eq, deflateDynamicBlockCoreP_eq, tokenFreqsPTA_toArray, tokenFreqsP_eq,
-    lzMatchP_map]
+  unfold deflateRawBase
+  rw [← lzMatchP_map]
+  exact deflateRawBaseP_eq data (lzMatchP data level)
 
 /-! ## The packed shared-window split candidate equals the boxed one (#2737)
 
@@ -499,8 +503,8 @@ theorem emitSharedBlocksAtP_eq (data : ByteArray) (ta : TokenArray)
   emitSharedBlocksAtP_eq_fuel data ta (ta.size - pos + 1) pos (by omega) cuts bw
 
 /-- The packed observation-divergence split candidate is byte-identical to the
-    boxed reference at the same (constant) cut list: `deflateRaw`'s level 5–8
-    split branch and the roundtrip proofs see
+    boxed reference at the same (constant) cut list: the pre-adaptive L5/L6 and
+    L8 split pipelines, L7's selected split route, and the roundtrip proofs see
     `deflateDynamicBlocksSharedAtTokens … (fun _ => cuts)` through this
     rewrite, and the `DeflateBlockSplit` theorems hold for any selector. -/
 theorem deflateDynamicBlocksSharedAtP_eq (data : ByteArray) (ta : TokenArray)

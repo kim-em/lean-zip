@@ -999,10 +999,11 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     balance): with the `niceLen` cutoff disabled (see there), (chain 8, cap 8)
     matches the old L2's weighted-Silesia ratio exactly at +12% speed, and
     (chain 16, cap 32) beats the old L3 on both axes — the old rows sat ~10%
-    below the greedy-band mixing frontier. After the L4 retune, the complete
-    median-of-5 refresh places L3 about 0.5% inside the direct L2↔L4 mixing
-    curve on both headline corpora; other matched runs straddled zero, so L3 is
-    a marginal point and the next natural ladder re-grid target.
+    below the greedy-band mixing frontier.  Before the adaptive re-grid below,
+    the complete median-of-5 refresh placed this fixed L3 source about 0.5%
+    inside the direct L2↔L4 mixing curve on both headline corpora; other matched
+    runs straddled zero.  That marginal result motivated the content-routed
+    large-input L2–L6 ladder while preserving these exact source points.
 
     Level 1 is the `deflate_fast` corner (#2726): depth `4` is exactly zlib
     `-1`'s `max_chain`. A tokens-held-constant attribution on Silesia (see
@@ -1467,8 +1468,9 @@ def l7ClassifyLarge (minUnique meanUnique maxUnique : Nat) : L7Profile :=
 
     Inputs below 1 MiB use the 63-probe adjacent-run signal.  Larger inputs use
     four spread 32 KiB regions and the allocation-free four-word cardinality
-    sketch.  Only level 7 consults this selector; every other level retains its
-    existing matcher and output policy. -/
+    sketch.  Level 7 uses the selected matcher directly; sufficiently large
+    levels 2–6 also reuse the profile to select among proven production
+    frontier constituents. -/
 def l7ProfileFor (data : ByteArray) : L7Profile := Id.run do
   if data.size < h3ProbeMinSize then
     return l7ClassifySmall data.size (l7AdjacentRunSamples data)
@@ -1486,6 +1488,155 @@ def l7ProfileFor (data : ByteArray) : L7Profile := Id.run do
     maxUnique := max maxUnique unique
     sumUnique := sumUnique + unique
   return l7ClassifyLarge minUnique (sumUnique / max prescanRegions 1) maxUnique
+
+/-! ## Adaptive fast-tier routes
+
+Levels 2–6 reuse level 7's allocation-free content classifier on sufficiently
+large inputs.  The route constructors name *pre-adaptive* pipelines: in
+particular, `.level4` is the fixed c16/i128 greedy point, `.level5` is the
+current split-level-5 pipeline, and `.level7` is the current retained-profile
+level-7 pipeline.  Keeping those constituents separate prevents recursive
+calls through the public level dispatch. -/
+
+/-- Inputs below 5 MiB retain the current L2–L6 bytes and avoid the profile
+    scan. -/
+def adaptiveFastTierMinSize : Nat := 5 * 1024 * 1024
+
+/-- Upper edge of L3's fast `h3Balanced` band (7,000,000 bytes, deliberately
+    decimal: ooffice stays fast while sao routes to L2). -/
+def l3AdaptiveBalancedMaxSize : Nat := 7 * 1000 * 1000
+
+/-- Upper edge of the L4–L6 fast `h3Balanced` band. -/
+def adaptiveBalancedMaxSize : Nat := 20 * 1024 * 1024
+
+inductive L2AdaptiveRoute where
+  | current
+  | level1
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+inductive L3AdaptiveRoute where
+  | current
+  | fast
+  | level2
+  | level4
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+inductive L4AdaptiveRoute where
+  | current
+  | fast
+  | level5
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+inductive L5AdaptiveRoute where
+  | current
+  | fast
+  | level7
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+inductive L6AdaptiveRoute where
+  | current
+  | fast
+  | level5
+  | level7
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+/-- Large-input L2 policy over an already-computed level-7 profile. -/
+def l2AdaptiveLargeRouteFor : L7Profile → L2AdaptiveRoute
+  | .chain128Probe32 => .current
+  | _ => .level1
+
+/-- Large-input L3 policy over an already-computed level-7 profile. -/
+def l3AdaptiveLargeRouteFor (size : Nat) : L7Profile → L3AdaptiveRoute
+  | .chain96Probe16 | .chain64Probe8 | .chain64Probe16 => .fast
+  | .h3Balanced =>
+      if size < l3AdaptiveBalancedMaxSize then .fast else .level2
+  | .shallow => .level2
+  | .chain128LongProbe32 | .chain128Probe16 | .chain128Probe32
+  | .h3Fast | .deep => .level4
+
+/-- Large-input L4 policy over an already-computed level-7 profile. -/
+def l4AdaptiveLargeRouteFor (size : Nat) : L7Profile → L4AdaptiveRoute
+  | .chain96Probe16 | .chain64Probe8 | .shallow => .fast
+  | .h3Fast => .current
+  | .h3Balanced =>
+      if size < adaptiveBalancedMaxSize then .fast else .level5
+  | .chain64Probe16 | .chain128LongProbe32 | .chain128Probe16
+  | .chain128Probe32 | .deep => .level5
+
+/-- Large-input L5 policy over an already-computed level-7 profile. -/
+def l5AdaptiveLargeRouteFor (size : Nat) : L7Profile → L5AdaptiveRoute
+  | .chain96Probe16 | .chain64Probe8 | .shallow => .fast
+  | .h3Balanced =>
+      if size < adaptiveBalancedMaxSize then .fast else .current
+  | .chain128LongProbe32 | .h3Fast | .deep => .level7
+  | .chain128Probe16 | .chain64Probe16 | .chain128Probe32 => .current
+
+/-- Large-input L6 policy over an already-computed level-7 profile. -/
+def l6AdaptiveLargeRouteFor (size : Nat) : L7Profile → L6AdaptiveRoute
+  | .chain96Probe16 | .chain64Probe8 => .fast
+  | .h3Balanced =>
+      if l3AdaptiveBalancedMaxSize ≤ size && size < adaptiveBalancedMaxSize then
+        .fast
+      else
+        .level7
+  | .chain64Probe16 => .level5
+  | .shallow | .h3Fast | .chain128LongProbe32 | .chain128Probe16
+  | .chain128Probe32 | .deep => .level7
+
+/-- Pure size/profile L2 selector, exposed for route conformance tests. -/
+def l2AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L2AdaptiveRoute :=
+  if size < adaptiveFastTierMinSize then .current
+  else l2AdaptiveLargeRouteFor profile
+
+/-- Pure size/profile L3 selector, exposed for route conformance tests. -/
+def l3AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L3AdaptiveRoute :=
+  if size < adaptiveFastTierMinSize then .current
+  else l3AdaptiveLargeRouteFor size profile
+
+/-- Pure size/profile L4 selector, exposed for route conformance tests. -/
+def l4AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L4AdaptiveRoute :=
+  if size < adaptiveFastTierMinSize then .current
+  else l4AdaptiveLargeRouteFor size profile
+
+/-- Pure size/profile L5 selector, exposed for route conformance tests. -/
+def l5AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L5AdaptiveRoute :=
+  if size < adaptiveFastTierMinSize then .current
+  else l5AdaptiveLargeRouteFor size profile
+
+/-- Pure size/profile L6 selector, exposed for route conformance tests. -/
+def l6AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L6AdaptiveRoute :=
+  if size < adaptiveFastTierMinSize then .current
+  else l6AdaptiveLargeRouteFor size profile
+
+/-- Production L2 selector.  The outer gate avoids computing `l7ProfileFor` on
+    small inputs. -/
+def l2AdaptiveRouteFor (data : ByteArray) : L2AdaptiveRoute :=
+  if data.size < adaptiveFastTierMinSize then .current
+  else l2AdaptiveLargeRouteFor (l7ProfileFor data)
+
+/-- Production L3 selector.  The outer gate avoids computing `l7ProfileFor` on
+    small inputs. -/
+def l3AdaptiveRouteFor (data : ByteArray) : L3AdaptiveRoute :=
+  if data.size < adaptiveFastTierMinSize then .current
+  else l3AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+
+/-- Production L4 selector.  The outer gate avoids computing `l7ProfileFor` on
+    small inputs. -/
+def l4AdaptiveRouteFor (data : ByteArray) : L4AdaptiveRoute :=
+  if data.size < adaptiveFastTierMinSize then .current
+  else l4AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+
+/-- Production L5 selector.  The outer gate avoids computing `l7ProfileFor` on
+    small inputs. -/
+def l5AdaptiveRouteFor (data : ByteArray) : L5AdaptiveRoute :=
+  if data.size < adaptiveFastTierMinSize then .current
+  else l5AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+
+/-- Production L6 selector.  The outer gate avoids computing `l7ProfileFor` on
+    small inputs. -/
+def l6AdaptiveRouteFor (data : ByteArray) : L6AdaptiveRoute :=
+  if data.size < adaptiveFastTierMinSize then .current
+  else l6AdaptiveLargeRouteFor data.size (l7ProfileFor data)
 
 /-- Boxed lazy matcher at an already-selected level-7 profile. -/
 def l7MatchFor (data : ByteArray) (profile : L7Profile) : Array LZ77Token :=
@@ -2928,8 +3079,8 @@ def deflateDynamicBlocksSharedAtTreesP (data : ByteArray) (toks : TokenArray)
     (`deflateObsSplitSizedFreqsP_snd`), the whole-stream histogram the base
     candidate needs — derived here by folding the per-block frequencies the
     sizing pass already built, instead of a second whole-stream `tokenFreqsP`
-    walk. `deflateRaw` (levels 5–8, cuts non-empty) forces this once and feeds
-    component 2 to `deflateRawBasePPrepF`. -/
+    walk.  The pre-adaptive split pipelines for levels 5–8 (cuts non-empty)
+    force this once and feed component 2 to `deflateRawBasePPrepF`. -/
 def deflateObsSplitSizedFreqsP (data : ByteArray) (toks : TokenArray)
     (cuts : List Nat) : (Nat × (Unit → ByteArray)) × (Array Nat × Array Nat) :=
   if data.size == 0 then
@@ -3166,20 +3317,44 @@ theorem deflateRawBaseFU64Level1_eq (data : ByteArray) :
   rw [lz77ChainIterPMergedF1U64_eq]
   simp
 
+/-- Parameterized greedy base path with the native-word outer loop and wide
+    fused histogram.  Unlike the level-indexed wrapper below, this helper keeps
+    arbitrary measured policy knobs available to adaptive routes. -/
+def deflateRawBaseFNU64 (data : ByteArray)
+    (maxChain insertCap niceLen : Nat) : ByteArray :=
+  let (ptokens, litF, distF) :=
+    lz77ChainIterPMergedFNU64 data maxChain insertCap niceLen
+  deflateRawBasePF data ptokens (litF, distF)
+
+/-- The parameterized wide base path is the established packed base at the same
+    greedy policy. -/
+theorem deflateRawBaseFNU64_eq (data : ByteArray)
+    (maxChain insertCap niceLen : Nat) :
+    deflateRawBaseFNU64 data maxChain insertCap niceLen =
+      deflateRawBaseP data
+        (lz77ChainIterP data maxChain 32768 insertCap niceLen) := by
+  unfold deflateRawBaseFNU64
+  rw [lz77ChainIterPMergedFNU64_eq, lz77ChainIterPMergedFNU_eq,
+    lz77ChainIterPMergedF_eq, lz77ChainIterPMerged_eq]
+  -- Reduce the fused triple's dependent subtype-size proof projections before
+  -- comparing its plain frequency pair with `tokenFreqsPTA`.
+  dsimp only
+  simpa only [tokenFreqsPTA_toArray] using
+    (deflateRawBasePF_tokenFreqsP data
+      (lz77ChainIterP data maxChain 32768 insertCap niceLen))
+
 /-- Parameterized greedy matcher with a native-word outer loop and one unboxed
     wide histogram.  Used by levels two through four; the matcher owns its
     addressability guards and exact generic fallback. -/
 def deflateRawBaseFU64Greedy (data : ByteArray) (level : UInt8) : ByteArray :=
-  let (ptokens, litF, distF) :=
-    lz77ChainIterPMergedFNU64 data (chainDepth level) (insertCap level) (niceLen level)
-  deflateRawBasePF data ptokens (litF, distF)
+  deflateRawBaseFNU64 data (chainDepth level) (insertCap level) (niceLen level)
 
 /-- Away from level one, the parameterized wide matcher is byte-identical to
     the established boxed-histogram fused implementation. -/
 theorem deflateRawBaseFU64Greedy_eq (data : ByteArray) (level : UInt8)
     (hlevel : level ≠ 1) :
     deflateRawBaseFU64Greedy data level = deflateRawBaseFLevel1Impl data level := by
-  unfold deflateRawBaseFU64Greedy deflateRawBaseFLevel1Impl
+  unfold deflateRawBaseFU64Greedy deflateRawBaseFNU64 deflateRawBaseFLevel1Impl
   rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
   rw [lz77ChainIterPMergedFNU64_eq, lz77ChainIterPMergedFNU_eq]
 
@@ -3448,6 +3623,85 @@ def deflateRawL7RouteP (data : ByteArray) (profile : L7Profile)
       if cuts.isEmpty then deflateRawBaseP data ptokens
       else deflateDynamicBlocksSharedAtTreesP data ptokens cuts
 
+/-- Current observation-split pipeline at an already-computed level token
+    stream.  Factoring this pre-adaptive tail lets adaptive levels select exact
+    current L5/L6 bytes without recursively calling `deflateRaw`. -/
+def deflateRawSplitLevelTokensP (data : ByteArray) (level : UInt8)
+    (ptokens : TokenArray) : ByteArray :=
+  let cuts :=
+    if level == 5 then
+      if useL5LargeInputPolicy data level then
+        chooseSplitsHeuristicPUPacked ptokens data.size
+          (splitCheckTokensFor data level)
+      else
+        chooseSplitsHeuristicPU ptokens data.size
+          (splitCheckTokensFor data level)
+    else
+      chooseSplitsHeuristicPUPacked ptokens data.size
+        (splitCheckTokensFor data level)
+  deflateRawSplitTierP data ptokens cuts
+
+/-- Current observation-split level pipeline, including its exact matcher. -/
+def deflateRawSplitLevelP (data : ByteArray) (level : UInt8) : ByteArray :=
+  deflateRawSplitLevelTokensP data level (lzMatchP data level)
+
+/-- Current retained-profile L7 pipeline.  The caller supplies the profile so
+    an adaptive route can classify once and retain it through matching/output. -/
+def deflateRawL7P (data : ByteArray) (profile : L7Profile) : ByteArray :=
+  deflateRawL7RouteP data profile (l7MatchPFor data profile)
+
+/-- Shared c8/i12 native-wide greedy point selected by adaptive L3–L6 routes. -/
+def deflateRawAdaptiveFast (data : ByteArray) : ByteArray :=
+  deflateRawBaseFNU64 data 8 12 258
+
+/-- Adaptive L2 core.  Large inputs keep exact current L2 (c8/i8) only for the
+    `chain128Probe32` profile; every other profile selects exact current L1. -/
+def deflateRawL2Adaptive (data : ByteArray) : ByteArray :=
+  match l2AdaptiveRouteFor data with
+  | .current => deflateRawBaseF data 2
+  | .level1 => deflateRawBaseF data 1
+
+/-- Adaptive L3 core.  Every named level route is a pre-adaptive exact helper,
+    so this function never recurses through the public dispatch. -/
+def deflateRawL3Adaptive (data : ByteArray) : ByteArray :=
+  match l3AdaptiveRouteFor data with
+  | .current => deflateRawBaseF data 3
+  | .fast => deflateRawAdaptiveFast data
+  | .level2 => deflateRawBaseF data 2
+  | .level4 => deflateRawBaseF data 4
+
+/-- Adaptive L4 core, with `.level5` selecting the exact current split L5. -/
+def deflateRawL4Adaptive (data : ByteArray) : ByteArray :=
+  match l4AdaptiveRouteFor data with
+  | .current => deflateRawBaseF data 4
+  | .fast => deflateRawAdaptiveFast data
+  | .level5 => deflateRawSplitLevelP data 5
+
+/-- Adaptive L5 core.  On large inputs it computes the profile once and retains
+    it if the exact current L7 route is selected. -/
+def deflateRawL5Adaptive (data : ByteArray) : ByteArray :=
+  if data.size < adaptiveFastTierMinSize then
+    deflateRawSplitLevelP data 5
+  else
+    let profile := l7ProfileFor data
+    match l5AdaptiveLargeRouteFor data.size profile with
+    | .current => deflateRawSplitLevelP data 5
+    | .fast => deflateRawAdaptiveFast data
+    | .level7 => deflateRawL7P data profile
+
+/-- Adaptive L6 core.  Exact L5 and retained-profile L7 constituents call their
+    pre-adaptive helpers rather than the public level dispatch. -/
+def deflateRawL6Adaptive (data : ByteArray) : ByteArray :=
+  if data.size < adaptiveFastTierMinSize then
+    deflateRawSplitLevelP data 6
+  else
+    let profile := l7ProfileFor data
+    match l6AdaptiveLargeRouteFor data.size profile with
+    | .current => deflateRawSplitLevelP data 6
+    | .fast => deflateRawAdaptiveFast data
+    | .level5 => deflateRawSplitLevelP data 5
+    | .level7 => deflateRawL7P data profile
+
 /-- Unified raw DEFLATE compression dispatch. The native level range is **0–10**
     (wider than zlib's 0–9). Since #2638 the top of the ladder is:
 
@@ -3459,13 +3713,18 @@ def deflateRawL7RouteP (data : ByteArray) (profile : L7Profile)
     So callers pinning `level = 9` for absolute best ratio should now pass 10.
     (The zlib/FFI bindings are a separate 0–9 path and are unchanged.)
 
-    Level 0 = stored; levels 1–4 run the fused greedy single-block cost-model
-    dispatch (`deflateRawBaseF`). Levels 5–8 (#2737, L5 since the L5 re-grid)
-    size-arbitrate that level's packed base candidate against the cross-block
-    (shared-window) split candidate — one whole-file match pass, token stream
-    partitioned per block, references cross block boundaries — with the
-    partition chosen by the scalar-native observation-divergence heuristic,
-    using its packed-counter refinement on large L5
+    Level 0 = stored and level 1 is the fused greedy single-block point.
+    Below 5 MiB, levels 2–6 retain their pre-adaptive pipelines byte-for-byte.
+    At and above that gate they reuse level 7's content profile to select among
+    already-proven frontier constituents: fixed greedy L1/L2/L4, the shared
+    c8/i12 greedy point, split L5/L6, and retained-profile L7.  Level 7 keeps
+    its content-selected matcher/output route directly, while level 8 keeps
+    the packed base-vs-cross-block split arbitration described below.
+
+    The split pipeline uses one whole-file match pass, partitions the token
+    stream per block while allowing references across block boundaries, and
+    chooses the partition with the scalar-native observation-divergence
+    heuristic, using its packed-counter refinement on large L5
     (`chooseSplitsHeuristicPU` / `chooseSplitsHeuristicPUPacked`, both refining
     libdeflate's streaming boundary check): each
     block gets its own frequency-fit Huffman trees, recovering most of the
@@ -3495,9 +3754,10 @@ def deflateRawL7RouteP (data : ByteArray) (profile : L7Profile)
 
     Every old L4–L8 point is dominated by (or within 1% of) the new curve's
     mixing frontier, and the split points sit far outside the old one.
-    L4 has since moved again: the fused greedy chain-16/cap-128 point is
-    measured above the current L3↔L5 time-per-byte interpolation on both
-    headline corpora.
+    The pre-adaptive L4 source point has since moved again: fused greedy
+    chain-16/cap-128 measured above the then-current L3↔L5 time-per-byte
+    interpolation on both headline corpora.  It remains an exact constituent
+    available to the adaptive L3/L4 policy.
 
     At level 8 this **replaces** the arbitrated split
     (`chooseSplitsArbitrated` + `deflateDynamicBlocksSharedSized`, retired
@@ -3549,22 +3809,25 @@ def deflateRawL7RouteP (data : ByteArray) (profile : L7Profile)
     guarantees we never regress below the base. All branches are
     roundtrip-verified.
 
-    The split tier starts at level 5 (the L5 re-grid; previously level ≥ 6 per
-    #2737, before that ≥ 8, and before that ≥ 7 — see #2698 for that history):
-    with the boundaries chosen by the cheap streaming heuristic and the whole
-    split pipeline on packed tokens, the candidates are **sized with their
+    The pre-adaptive split tier starts at level 5 (the L5 re-grid; previously
+    level ≥ 6 per #2737, before that ≥ 8, and before that ≥ 7 — see #2698 for
+    that history).  Adaptive L4–L6 may now select exact pre-adaptive L5, L6, or
+    retained-profile L7 constituents without recursively entering this public
+    dispatch.  With boundaries chosen by the cheap streaming heuristic and the
+    whole split pipeline on packed tokens, the candidates are **sized with their
     per-block trees captured** (`deflateRawBasePPrep` /
     `deflateDynamicBlocksSharedAtSizedP`) and only the winner is emitted
     (#2753), reusing the trees the sizing pass already built — so exactly one
-    emit pass runs instead of two (three at L8). Level 4 stays single-block on
-    purpose — its fused greedy policy is the high-speed frontier point. L5 joined the split tier in
+    emit pass runs instead of two (three at L8).  The pre-adaptive L4 source
+    point stays single-block on purpose; public large-input L4 may instead
+    select fast greedy or exact split-L5.  L5 joined the split tier in
     the re-grid: post-#2824/#2825/#2830 the old single-block L5 sat ~14%
     inside the L4↔L6 mixing line, and a shallow split point (chain 24, gate
     64, probe /4, no singleton) matches its speed at −0.53pp weighted-Silesia
     ratio — the split's per-block trees buy more than the deep chain did.
     Inputs of at least 4 MiB subsequently move to chain 22 and a 2016-token
     split cadence; smaller L5 inputs retain the chain-24/512-token point.
-    Levels 1–4 stay single-block greedy.
+    Inputs below the 5 MiB adaptive gate retain those exact historical bytes.
 
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
     short-circuited on the first compressible region) and, on unambiguously
@@ -3577,6 +3840,10 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
   if level == 0 then deflateStoredPure data
   else if incompressiblePrescan data then deflateStoredPure data
   else if 5 ≤ level then
+    if level == 5 then
+      deflateRawL5Adaptive data
+    else if level == 6 then
+      deflateRawL6Adaptive data
     -- One *packed* matcher pass shared by the base and shared-split candidates
     -- (the matcher is 83–84% of each candidate's cost — Wave-0 profile, D-2).
     -- Both candidates consume the packed words end-to-end (freqs *and* emit):
@@ -3587,7 +3854,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     -- ptt5-class Canterbury bitmaps at L9, so weakening it changes real
     -- output. The floor's cost was never the matcher; it was the full base
     -- EMIT, now a sized prep below.)
-    if level == 7 then
+    else if level == 7 then
       -- Level 7 selects one content profile and retains it through matching and
       -- split-cadence/output-route selection.  In particular, the large shallow
       -- point needs the specialized L5 matcher, its 2016-token cadence, and the
@@ -3595,8 +3862,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       -- sketch twice.  Small inputs retain size arbitration except for the
       -- held-out-safe direct-split profiles selected by `l7OutputRouteFor`.
       let profile := l7ProfileFor data
-      let ptokens := l7MatchPFor data profile
-      deflateRawL7RouteP data profile ptokens
+      deflateRawL7P data profile
     else
       let ptokens := lzMatchP data level
       if level == 9 then
@@ -3635,7 +3901,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
         let bp := deflateRawBasePPrep data ptokens
         emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
       else
-        -- Levels 5, 6 and 8: base vs cross-block shared-window split at the
+        -- Level 8: base vs cross-block shared-window split at the
         -- observation-divergence boundaries (#2737),
         -- **size-arbitrated** (#2753). Both candidates are *prepared* — sized to
         -- their flushed byte count with per-block trees captured
@@ -3660,26 +3926,17 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
         -- (`chooseSplitsHeuristicPUPacked_lzMatchP_eq`), while reducing the hot
         -- loop's twenty counters to seven words. Small L5 retains the scalar
         -- route, where setup dominates the shorter stream.
-        let cuts :=
-          if level == 5 then
-            if useL5LargeInputPolicy data level then
-              chooseSplitsHeuristicPUPacked ptokens data.size
-                (splitCheckTokensFor data level)
-            else
-              chooseSplitsHeuristicPU ptokens data.size
-                (splitCheckTokensFor data level)
-          else
-            chooseSplitsHeuristicPUPacked ptokens data.size
-              (splitCheckTokensFor data level)
-        -- `deflateRawSplitTierP`: the base, or the size-arbitrated smaller of
-        -- base and obs-split, with only the winning captured-tree thunk forced.
-        deflateRawSplitTierP data ptokens cuts
+        deflateRawSplitLevelTokensP data level ptokens
   else
-    -- Greedy tier (levels 1–4): fuse the whole-stream `tokenFreqsP` walk into the
-    -- matcher pass. `deflateRawBaseF` produces the tokens and their frequencies in
-    -- one pass and sizes/emits the base candidate from them, byte-identical to
-    -- `deflateRawBase data level` (`deflateRawBaseF_eq`) — it removes the separate
-    -- re-read of the (possibly cache-spilling) token array (#freq-fusion).
-    deflateRawBaseF data level
+    if level == 2 then
+      deflateRawL2Adaptive data
+    else if level == 3 then
+      deflateRawL3Adaptive data
+    else if level == 4 then
+      deflateRawL4Adaptive data
+    else
+      -- Greedy base (level 1): fuse the whole-stream `tokenFreqsP` walk into
+      -- matching. Adaptive L2–L4 select among the same proven helpers above.
+      deflateRawBaseF data level
 
 end Zip.Native.Deflate
