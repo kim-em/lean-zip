@@ -2756,7 +2756,7 @@ decreasing_by all_goals (first | assumption | omega)
     interior-update path from the generated hot loop.  The public entry below
     remains definitionally the generic `useH3 := false` matcher for proofs and
     selects this loop only through `implemented_by`. -/
-def lz77LazyMergedLoopNoH3 (data : ByteArray)
+@[specialize useFastLog] def lz77LazyMergedLoopNoH3 (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
     (useFastLog : Bool) (c : Array Nat) (pos pLen pMatchPos step : Nat)
     (acc : TokenArray) : TokenArray :=
@@ -2901,7 +2901,7 @@ decreasing_by all_goals (first | assumption | omega)
     singleton enabled.  `h3tab` remains explicit state, but seeding, singleton
     writes, and fused interior updates are unconditional, removing every
     recursive `useH3` test from the generated hot loop. -/
-def lz77LazyMergedLoopH3 (data : ByteArray)
+@[specialize useFastLog] def lz77LazyMergedLoopH3 (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
     (useFastLog : Bool) (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat)
     (acc : TokenArray) : TokenArray :=
@@ -3051,6 +3051,38 @@ def lz77LazyMergedLoopH3 (data : ByteArray)
 termination_by 2 * (data.size - pos) + min pLen 1
 decreasing_by all_goals (first | assumption | omega)
 
+/-- Non-inlined entry shim that gives the compiler a constant `false`
+    specialization of the no-H3 loop. -/
+@[noinline] def lz77LazyMergedLoopNoH3NatLog (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (c : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
+  lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+    goodMatch niceLen lazyDepth lazy2Steps false c pos pLen pMatchPos step acc
+
+/-- Non-inlined entry shim that gives the compiler a constant `true`
+    specialization of the no-H3 loop. -/
+@[noinline] def lz77LazyMergedLoopNoH3FastLog (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (c : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
+  lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+    goodMatch niceLen lazyDepth lazy2Steps true c pos pLen pMatchPos step acc
+
+/-- Non-inlined entry shim that gives the compiler a constant `false`
+    specialization of the H3 loop. -/
+@[noinline] def lz77LazyMergedLoopH3NatLog (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
+  lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+    goodMatch niceLen lazyDepth lazy2Steps false c h3tab pos pLen pMatchPos step acc
+
+/-- Non-inlined entry shim that gives the compiler a constant `true`
+    specialization of the H3 loop. -/
+@[noinline] def lz77LazyMergedLoopH3FastLog (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
+  lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+    goodMatch niceLen lazyDepth lazy2Steps true c h3tab pos pLen pMatchPos step acc
+
 /-- Merged-array entry mirroring `lz77ChainLazyIterP`: builds the combined
     `prevSize + hashSize` array and runs `lz77LazyMergedLoop`. Threads the
     rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
@@ -3079,10 +3111,15 @@ def lz77ChainLazyIterPMergedH3Native (data : ByteArray) (maxChain : Nat)
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
-    lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap goodMatch
-      niceLen lazyDepth lazy2Steps useFastLog
-      (.replicate (prevSize + hashSize) data.size)
-      (.replicate 32768 data.size) 0 0 0 0 (TokenArray.emptyWithCapacity data.size)
+    let c := .replicate (prevSize + hashSize) data.size
+    let h3tab := .replicate 32768 data.size
+    let acc := TokenArray.emptyWithCapacity data.size
+    if useFastLog then
+      lz77LazyMergedLoopH3FastLog data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps c h3tab 0 0 0 0 acc
+    else
+      lz77LazyMergedLoopH3NatLog data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps c h3tab 0 0 0 0 acc
 
 /-- Proof-facing H3 entry.  Its logical body is the proved generic matcher;
     generated code uses `lz77ChainLazyIterPMergedH3Native`. -/
@@ -3105,10 +3142,14 @@ def lz77ChainLazyIterPMergedNoH3Native (data : ByteArray) (maxChain : Nat)
   else
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
-    lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap goodMatch
-      niceLen lazyDepth lazy2Steps useFastLog
-      (.replicate (prevSize + hashSize) data.size) 0 0 0 0
-      (TokenArray.emptyWithCapacity data.size)
+    let c := .replicate (prevSize + hashSize) data.size
+    let acc := TokenArray.emptyWithCapacity data.size
+    if useFastLog then
+      lz77LazyMergedLoopNoH3FastLog data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps c 0 0 0 0 acc
+    else
+      lz77LazyMergedLoopNoH3NatLog data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps c 0 0 0 0 acc
 
 /-- Proof-facing no-H3 entry.  Its logical body is the proved generic matcher;
     generated code uses `lz77ChainLazyIterPMergedNoH3Native`. -/
