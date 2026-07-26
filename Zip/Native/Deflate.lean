@@ -466,8 +466,9 @@ private theorem unpackTok_pack_reference (l d : UInt32) (hlu : l ≤ 258) (hdu :
 /-- `unpackTok` recovers every token within the encoder bounds (literals
     unconditionally; references with `3 ≤ len ≤ 258`, `1 ≤ dist ≤ 32768` —
     exactly the `Enc` predicate of the matcher encodability theorems). The
-    bit-level facts are discharged by `bv_decide` after `generalize`-ing the
-    `Nat → UInt32` casts into variables carrying their `≤` bounds. -/
+    bit-level facts are discharged by `bv_decide` in `unpackTok_pack_reference`,
+    which states the reference case over `UInt32` variables carrying their `≤`
+    bounds — the shape `bv_decide` needs. -/
 theorem unpackTok_packTok (t : LZ77Token)
     (h : match t with
       | .literal _ => True
