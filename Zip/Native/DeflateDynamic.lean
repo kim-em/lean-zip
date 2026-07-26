@@ -1169,13 +1169,6 @@ def prescanRegionBytes : Nat := 32768
     allocation small. -/
 def prescanTableBits : Nat := 20
 
-/-- Minimum input size for the h3 content gate to engage. Below this the matcher
-    is cheap enough that the probe's cost is negligible and the region scan would
-    be net overhead, so small inputs keep the static `useH3Level` decision — which
-    also leaves every existing small-input output byte-identical. 1 MiB, matching
-    `prescanMinSize`. -/
-def h3ProbeMinSize : Nat := 1048576
-
 /-- Per-region 4-gram collision-fraction cutoff (percent) below which a region is
     judged sparse in recurring 4-grams, i.e. low-compressibility. Tuned on Silesia:
     the least-compressible region of each ratio-winning binary sits below 61%
