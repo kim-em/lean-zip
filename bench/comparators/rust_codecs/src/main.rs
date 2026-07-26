@@ -26,6 +26,9 @@ const BACKEND: &str = "zlib-rs";
 #[cfg(feature = "zlib-ng-backend")]
 const BACKEND: &str = "zlib-ng";
 
+const TIMING_AGGREGATION: &str = "median";
+const TIMING_REPS: usize = 5;
+
 fn iters_for(size: usize) -> usize {
     if size <= 16_384 {
         50
@@ -55,7 +58,7 @@ fn median_ns_per_op(
     iters: usize,
     mut operation: impl FnMut() -> io::Result<usize>,
 ) -> io::Result<u128> {
-    let mut samples = [0_u128; 5];
+    let mut samples = [0_u128; TIMING_REPS];
     let mut sink = 0_usize;
     for sample in &mut samples {
         let start = Instant::now();
@@ -82,9 +85,12 @@ fn run_decode(path: &str) -> io::Result<()> {
     let size = decoded.len();
     let ns = median_ns_per_op(iters_for(size), || Ok(inflate(&compressed)?.len()))?;
     println!(
-        "{{\"decompress_mbps\":{:.2},\"decoded_size\":{}}}",
+        "{{\"decompress_mbps\":{:.2},\"decoded_size\":{},\
+         \"timing_aggregation\":\"{}\",\"timing_reps\":{}}}",
         mbps(size, ns),
-        size
+        size,
+        TIMING_AGGREGATION,
+        TIMING_REPS
     );
     Ok(())
 }
@@ -103,10 +109,13 @@ fn run_roundtrip(path: &str, level: u32) -> io::Result<()> {
     let compress_ns = median_ns_per_op(iters, || Ok(deflate(&data, level)?.len()))?;
     let decompress_ns = median_ns_per_op(iters, || Ok(inflate(&compressed)?.len()))?;
     println!(
-        "{{\"out_size\":{},\"compress_mbps\":{:.2},\"decompress_mbps\":{:.2}}}",
+        "{{\"out_size\":{},\"compress_mbps\":{:.2},\"decompress_mbps\":{:.2},\
+         \"timing_aggregation\":\"{}\",\"timing_reps\":{}}}",
         compressed.len(),
         mbps(size, compress_ns),
-        mbps(size, decompress_ns)
+        mbps(size, decompress_ns),
+        TIMING_AGGREGATION,
+        TIMING_REPS
     );
     Ok(())
 }

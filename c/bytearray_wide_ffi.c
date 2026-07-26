@@ -29,7 +29,12 @@
  */
 
 #include <lean/lean.h>
+#include <limits.h>
 #include <stdint.h>
+
+#if defined(_MSC_VER) && !defined(__clang__)
+#include <intrin.h>
+#endif
 
 /*
  * lean_zip_uget_u32le : ByteArray → USize → UInt32
@@ -118,6 +123,38 @@ LEAN_EXPORT lean_obj_res lean_zip_push_u64le(lean_obj_arg a, uint64_t v, size_t 
         a = lean_byte_array_push(a, (uint8_t)(v >> (8 * i)));
     }
     return a;
+}
+
+/*
+ * lean_zip_uint32_log2_clz : UInt32 → UInt32
+ *
+ * Exact floor-log2 with the same zero/one convention as `UInt32.log2`.
+ * GCC/Clang lower `__builtin_clz` to the target's CLZ/LZCNT/BSR sequence;
+ * MSVC exposes the equivalent bit-scan-reverse intrinsic. The final fallback
+ * is only for compilers providing neither intrinsic.
+ */
+LEAN_EXPORT uint32_t lean_zip_uint32_log2_clz(uint32_t x) {
+    if (x < 2) return 0;
+#if defined(_MSC_VER) && !defined(__clang__)
+    unsigned long index;
+    _BitScanReverse(&index, (unsigned long)x);
+    return (uint32_t)index;
+#elif defined(__clang__) || defined(__GNUC__)
+    /*
+     * Do not assume `unsigned int` is 32 bits.  `uint32_t` guarantees the
+     * input width, while the sizeof term adjusts for any wider
+     * `unsigned long long` accepted by __builtin_clzll.
+     */
+    return (uint32_t)(sizeof(unsigned long long) * CHAR_BIT - 1u)
+        - (uint32_t)__builtin_clzll((unsigned long long)x);
+#else
+    uint32_t result = 0;
+    while (x >= 2) {
+        result++;
+        x >>= 1;
+    }
+    return result;
+#endif
 }
 
 /*

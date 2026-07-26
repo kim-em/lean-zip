@@ -233,32 +233,113 @@ theorem lz77ChainLazyIterP_map (data : ByteArray) (maxChain windowSize insertCap
 
 /-! ## Dispatch boundary -/
 
+/-- The packed matcher at an already-selected level-7 profile is the exact
+    packed image of its boxed twin.  The large shallow arm uses the specialized
+    merged L5 loop; its existing equality theorem pins that loop to the same
+    chain-22/depth-5 generic matcher. -/
+theorem l7MatchPFor_eq (data : ByteArray) (profile : L7Profile) :
+    (l7MatchPFor data profile).toArray = (l7MatchFor data profile).map packTok := by
+  unfold l7MatchPFor l7MatchFor
+  by_cases hs : l7UseLargeShallow data profile = true
+  · rw [if_pos hs, lz77ChainLazyIterPMergedL5Large_eq]
+    have hs' : (profile == .shallow) = true ∧
+        decide (l5LargeInputMinSize ≤ data.size) = true := by
+      simpa only [l7UseLargeShallow, Bool.and_eq_true] using hs
+    have hp : profile = .shallow := LawfulBEq.eq_of_beq hs'.1
+    have hsize : l5LargeInputMinSize ≤ data.size := of_decide_eq_true hs'.2
+    subst profile
+    simp only [l7MatchConfig]
+    rw [if_pos hsize]
+    exact lz77ChainLazyIterP_eq data 22 32768 1000000000 64 65 5 false 1
+  · rw [if_neg hs]
+    by_cases hh : (l7MatchConfig data profile).useH3 = true
+    · simp only [hh, ↓reduceIte, lz77ChainLazyIterPMergedH3,
+        lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_eq data (l7MatchConfig data profile).chainDepth 32768
+        1000000000 (l7MatchConfig data profile).goodMatch
+        (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+        true (l7MatchConfig data profile).lazy2Steps
+    · have hh' : (l7MatchConfig data profile).useH3 = false := by
+        cases h : (l7MatchConfig data profile).useH3 with
+        | false => rfl
+        | true => exact (hh h).elim
+      simp only [hh', Bool.false_eq_true, ↓reduceIte, lz77ChainLazyIterPMergedNoH3,
+        lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_eq data (l7MatchConfig data profile).chainDepth 32768
+        1000000000 (l7MatchConfig data profile).goodMatch
+        (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+        false (l7MatchConfig data profile).lazy2Steps
+
+/-- The boxed view of an already-selected packed level-7 profile is its boxed
+    matcher. -/
+theorem l7MatchPFor_map (data : ByteArray) (profile : L7Profile) :
+    (l7MatchPFor data profile).toArray.map unpackTok = l7MatchFor data profile := by
+  unfold l7MatchPFor l7MatchFor
+  by_cases hs : l7UseLargeShallow data profile = true
+  · rw [if_pos hs, lz77ChainLazyIterPMergedL5Large_eq]
+    have hs' : (profile == .shallow) = true ∧
+        decide (l5LargeInputMinSize ≤ data.size) = true := by
+      simpa only [l7UseLargeShallow, Bool.and_eq_true] using hs
+    have hp : profile = .shallow := LawfulBEq.eq_of_beq hs'.1
+    have hsize : l5LargeInputMinSize ≤ data.size := of_decide_eq_true hs'.2
+    subst profile
+    simp only [l7MatchConfig]
+    rw [if_pos hsize]
+    exact lz77ChainLazyIterP_map data 22 32768 1000000000 64 65 5 false 1
+      (by omega) (by omega)
+  · rw [if_neg hs]
+    by_cases hh : (l7MatchConfig data profile).useH3 = true
+    · simp only [hh, ↓reduceIte, lz77ChainLazyIterPMergedH3,
+        lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_map data (l7MatchConfig data profile).chainDepth 32768
+        1000000000 (l7MatchConfig data profile).goodMatch
+        (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+        true (l7MatchConfig data profile).lazy2Steps (by omega) (by omega)
+    · have hh' : (l7MatchConfig data profile).useH3 = false := by
+        cases h : (l7MatchConfig data profile).useH3 with
+        | false => rfl
+        | true => exact (hh h).elim
+      simp only [hh', Bool.false_eq_true, ↓reduceIte, lz77ChainLazyIterPMergedNoH3,
+        lz77ChainLazyIterPMerged_eq]
+      exact lz77ChainLazyIterP_map data (l7MatchConfig data profile).chainDepth 32768
+        1000000000 (l7MatchConfig data profile).goodMatch
+        (l7MatchConfig data profile).niceLen (l7MatchConfig data profile).lazyDepth
+        false (l7MatchConfig data profile).lazy2Steps (by omega) (by omega)
+
 /-- `lzMatchP` is the `packTok` image of `lzMatch` at every level. -/
 theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).toArray = (lzMatch data level).map packTok := by
   unfold lzMatchP lzMatch
-  by_cases h5 : 5 ≤ level
-  · simp only [if_pos h5]
-    by_cases hlarge : useL5LargeInputPolicy data level = true
-    · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
-      have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
-        simpa [useL5LargeInputPolicy] using hlarge
-      obtain ⟨rfl, _hsize⟩ := hp
-      have hchain : lazyChainDepthFor data 5 = 22 := by
-        unfold lazyChainDepthFor
-        rw [if_pos hlarge]
-      rw [hchain]
-      simpa [lazyDepthFor, hlarge,
-        useH3For, useH3Level, lazy2StepsLevel] using
-        (lz77ChainLazyIterP_eq data 22 32768 (insertCap 5) (goodMatch 5)
-          (niceLen 5) 5 false 1)
-    · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
-      exact lz77ChainLazyIterP_eq data (lazyChainDepthFor data level) 32768
-        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-        (useH3For data level) (lazy2StepsLevel level)
-  · simp only [if_neg h5]
-    rw [lz77ChainIterPMerged_eq]
-    exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
+  by_cases h7 : (level == 7) = true
+  · simp only [h7, ↓reduceIte]
+    exact l7MatchPFor_eq data (l7ProfileFor data)
+  · have h7f : (level == 7) = false := by
+      cases hb : level == 7 with
+      | false => rfl
+      | true => exact (h7 hb).elim
+    simp only [h7f, Bool.false_eq_true, ↓reduceIte]
+    by_cases h5 : 5 ≤ level
+    · simp only [if_pos h5]
+      by_cases hlarge : useL5LargeInputPolicy data level = true
+      · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
+        have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
+          simpa [useL5LargeInputPolicy] using hlarge
+        obtain ⟨rfl, _hsize⟩ := hp
+        have hchain : lazyChainDepthFor data 5 = 22 := by
+          unfold lazyChainDepthFor
+          rw [if_pos hlarge]
+        rw [hchain]
+        simpa [lazyDepthFor, hlarge,
+          useH3For, useH3Level, lazy2StepsLevel] using
+          (lz77ChainLazyIterP_eq data 22 32768 (insertCap 5) (goodMatch 5)
+            (niceLen 5) 5 false 1)
+      · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
+        exact lz77ChainLazyIterP_eq data (lazyChainDepthFor data level) 32768
+          (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+          (useH3For data level) (lazy2StepsLevel level)
+    · simp only [if_neg h5]
+      rw [lz77ChainIterPMerged_eq]
+      exact lz77ChainIterP_eq data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- The boxed view of the packed token stream is exactly `lzMatch`'s stream:
     stage B+ consumers of `lzMatchP` inherit every `lzMatch` contract through
@@ -266,30 +347,38 @@ theorem lzMatchP_eq (data : ByteArray) (level : UInt8) :
 theorem lzMatchP_map (data : ByteArray) (level : UInt8) :
     (lzMatchP data level).toArray.map unpackTok = lzMatch data level := by
   unfold lzMatchP lzMatch
-  by_cases h5 : 5 ≤ level
-  · simp only [if_pos h5]
-    by_cases hlarge : useL5LargeInputPolicy data level = true
-    · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
-      have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
-        simpa [useL5LargeInputPolicy] using hlarge
-      obtain ⟨rfl, _hsize⟩ := hp
-      have hchain : lazyChainDepthFor data 5 = 22 := by
-        unfold lazyChainDepthFor
-        rw [if_pos hlarge]
-      rw [hchain]
-      simpa [lazyDepthFor, hlarge,
-        useH3For, useH3Level, lazy2StepsLevel] using
-        (lz77ChainLazyIterP_map data 22 32768 (insertCap 5) (goodMatch 5)
-          (niceLen 5) 5 false 1 (by omega) (by omega))
-    · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
-      exact lz77ChainLazyIterP_map data (lazyChainDepthFor data level) 32768
-        (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
-        (useH3For data level) (lazy2StepsLevel level)
+  by_cases h7 : (level == 7) = true
+  · simp only [h7, ↓reduceIte]
+    exact l7MatchPFor_map data (l7ProfileFor data)
+  · have h7f : (level == 7) = false := by
+      cases hb : level == 7 with
+      | false => rfl
+      | true => exact (h7 hb).elim
+    simp only [h7f, Bool.false_eq_true, ↓reduceIte]
+    by_cases h5 : 5 ≤ level
+    · simp only [if_pos h5]
+      by_cases hlarge : useL5LargeInputPolicy data level = true
+      · rw [if_pos hlarge, lz77ChainLazyIterPMergedL5Large_eq]
+        have hp : level = 5 ∧ l5LargeInputMinSize ≤ data.size := by
+          simpa [useL5LargeInputPolicy] using hlarge
+        obtain ⟨rfl, _hsize⟩ := hp
+        have hchain : lazyChainDepthFor data 5 = 22 := by
+          unfold lazyChainDepthFor
+          rw [if_pos hlarge]
+        rw [hchain]
+        simpa [lazyDepthFor, hlarge,
+          useH3For, useH3Level, lazy2StepsLevel] using
+          (lz77ChainLazyIterP_map data 22 32768 (insertCap 5) (goodMatch 5)
+            (niceLen 5) 5 false 1 (by omega) (by omega))
+      · rw [if_neg hlarge, lz77ChainLazyIterPMerged_eq]
+        exact lz77ChainLazyIterP_map data (lazyChainDepthFor data level) 32768
+          (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level)
+          (useH3For data level) (lazy2StepsLevel level)
+          (by omega) (by omega)
+    · simp only [if_neg h5]
+      rw [lz77ChainIterPMerged_eq]
+      exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
         (by omega) (by omega)
-  · simp only [if_neg h5]
-    rw [lz77ChainIterPMerged_eq]
-    exact lz77ChainIterP_map data (chainDepth level) 32768 (insertCap level) (niceLen level)
-      (by omega) (by omega)
 
 /-! ## Stages B+C: the packed base candidate equals the boxed one
 
@@ -432,6 +521,33 @@ the packed twin of `emitSharedBlocksAtSized_eq`. Each block's trees are
 is exactly what `emitSharedBlockP` recomputes; the `emitDynBlockP` calls then
 coincide (the alphabet-size proofs are proof-irrelevant). -/
 
+/-- Fuel form of the trees-only partition walker's equality to the tree
+    component of the exact-size walker. -/
+private theorem sharedPartitionTreesP_eq_fuel (toks : TokenArray) :
+    ∀ (fuel pos : Nat), toks.size - pos < fuel → ∀ (cuts : List Nat),
+      sharedPartitionTreesP toks cuts pos = (sharedPartitionSizedP toks cuts pos).2 := by
+  intro fuel
+  induction fuel with
+  | zero => intro pos hf; omega
+  | succ fuel ih =>
+    intro pos hf cuts
+    by_cases hend : min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size
+    · conv => lhs; unfold sharedPartitionTreesP
+      conv => rhs; unfold sharedPartitionSizedP
+      simp only [if_pos hend]
+    · conv => lhs; unfold sharedPartitionTreesP
+      conv => rhs; unfold sharedPartitionSizedP
+      simp only [if_neg hend]
+      rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size)
+        (by omega) cuts.tail]
+
+/-- The trees-only partition walker produces exactly the tree list captured by
+    the established exact-size walker, for every packed token stream and cut
+    list. -/
+theorem sharedPartitionTreesP_eq (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
+    sharedPartitionTreesP toks cuts pos = (sharedPartitionSizedP toks cuts pos).2 :=
+  sharedPartitionTreesP_eq_fuel toks (toks.size - pos + 1) pos (by omega) cuts
+
 /-- Fed the sizing pass's trees, the tree-taking packed emitter equals the
     reference packed emitter (fuel-quantified form for the induction). -/
 private theorem emitSharedBlocksAtSizedP_eq_fuel (data : ByteArray) (ta : TokenArray) :
@@ -492,6 +608,24 @@ theorem deflateDynamicBlocksSharedAtSizedP_emit (data : ByteArray) (ta : TokenAr
   · rename_i h
     show (emitSharedBlocksAtSizedP data ta cuts (sharedPartitionSizedP ta cuts 0).2 0
       BitWriter.empty).flush = deflateDynamicBlocksSharedAtP data ta cuts
+    rw [emitSharedBlocksAtSizedP_eq]
+    unfold deflateDynamicBlocksSharedAtP
+    rw [if_neg h]
+
+/-- Trees-only split preparation emits byte-for-byte the established packed
+    shared-window split candidate, for every input, token stream, and cut list. -/
+theorem deflateDynamicBlocksSharedAtTreesP_eq (data : ByteArray) (ta : TokenArray)
+    (cuts : List Nat) :
+    deflateDynamicBlocksSharedAtTreesP data ta cuts =
+      deflateDynamicBlocksSharedAtP data ta cuts := by
+  unfold deflateDynamicBlocksSharedAtTreesP
+  split
+  · rfl
+  · rename_i h
+    rw [sharedPartitionTreesP_eq]
+    show (emitSharedBlocksAtSizedP data ta cuts
+      (sharedPartitionSizedP ta cuts 0).2 0 BitWriter.empty).flush =
+        deflateDynamicBlocksSharedAtP data ta cuts
     rw [emitSharedBlocksAtSizedP_eq]
     unfold deflateDynamicBlocksSharedAtP
     rw [if_neg h]

@@ -966,6 +966,13 @@ def tooFar3 : Nat := 4096
     hash3Probe data (min windowSize tooFar3) pos (headProbeGuarded h3tab (hash3Single data pos hlt)) hlt
   else 0
 
+/-- Allocate the length-3 singleton table only for matcher profiles that use it.
+    Every access and update is guarded by the same `useH3`; the empty table on
+    the false branch is therefore observationally identical to an initialized
+    32K table while avoiding a fixed allocation on no-H3 inputs. -/
+@[inline] def initialH3Table (useH3 : Bool) (sentinel : Nat) : Array Nat :=
+  if useH3 then .replicate 32768 sentinel else #[]
+
 /-- Interior-position hash3-singleton insertion, the length-3 twin of
     `lz77Chain.updateHashes`' chain insertion: for each `j ∈ [j, matchLen)` (also
     `≤ insertCap`) with three readable bytes, store `pos+j` into
@@ -1265,6 +1272,66 @@ decreasing_by
       rw [USize.toNat_sub_of_le _ _ hle, USize.toNat_one]
     omega
 
+/-- Hot-path specialization of `chainWalkPackedU` for an accumulator below the
+    match cutoff.  That inequality is preserved by the skip branch and is
+    re-established by the non-skip continuation, so the skip branch does not
+    need to retest it at every candidate.  `chainWalkPackedUBelow_eq` proves that
+    this is exactly `chainWalkPackedU` whenever `hbelow` holds. -/
+def chainWalkPackedUBelow (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (hps : min chainWinSize data.size ≤ prev.size) (hsz : data.size < USize.size)
+    (posU maxLenU cutoffU : USize) (hposU : posU.toNat = pos) (hmaxU : maxLenU.toNat = maxLen)
+    (hcutU : cutoffU.toNat = min niceLen maxLen)
+    (cand : Nat) (fuelU bestLenU bestPosU : USize) (hbelow : bestLenU < cutoffU) : Nat :=
+  if fuelU = 0 then bestPosU.toNat * 512 + bestLenU.toNat
+  else if hc : cand < pos ∧ pos - cand ≤ windowSize then
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have hcand : cand + maxLen ≤ data.size := by omega
+    have hcandlt : cand < USize.size := by omega
+    let candU : USize := cand.toUSize
+    have hcandU : candU.toNat = cand := toUSize_toNat_of_lt hcandlt
+    let skip : Bool := if hbl : bestLenU < maxLenU then
+        have hbln : bestLenU.toNat < maxLen := by rw [← hmaxU]; exact USize.lt_iff_toNat_lt.mp hbl
+        have hb1 : (candU + bestLenU).toNat < data.size := by
+          have e : (candU + bestLenU).toNat = cand + bestLenU.toNat := by
+            rw [USize.toNat_add, hcandU]; apply Nat.mod_eq_of_lt; omega
+          omega
+        have hb2 : (posU + bestLenU).toNat < data.size := by
+          have e : (posU + bestLenU).toNat = pos + bestLenU.toNat := by
+            rw [USize.toNat_add, hposU]; apply Nat.mod_eq_of_lt; omega
+          omega
+        data.uget (candU + bestLenU) hb1 != data.uget (posU + bestLenU) hb2
+      else false
+    if skip then
+      chainWalkPackedUBelow data prev windowSize pos maxLen niceLen hpm hps hsz
+        posU maxLenU cutoffU hposU hmaxU hcutU
+        (prev[cand &&& 0x7FFF]'(by have h1 := winMask_lt cand; have h2 := Nat.and_le_left (n := cand) (m := 0x7FFF); simp only [chainWinSize] at h1 hps; omega))
+        (fuelU - 1) bestLenU bestPosU hbelow
+    else
+      let mlU := countMatchUCore data candU posU maxLenU hsz
+        (by rw [hcandU, hmaxU]; exact hcand)
+        (by rw [hposU, hmaxU]; exact hpm)
+      let blU : USize := if mlU > bestLenU then mlU else bestLenU
+      let bpU : USize := if mlU > bestLenU then candU else bestPosU
+      if hstop : blU ≥ cutoffU then bpU.toNat * 512 + blU.toNat
+      else chainWalkPackedUBelow data prev windowSize pos maxLen niceLen hpm hps hsz
+        posU maxLenU cutoffU hposU hmaxU hcutU
+        (prev[cand &&& 0x7FFF]'(by have h1 := winMask_lt cand; have h2 := Nat.and_le_left (n := cand) (m := 0x7FFF); simp only [chainWinSize] at h1 hps; omega))
+        (fuelU - 1) blU bpU (USize.not_le.mp hstop)
+  else bestPosU.toNat * 512 + bestLenU.toNat
+termination_by fuelU.toNat
+decreasing_by
+  all_goals
+    have hfz : ¬ fuelU = 0 := by assumption
+    have hpos : 0 < fuelU.toNat := by
+      rcases Nat.eq_zero_or_pos fuelU.toNat with h | h
+      · exact absurd (USize.toNat_inj.mp (by rw [h, USize.toNat_zero])) hfz
+      · exact h
+    have hle : (1 : USize) ≤ fuelU := by rw [USize.le_iff_toNat_le, USize.toNat_one]; omega
+    have heq : (fuelU - 1).toNat = fuelU.toNat - 1 := by
+      rw [USize.toNat_sub_of_le _ _ hle, USize.toNat_one]
+    omega
+
 /-- Packed chain walk with all scalar hot-loop state
     in `USize`, including the candidate and packed result.  The `prev` ring is
     still an `Array Nat`, so each link is converted once when loaded; all
@@ -1366,7 +1433,9 @@ abbrev chainWalkPackedUUSafe (data : ByteArray) (prev : Array Nat)
     that `fuel`/`bestLen`/`bestPos` are representable. Every miss (never taken for
     the production matcher: `data.size` fits a `size_t`, `fuel = maxChain` is tiny,
     and the walk starts at `bestLen = bestPos = 0`) falls back to `chainWalkPacked`,
-    so this equals `chainWalkGuardedPacked` (`chainWalkGuardedPackedU_eq`). -/
+    so this equals `chainWalkGuardedPacked` (`chainWalkGuardedPackedU_eq`). A
+    once-per-walk cutoff guard selects `chainWalkPackedUBelow`; an already-at-cutoff
+    defensive seed keeps using the generic loop. -/
 @[inline] def chainWalkGuardedPackedU (data : ByteArray) (prev : Array Nat)
     (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
     (cand fuel bestLen bestPos : Nat) : Nat :=
@@ -1374,10 +1443,16 @@ abbrev chainWalkPackedUUSafe (data : ByteArray) (prev : Array Nat)
     if hg : data.size.toUSize.toNat = data.size ∧ fuel.toUSize.toNat = fuel ∧
         bestLen.toUSize.toNat = bestLen ∧ bestPos.toUSize.toNat = bestPos then
       have hsz : data.size < USize.size := by rw [← hg.1]; exact USize.toNat_lt_two_pow_numBits _
-      chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
-        pos.toUSize maxLen.toUSize (min niceLen maxLen).toUSize
-        (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
-        (toUSize_toNat_of_lt (by omega)) cand fuel.toUSize bestLen.toUSize bestPos.toUSize
+      if hbelow : bestLen.toUSize < (min niceLen maxLen).toUSize then
+        chainWalkPackedUBelow data prev windowSize pos maxLen niceLen hpm hps hsz
+          pos.toUSize maxLen.toUSize (min niceLen maxLen).toUSize
+          (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+          (toUSize_toNat_of_lt (by omega)) cand fuel.toUSize bestLen.toUSize bestPos.toUSize hbelow
+      else
+        chainWalkPackedU data prev windowSize pos maxLen niceLen hpm hps hsz
+          pos.toUSize maxLen.toUSize (min niceLen maxLen).toUSize
+          (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+          (toUSize_toNat_of_lt (by omega)) cand fuel.toUSize bestLen.toUSize bestPos.toUSize
     else
       chainWalkPacked data prev windowSize pos maxLen niceLen hpm hps cand fuel bestLen bestPos
   else
@@ -1507,6 +1582,27 @@ where
   termination_by data.size - pos
   decreasing_by all_goals omega
 
+/-- Minimum input size for the H3 content gate.  The large-input native lazy
+    matcher also reuses this threshold for exact unboxed distance logarithms,
+    keeping the extra native-word guard off small inputs. -/
+def h3ProbeMinSize : Nat := 1048576
+
+/-- Exact native-word fast path for DEFLATE distances. Production distances are
+    at most 32768, while the fallback preserves behavior for arbitrary `Nat`s. -/
+@[inline] def lazyDistLog2 (dist : Nat) : Nat :=
+  if h : dist ≤ 32768 then
+    (UInt32.ofNatLT dist (Nat.lt_of_le_of_lt h (by decide))).log2Clz.toNat
+  else
+    dist.log2
+
+@[simp] theorem lazyDistLog2_eq (dist : Nat) :
+    lazyDistLog2 dist = dist.log2 := by
+  unfold lazyDistLog2
+  split
+  · rw [UInt32.toNat_log2Clz]
+    rfl
+  · rfl
+
 /-- libdeflate's cost-based lazy accept rule (`deflate_compress.c`, the first
     lookahead step). The lazy matcher prefers the `pos+1` match `(len2, dist2)`
     over the `pos` match `(len1, dist1)` when it is strictly longer **and** the
@@ -1540,6 +1636,27 @@ theorem lazyAcceptCost_lt {len1 dist1 len2 dist2 : Nat}
     (h : lazyAcceptCost len1 dist1 len2 dist2 = true) : len1 < len2 := by
   simp only [lazyAcceptCost, Bool.and_eq_true, decide_eq_true_eq] at h
   exact h.1
+
+/-- Exact native-word implementation of `lazyAcceptCost`.  Kept separate so
+    small-input native matchers retain the original `Nat.log2` path. -/
+@[inline] def lazyAcceptCostFast (len1 dist1 len2 dist2 : Nat) : Bool :=
+  decide (len1 < len2) &&
+    decide (4 * (len2 - len1) + lazyDistLog2 dist1 >
+      2 + lazyDistLog2 dist2)
+
+@[simp] theorem lazyAcceptCostFast_eq (len1 dist1 len2 dist2 : Nat) :
+    lazyAcceptCostFast len1 dist1 len2 dist2 =
+      lazyAcceptCost len1 dist1 len2 dist2 := by
+  simp only [lazyAcceptCostFast, lazyAcceptCost, lazyDistLog2_eq]
+
+/-- Select the exact unboxed distance-log implementation once per native
+    matcher entry while preserving the original implementation for small data. -/
+@[inline] def lazyAcceptCostNative (useFastLog : Bool)
+    (len1 dist1 len2 dist2 : Nat) : Bool :=
+  if useFastLog then
+    lazyAcceptCostFast len1 dist1 len2 dist2
+  else
+    lazyAcceptCost len1 dist1 len2 dist2
 
 /-- Chain depth for a rolling-lazy2 follow-up probe (`rollDefer`). Mirrors the
     certified spike's mode-0 ladder (`bench/ZipLazyRollSweep.lean`, #2837): a
@@ -1740,7 +1857,7 @@ def lz77ChainLazy (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768
     let hashSize := 65536
     (lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray
+      (initialH3Table useH3 data.size) 0 insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray
 
 /-! Iterative (accumulator) twin of the rolling-lazy2 boxed `mutual`
     (`lz77ChainLazy.mainLoop`/`rollDefer`), threading the `lazy2Steps` knob (rung 2
@@ -1893,7 +2010,7 @@ def lz77ChainLazyIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 3
     let hashSize := 65536
     lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 #[]
+      (initialH3Table useH3 data.size) 0 #[]
 
 /-! ## Packed-token matcher twins (Wave 3b stage A)
 
@@ -2120,7 +2237,7 @@ def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 
     let hashSize := 65536
     lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0
+      (initialH3Table useH3 data.size) 0
       (TokenArray.emptyWithCapacity data.size)
 
 /-! ## SPIKE (#2767 salvage): merged-array lazy matcher (single `Array Nat`)
@@ -2461,6 +2578,46 @@ decreasing_by
   else
     (updateHashesMergedGuarded data hashSize prevSize c pos j matchLen insertCap, h3tab)
 
+/-- Constant-enabled twin of `updateHashesMergedH3Guarded`: the H3-specialized
+    lazy loop calls this directly so its interior-update path contains no
+    runtime `useH3` dispatch while retaining the same fused one-pass update. -/
+@[inline] def updateHashesMergedH3GuardedEnabled (data : ByteArray)
+    (hashSize prevSize : Nat) (c h3tab : Array Nat) (pos j matchLen insertCap : Nat) :
+    Array Nat × Array Nat :=
+  if hg : 0 < hashSize ∧ prevSize + hashSize ≤ c.size ∧
+      min chainWinSize data.size ≤ prevSize ∧ 32768 ≤ h3tab.size then
+    if hu : data.size.toUSize.toNat = data.size ∧
+        (prevSize + hashSize).toUSize.toNat = prevSize + hashSize ∧
+        pos.toUSize.toNat = pos ∧ j.toUSize.toNat = j ∧
+        matchLen.toUSize.toNat = matchLen ∧ insertCap.toUSize.toNat = insertCap then
+      have hsz : data.size < USize.size := by
+        rw [← hu.1]; exact USize.toNat_lt_two_pow_numBits _
+      have hphlt : prevSize + hashSize < USize.size := by
+        rw [← hu.2.1]; exact USize.toNat_lt_two_pow_numBits _
+      updateHashesMergedH3FastU data hashSize prevSize pos c h3tab hg.1 hg.2.1 hg.2.2.1
+        hg.2.2.2 hsz hphlt
+        pos.toUSize prevSize.toUSize hashSize.toUSize (data.size - pos - 2).toUSize
+        insertCap.toUSize hu.2.2.1 (toUSize_toNat_of_lt (by omega))
+        (toUSize_toNat_of_lt (by omega)) (toUSize_toNat_of_lt (by omega))
+        j.toUSize matchLen.toUSize
+    else
+      (updateHashesMergedFast data hashSize prevSize c pos j matchLen insertCap
+        hg.1 hg.2.1 hg.2.2.1,
+       updateHash3 data h3tab pos j matchLen insertCap)
+  else
+    (updateHashesMerged data hashSize prevSize c pos j matchLen insertCap,
+     updateHash3 data h3tab pos j matchLen insertCap)
+
+/-- The constant-enabled helper is definitionally the `useH3 := true` branch
+    of the proved generic dispatcher. -/
+theorem updateHashesMergedH3GuardedEnabled_eq (data : ByteArray)
+    (hashSize prevSize : Nat) (c h3tab : Array Nat) (pos j matchLen insertCap : Nat) :
+    updateHashesMergedH3GuardedEnabled data hashSize prevSize c h3tab
+        pos j matchLen insertCap =
+      updateHashesMergedH3Guarded true data hashSize prevSize c h3tab
+        pos j matchLen insertCap := by
+  rfl
+
 /-- Merged-array twin of `lz77ChainLazyIterP` with the mainLoop **and** the
     rolling deferral fused into one hot loop (#2837): identical control flow, but
     the chain state is the single combined array `c` (prev ring at offset 0, hash
@@ -2606,6 +2763,339 @@ def lz77LazyMergedLoop (data : ByteArray)
 termination_by 2 * (data.size - pos) + min pLen 1
 decreasing_by all_goals (first | assumption | omega)
 
+/-- Native specialization of `lz77LazyMergedLoop` for the profiles that do not
+    use the hash3 singleton table.  Keeping this as a separate recursive loop
+    removes the dead `useH3` branch, `h3tab` state, `h3Seed`, and pair-valued
+    interior-update path from the generated hot loop.  The public entry below
+    remains definitionally the generic `useH3 := false` matcher for proofs and
+    selects this loop only through `implemented_by`. -/
+@[specialize useFastLog] def lz77LazyMergedLoopNoH3 (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (useFastLog : Bool) (c : Array Nat) (pos pLen pMatchPos step : Nat)
+    (acc : TokenArray) : TokenArray :=
+  if hpz : pLen = 0 then
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let head := headProbeGuarded c (prevSize + h)
+      let c := guardedSet c (prevSize + h) pos
+      let c := guardedSet c (pos &&& 0x7FFF) head
+      have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
+      let r := chainWalkGuardedPackedU data c windowSize pos
+        (min 258 (data.size - pos)) niceLen hmaxLenP head maxChain 0 0
+      let matchLen := r % 512
+      let matchPos := r / 512
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          if h3lt : pos + 3 < data.size then
+            if matchLen < goodMatch then
+              let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+              let head2 := headProbeGuarded c (prevSize + h2)
+              have hmaxLen2P : (pos + 1) + min 258 (data.size - (pos + 1)) ≤ data.size := by omega
+              let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
+              let seed := if matchLen < cutoff2 then matchLen else 0
+              let r2 :=
+                chainWalkGuardedPackedU data c windowSize (pos + 1)
+                  (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 lazyDepth seed 0
+              let matchLen2 := r2 % 512
+              let matchPos2 := r2 / 512
+              if lazyAcceptCostNative useFastLog matchLen (pos - matchPos)
+                  matchLen2 (pos + 1 - matchPos2) then
+                if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                  if h1 : 1 < lazy2Steps then
+                    have : 2 * (data.size - (pos + 1)) + min matchLen2 1 <
+                        2 * (data.size - pos) + min pLen 1 := by omega
+                    lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+                      goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+                      (pos + 1) matchLen2 matchPos2 1
+                      (acc.push (packTok (.literal (data[pos]'(by omega)))))
+                  else
+                    have : 2 * (data.size - (pos + 1 + matchLen2)) + min (0 : Nat) 1 <
+                        2 * (data.size - pos) + min pLen 1 := by omega
+                    let c := updateHashesMergedGuarded data hashSize prevSize c pos 1
+                      (matchLen2 + 1) insertCap
+                    lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+                      goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+                      (pos + 1 + matchLen2) 0 0 0
+                      (acc.push (packTok (.literal (data[pos]'(by omega)))) |>.push
+                        (packTok (.reference matchLen2 (pos + 1 - matchPos2))))
+                else
+                  have : 2 * (data.size - (pos + matchLen)) + min (0 : Nat) 1 <
+                      2 * (data.size - pos) + min pLen 1 := by omega
+                  let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
+                  lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+                    goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+                    (pos + matchLen) 0 0 0
+                    (acc.push (packTok (.reference matchLen (pos - matchPos))))
+              else
+                have : 2 * (data.size - (pos + matchLen)) + min (0 : Nat) 1 <
+                    2 * (data.size - pos) + min pLen 1 := by omega
+                let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
+                lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+                  goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+                  (pos + matchLen) 0 0 0
+                  (acc.push (packTok (.reference matchLen (pos - matchPos))))
+            else
+              have : 2 * (data.size - (pos + matchLen)) + min (0 : Nat) 1 <
+                  2 * (data.size - pos) + min pLen 1 := by omega
+              let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
+              lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+                goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+                (pos + matchLen) 0 0 0
+                (acc.push (packTok (.reference matchLen (pos - matchPos))))
+          else
+            have : 2 * (data.size - (pos + matchLen)) + min (0 : Nat) 1 <
+                2 * (data.size - pos) + min pLen 1 := by omega
+            lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+              goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+              (pos + matchLen) 0 0 0
+              (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          have : 2 * (data.size - (pos + 1)) + min (0 : Nat) 1 <
+              2 * (data.size - pos) + min pLen 1 := by omega
+          lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+            goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+            (pos + 1) 0 0 0
+            (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      else
+        have : 2 * (data.size - (pos + 1)) + min (0 : Nat) 1 <
+            2 * (data.size - pos) + min pLen 1 := by omega
+        lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+          goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+          (pos + 1) 0 0 0
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      trailingPT data pos acc
+  else
+    if hcan : step < lazy2Steps ∧ pos + 3 < data.size ∧ pLen < goodMatch then
+      let hmh := lz77Greedy.hash3 data pos hashSize (by omega)
+      let headmp := headProbeGuarded c (prevSize + hmh)
+      let c := guardedSet c (prevSize + hmh) pos
+      let c := guardedSet c (pos &&& 0x7FFF) headmp
+      let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+      let head2 := headProbeGuarded c (prevSize + h2)
+      have hmaxLen2P : (pos + 1) + min 258 (data.size - (pos + 1)) ≤ data.size := by omega
+      let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
+      let seed := if pLen < cutoff2 then pLen else 0
+      let r2 := chainWalkGuardedPackedU data c windowSize (pos + 1)
+        (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2
+        (lazy2ProbeDepth maxChain) seed 0
+      let len' := r2 % 512
+      let pos' := r2 / 512
+      if lazyAcceptCostNative useFastLog pLen (pos - pMatchPos)
+          len' (pos + 1 - pos') = true ∧
+          (pos + 1) + len' ≤ data.size then
+        have : 2 * (data.size - (pos + 1)) + min len' 1 <
+            2 * (data.size - pos) + min pLen 1 := by omega
+        lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+          goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+          (pos + 1) len' pos' (step + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      else
+        have : 2 * (data.size - (pos + pLen)) + min (0 : Nat) 1 <
+            2 * (data.size - pos) + min pLen 1 := by omega
+        let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 pLen insertCap
+        lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+          goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+          (pos + pLen) 0 0 0
+          (acc.push (packTok (.reference pLen (pos - pMatchPos))))
+    else
+      have : 2 * (data.size - (pos + pLen)) + min (0 : Nat) 1 <
+          2 * (data.size - pos) + min pLen 1 := by omega
+      let c := updateHashesMergedGuarded data hashSize prevSize c (pos - 1) 1
+        (pLen + 1) insertCap
+      lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps useFastLog c
+        (pos + pLen) 0 0 0
+        (acc.push (packTok (.reference pLen (pos - pMatchPos))))
+termination_by 2 * (data.size - pos) + min pLen 1
+decreasing_by all_goals (first | assumption | omega)
+
+/-- Native specialization of `lz77LazyMergedLoop` for profiles with the hash3
+    singleton enabled.  `h3tab` remains explicit state, but seeding, singleton
+    writes, and fused interior updates are unconditional, removing every
+    recursive `useH3` test from the generated hot loop. -/
+@[specialize useFastLog] def lz77LazyMergedLoopH3 (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (useFastLog : Bool) (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat)
+    (acc : TokenArray) : TokenArray :=
+  if hpz : pLen = 0 then
+    if hlt : pos + 2 < data.size then
+      let h := lz77Greedy.hash3 data pos hashSize hlt
+      let head := headProbeGuarded c (prevSize + h)
+      let c := guardedSet c (prevSize + h) pos
+      let c := guardedSet c (pos &&& 0x7FFF) head
+      let seed := hash3Probe data (min windowSize tooFar3) pos
+        (headProbeGuarded h3tab (hash3Single data pos hlt)) hlt
+      let h3tab := guardedSet h3tab (hash3Single data pos hlt) pos
+      have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
+      let r := chainWalkGuardedPackedU data c windowSize pos
+        (min 258 (data.size - pos)) niceLen hmaxLenP head maxChain
+        (seed % 512) (seed / 512)
+      let matchLen := r % 512
+      let matchPos := r / 512
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          if h3lt : pos + 3 < data.size then
+            if matchLen < goodMatch then
+              let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+              let head2 := headProbeGuarded c (prevSize + h2)
+              have hmaxLen2P : (pos + 1) + min 258 (data.size - (pos + 1)) ≤ data.size := by omega
+              let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
+              let seed := if matchLen < cutoff2 then matchLen else 0
+              let r2 :=
+                chainWalkGuardedPackedU data c windowSize (pos + 1)
+                  (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2 lazyDepth seed 0
+              let matchLen2 := r2 % 512
+              let matchPos2 := r2 / 512
+              if lazyAcceptCostNative useFastLog matchLen (pos - matchPos)
+                  matchLen2 (pos + 1 - matchPos2) then
+                if hle2 : pos + 1 + matchLen2 ≤ data.size then
+                  if h1 : 1 < lazy2Steps then
+                    have : 2 * (data.size - (pos + 1)) + min matchLen2 1 <
+                        2 * (data.size - pos) + min pLen 1 := by omega
+                    lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+                      goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab (pos + 1)
+                      matchLen2 matchPos2 1
+                      (acc.push (packTok (.literal (data[pos]'(by omega)))))
+                  else
+                    have : 2 * (data.size - (pos + 1 + matchLen2)) + min (0 : Nat) 1 <
+                        2 * (data.size - pos) + min pLen 1 := by omega
+                    let (c, h3tab) := updateHashesMergedH3GuardedEnabled data hashSize
+                      prevSize c h3tab pos 1 (matchLen2 + 1) insertCap
+                    lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+                      goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+                      (pos + 1 + matchLen2) 0 0 0
+                      (acc.push (packTok (.literal (data[pos]'(by omega)))) |>.push
+                        (packTok (.reference matchLen2 (pos + 1 - matchPos2))))
+                else
+                  have : 2 * (data.size - (pos + matchLen)) + min (0 : Nat) 1 <
+                      2 * (data.size - pos) + min pLen 1 := by omega
+                  let (c, h3tab) := updateHashesMergedH3GuardedEnabled data hashSize
+                    prevSize c h3tab pos 1 matchLen insertCap
+                  lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+                    goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+                    (pos + matchLen) 0 0 0
+                    (acc.push (packTok (.reference matchLen (pos - matchPos))))
+              else
+                have : 2 * (data.size - (pos + matchLen)) + min (0 : Nat) 1 <
+                    2 * (data.size - pos) + min pLen 1 := by omega
+                let (c, h3tab) := updateHashesMergedH3GuardedEnabled data hashSize
+                  prevSize c h3tab pos 1 matchLen insertCap
+                lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+                  goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+                  (pos + matchLen) 0 0 0
+                  (acc.push (packTok (.reference matchLen (pos - matchPos))))
+            else
+              have : 2 * (data.size - (pos + matchLen)) + min (0 : Nat) 1 <
+                  2 * (data.size - pos) + min pLen 1 := by omega
+              let (c, h3tab) := updateHashesMergedH3GuardedEnabled data hashSize
+                prevSize c h3tab pos 1 matchLen insertCap
+              lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+                goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+                (pos + matchLen) 0 0 0
+                (acc.push (packTok (.reference matchLen (pos - matchPos))))
+          else
+            have : 2 * (data.size - (pos + matchLen)) + min (0 : Nat) 1 <
+                2 * (data.size - pos) + min pLen 1 := by omega
+            lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+              goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+              (pos + matchLen) 0 0 0
+              (acc.push (packTok (.reference matchLen (pos - matchPos))))
+        else
+          have : 2 * (data.size - (pos + 1)) + min (0 : Nat) 1 <
+              2 * (data.size - pos) + min pLen 1 := by omega
+          lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+            goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+            (pos + 1) 0 0 0
+            (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      else
+        have : 2 * (data.size - (pos + 1)) + min (0 : Nat) 1 <
+            2 * (data.size - pos) + min pLen 1 := by omega
+        lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+          goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+          (pos + 1) 0 0 0
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+    else
+      trailingPT data pos acc
+  else
+    if hcan : step < lazy2Steps ∧ pos + 3 < data.size ∧ pLen < goodMatch then
+      let hmh := lz77Greedy.hash3 data pos hashSize (by omega)
+      let headmp := headProbeGuarded c (prevSize + hmh)
+      let c := guardedSet c (prevSize + hmh) pos
+      let c := guardedSet c (pos &&& 0x7FFF) headmp
+      let h3tab := guardedSet h3tab (hash3Single data pos (by omega)) pos
+      let h2 := lz77Greedy.hash3 data (pos + 1) hashSize (by omega)
+      let head2 := headProbeGuarded c (prevSize + h2)
+      have hmaxLen2P : (pos + 1) + min 258 (data.size - (pos + 1)) ≤ data.size := by omega
+      let cutoff2 := min niceLen (min 258 (data.size - (pos + 1)))
+      let seed := if pLen < cutoff2 then pLen else 0
+      let r2 := chainWalkGuardedPackedU data c windowSize (pos + 1)
+        (min 258 (data.size - (pos + 1))) niceLen hmaxLen2P head2
+        (lazy2ProbeDepth maxChain) seed 0
+      let len' := r2 % 512
+      let pos' := r2 / 512
+      if lazyAcceptCostNative useFastLog pLen (pos - pMatchPos)
+          len' (pos + 1 - pos') = true ∧
+          (pos + 1) + len' ≤ data.size then
+        have : 2 * (data.size - (pos + 1)) + min len' 1 <
+            2 * (data.size - pos) + min pLen 1 := by omega
+        lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+          goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab (pos + 1)
+          len' pos' (step + 1)
+          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      else
+        have : 2 * (data.size - (pos + pLen)) + min (0 : Nat) 1 <
+            2 * (data.size - pos) + min pLen 1 := by omega
+        let (c, h3tab) := updateHashesMergedH3GuardedEnabled data hashSize
+          prevSize c h3tab pos 1 pLen insertCap
+        lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+          goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+          (pos + pLen) 0 0 0
+          (acc.push (packTok (.reference pLen (pos - pMatchPos))))
+    else
+      have : 2 * (data.size - (pos + pLen)) + min (0 : Nat) 1 <
+          2 * (data.size - pos) + min pLen 1 := by omega
+      let (c, h3tab) := updateHashesMergedH3GuardedEnabled data hashSize
+        prevSize c h3tab (pos - 1) 1 (pLen + 1) insertCap
+      lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps useFastLog c h3tab
+        (pos + pLen) 0 0 0
+        (acc.push (packTok (.reference pLen (pos - pMatchPos))))
+termination_by 2 * (data.size - pos) + min pLen 1
+decreasing_by all_goals (first | assumption | omega)
+
+/-- Non-inlined entry shim that gives the compiler a constant `false`
+    specialization of the no-H3 loop. -/
+@[noinline] def lz77LazyMergedLoopNoH3NatLog (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (c : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
+  lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+    goodMatch niceLen lazyDepth lazy2Steps false c pos pLen pMatchPos step acc
+
+/-- Non-inlined entry shim that gives the compiler a constant `true`
+    specialization of the no-H3 loop. -/
+@[noinline] def lz77LazyMergedLoopNoH3FastLog (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (c : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
+  lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap
+    goodMatch niceLen lazyDepth lazy2Steps true c pos pLen pMatchPos step acc
+
+/-- Non-inlined entry shim that gives the compiler a constant `false`
+    specialization of the H3 loop. -/
+@[noinline] def lz77LazyMergedLoopH3NatLog (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
+  lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+    goodMatch niceLen lazyDepth lazy2Steps false c h3tab pos pLen pMatchPos step acc
+
+/-- Non-inlined entry shim that gives the compiler a constant `true`
+    specialization of the H3 loop. -/
+@[noinline] def lz77LazyMergedLoopH3FastLog (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray) : TokenArray :=
+  lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap
+    goodMatch niceLen lazyDepth lazy2Steps true c h3tab pos pLen pMatchPos step acc
+
 /-- Merged-array entry mirroring `lz77ChainLazyIterP`: builds the combined
     `prevSize + hashSize` array and runs `lz77LazyMergedLoop`. Threads the
     rolling-lazy2 `lazy2Steps` knob (default `1`). Proven equal to
@@ -2620,8 +3110,69 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
     lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
-      (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0 0 0 0
+      (.replicate (prevSize + hashSize) data.size) (initialH3Table useH3 data.size) 0 0 0 0
       (TokenArray.emptyWithCapacity data.size)
+
+/-- Native entry for the constant-enabled H3 specialization. -/
+def lz77ChainLazyIterPMergedH3Native (data : ByteArray) (maxChain : Nat)
+    (windowSize : Nat := 32768) (insertCap : Nat := 1000000000)
+    (goodMatch : Nat := 259) (niceLen : Nat := 258)
+    (lazyDepth : Nat := maxChain) (lazy2Steps : Nat := 1) : TokenArray :=
+  let useFastLog : Bool := decide (h3ProbeMinSize ≤ data.size)
+  if data.size < 3 then
+    trailingPT data 0 TokenArray.empty
+  else
+    let hashSize := 65536
+    let prevSize := min chainWinSize data.size
+    let c := .replicate (prevSize + hashSize) data.size
+    let h3tab := .replicate 32768 data.size
+    let acc := TokenArray.emptyWithCapacity data.size
+    if useFastLog then
+      lz77LazyMergedLoopH3FastLog data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps c h3tab 0 0 0 0 acc
+    else
+      lz77LazyMergedLoopH3NatLog data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps c h3tab 0 0 0 0 acc
+
+/-- Proof-facing H3 entry.  Its logical body is the proved generic matcher;
+    generated code uses `lz77ChainLazyIterPMergedH3Native`. -/
+@[implemented_by lz77ChainLazyIterPMergedH3Native]
+def lz77ChainLazyIterPMergedH3 (data : ByteArray) (maxChain : Nat)
+    (windowSize : Nat := 32768) (insertCap : Nat := 1000000000)
+    (goodMatch : Nat := 259) (niceLen : Nat := 258)
+    (lazyDepth : Nat := maxChain) (lazy2Steps : Nat := 1) : TokenArray :=
+  lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen
+    lazyDepth true lazy2Steps
+
+/-- Native entry for the no-H3 specialization. -/
+def lz77ChainLazyIterPMergedNoH3Native (data : ByteArray) (maxChain : Nat)
+    (windowSize : Nat := 32768) (insertCap : Nat := 1000000000)
+    (goodMatch : Nat := 259) (niceLen : Nat := 258)
+    (lazyDepth : Nat := maxChain) (lazy2Steps : Nat := 1) : TokenArray :=
+  let useFastLog : Bool := decide (h3ProbeMinSize ≤ data.size)
+  if data.size < 3 then
+    trailingPT data 0 TokenArray.empty
+  else
+    let hashSize := 65536
+    let prevSize := min chainWinSize data.size
+    let c := .replicate (prevSize + hashSize) data.size
+    let acc := TokenArray.emptyWithCapacity data.size
+    if useFastLog then
+      lz77LazyMergedLoopNoH3FastLog data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps c 0 0 0 0 acc
+    else
+      lz77LazyMergedLoopNoH3NatLog data windowSize hashSize prevSize maxChain insertCap
+        goodMatch niceLen lazyDepth lazy2Steps c 0 0 0 0 acc
+
+/-- Proof-facing no-H3 entry.  Its logical body is the proved generic matcher;
+    generated code uses `lz77ChainLazyIterPMergedNoH3Native`. -/
+@[implemented_by lz77ChainLazyIterPMergedNoH3Native]
+def lz77ChainLazyIterPMergedNoH3 (data : ByteArray) (maxChain : Nat)
+    (windowSize : Nat := 32768) (insertCap : Nat := 1000000000)
+    (goodMatch : Nat := 259) (niceLen : Nat := 258)
+    (lazyDepth : Nat := maxChain) (lazy2Steps : Nat := 1) : TokenArray :=
+  lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen
+    lazyDepth false lazy2Steps
 
 /-- Merged-array twin of `lz77ChainIterP.mainLoop` (the greedy tier, levels
     1–3): identical control flow, but the chain state is the single combined

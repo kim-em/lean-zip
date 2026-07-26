@@ -1,8 +1,9 @@
 import ZipTest.Helpers
 
 /-! Conformance tests for the word-sized `@[extern]` ByteArray readers
-    (`ByteArray.ugetUInt32LE`, `ByteArray.ugetUInt64LE`) and writers
-    (`ByteArray.usetUInt64LE`, `ByteArray.pushUInt64LE`).
+    (`ByteArray.ugetUInt32LE`, `ByteArray.ugetUInt64LE`), writers
+    (`ByteArray.usetUInt64LE`, `ByteArray.pushUInt64LE`), and
+    `UInt32.log2Clz`.
 
     Each test compares the compiled `@[extern]` result (which runs the C in
     `c/bytearray_wide_ffi.c`) against a pure-Lean reference recombination of the
@@ -165,7 +166,37 @@ partial def checkPush64Exclusive (got want : ByteArray) (k : Nat := 0)
     checkPush64Exclusive got' want' (k + 1)
       (v * 6364136223846793005 + 1442695040888963407)
 
+/-- Compare the compiled CLZ extern with its pure-Lean `UInt32.log2` model. -/
+private def checkLog2Clz (x : UInt32) : IO Unit := do
+  let got := x.log2Clz
+  let want := x.log2
+  unless got == want do
+    throw (IO.userError s!"UInt32.log2Clz mismatch at {x}: got {got}, want {want}")
+
+/-- Exercise every value around the DEFLATE distance range, explicit power-of-two
+    boundaries across the full word, and a deterministic spread of other 32-bit
+    values. This calls the compiled `@[extern]` and compares it with the logical
+    body without going through `lazyDistLog2`. -/
+def log2ClzTests : IO Unit := do
+  let boundaries : List UInt32 := [
+    0, 1, 2, 3, 4, 7, 8, 15, 16, 31, 32, 63, 64, 127, 128,
+    255, 256, 511, 512, 1023, 1024, 2047, 2048, 4095, 4096,
+    8191, 8192, 16383, 16384, 32767, 32768, 32769, 65535, 65536,
+    0x7FFFFFFF, 0x80000000, 0xFFFFFFFE, 0xFFFFFFFF
+  ]
+  for x in boundaries do
+    checkLog2Clz x
+  for i in [0:65537] do
+    checkLog2Clz i.toUInt32
+  let mut state : UInt32 := 0xC0FFEE01
+  for _ in [:16384] do
+    state := state ^^^ (state <<< 13)
+    state := state ^^^ (state >>> 17)
+    state := state ^^^ (state <<< 5)
+    checkLog2Clz state
+
 def tests : IO Unit := do
+  log2ClzTests
   for a in patterns do
     checkU32 a
   for a in patterns64 do
@@ -198,6 +229,6 @@ def tests : IO Unit := do
   let b := ByteArray.mk #[0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x01]
   unless ByteArray.ugetUInt64LE b 0 (by decide) == 0x0123456789ABCDEF do
     throw (IO.userError "ugetUInt64LE spot-check failed")
-  IO.println "Wide reader conformance tests: OK"
+  IO.println "Wide reader/writer/log2 conformance tests: OK"
 
 end ZipTest.Wide

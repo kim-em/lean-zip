@@ -117,6 +117,20 @@ def pushUInt64LE (a : ByteArray) (v : UInt64) (k : USize)
 
 end ByteArray
 
+/-- Native floor-log2 for a `UInt32`. The Lean body is exactly `UInt32.log2`,
+    including its `0 ↦ 0` convention, and is therefore the trusted logical
+    specification of the `@[extern]`. The C implementation uses count-leading-
+    zeros (`31 - clz x` for `x ≥ 2`) instead of core's divide-by-two loop. -/
+@[extern "lean_zip_uint32_log2_clz"]
+def UInt32.log2Clz (x : UInt32) : UInt32 := x.log2
+
+/-- The CLZ-backed runtime override is logically transparent. -/
+@[simp] theorem UInt32.log2Clz_eq_log2 (x : UInt32) : x.log2Clz = x.log2 := rfl
+
+/-- Unboxing the result exposes exactly `Nat.log2` of the input word. -/
+@[simp] theorem UInt32.toNat_log2Clz (x : UInt32) :
+    x.log2Clz.toNat = x.toNat.log2 := rfl
+
 /-- Count trailing zero bits of a `UInt64` (zero case defined as 64). This is the
     pure logical *specification* — its body is `BitVec.ctz`, kept for the
     match-extension proofs (`ctz (w1 ^^^ w2) >>> 3` is the little-endian byte

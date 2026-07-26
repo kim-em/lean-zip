@@ -796,7 +796,7 @@ theorem lz77ChainLazyIterPMerged_eq (data : ByteArray) (maxChain windowSize inse
     rw [← Array.replicate_append_replicate]
     exact mergedLoop_eq data windowSize 65536 (min chainWinSize data.size) maxChain insertCap
       goodMatch niceLen lazyDepth lazy2Steps useH3 (Array.replicate 65536 data.size)
-      (Array.replicate (min chainWinSize data.size) data.size) (Array.replicate 32768 data.size) 0 _
+      (Array.replicate (min chainWinSize data.size) data.size) (initialH3Table useH3 data.size) 0 _
       (by omega) (by rw [Array.size_replicate]) (by rw [Array.size_replicate])
       (Nat.le_of_eq (by rw [Array.size_replicate]))
 

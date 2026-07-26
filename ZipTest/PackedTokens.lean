@@ -259,6 +259,49 @@ private def checkLargeL5CompiledPath : IO Unit := do
   unless production == established do
     throw (IO.userError "large-L5 production/reference output mismatch")
 
+/-- Direct compiled conformance for the two level-7 `@[implemented_by]`
+    specializations. Calling the proof-facing wrappers exercises their native
+    implementations in compiled tests, while `lz77ChainLazyIterPMerged` is the
+    proved generic/logical reference. Keep the matcher shallow enough for CI
+    while retaining H3 updates, interior insertion, lazy lookahead, and rolling
+    deferral. -/
+private def checkLazySpecialization (label : String) (data : ByteArray)
+    (expectFastLog : Bool) : IO Unit := do
+  let useFastLog : Bool := decide (h3ProbeMinSize ≤ data.size)
+  unless useFastLog == expectFastLog do
+    throw (IO.userError
+      s!"{label}: expected useFastLog={expectFastLog}, got {useFastLog} at size {data.size}")
+  let maxChain := 4
+  let lazyDepth := 2
+  let dispatchedNoH3 := lz77ChainLazyIterPMergedNoH3 data maxChain
+    32768 1000000000 259 65 lazyDepth 2
+  let genericNoH3 := lz77ChainLazyIterPMerged data maxChain
+    32768 1000000000 259 65 lazyDepth false 2
+  unless dispatchedNoH3.toArray == genericNoH3.toArray do
+    throw (IO.userError
+      s!"{label}: no-H3 dispatched/generic token mismatch \
+         ({dispatchedNoH3.size} vs {genericNoH3.size} tokens)")
+  let dispatchedH3 := lz77ChainLazyIterPMergedH3 data maxChain
+    32768 1000000000 259 65 lazyDepth 2
+  let genericH3 := lz77ChainLazyIterPMerged data maxChain
+    32768 1000000000 259 65 lazyDepth true 2
+  unless dispatchedH3.toArray == genericH3.toArray do
+    throw (IO.userError
+      s!"{label}: H3 dispatched/generic token mismatch \
+         ({dispatchedH3.size} vs {genericH3.size} tokens)")
+
+/-- Pin both native specializations immediately below, at, and above the
+    once-per-entry 1 MiB distance-log gate. The near-boundary text is
+    deterministic and reference-rich, so the hot recursive paths run without
+    turning this conformance check into another benchmark. -/
+def lazySpecializationTests : IO Unit := do
+  checkLazySpecialization "fast-log-gate-minus-one"
+    (mkTextData (h3ProbeMinSize - 1)) false
+  checkLazySpecialization "fast-log-gate"
+    (mkTextData h3ProbeMinSize) true
+  checkLazySpecialization "fast-log-gate-plus-one"
+    (mkTextData (h3ProbeMinSize + 1)) true
+
 def tests : IO Unit := do
   IO.println "  PackedTokens tests..."
   let alice ← IO.FS.readBinFile "bench/corpora/canterbury/alice29.txt"
@@ -332,6 +375,7 @@ def tests : IO Unit := do
   checkSplitP "size0" ByteArray.empty
   checkSplitP "size1" (ByteArray.mk #[42])
   checkLargeL5CompiledPath
+  lazySpecializationTests
   IO.println "  PackedTokens tests passed"
 
 end ZipTest.PackedTokens

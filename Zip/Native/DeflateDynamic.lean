@@ -1169,13 +1169,6 @@ def prescanRegionBytes : Nat := 32768
     allocation small. -/
 def prescanTableBits : Nat := 20
 
-/-- Minimum input size for the h3 content gate to engage. Below this the matcher
-    is cheap enough that the probe's cost is negligible and the region scan would
-    be net overhead, so small inputs keep the static `useH3Level` decision — which
-    also leaves every existing small-input output byte-identical. 1 MiB, matching
-    `prescanMinSize`. -/
-def h3ProbeMinSize : Nat := 1048576
-
 /-- Per-region 4-gram collision-fraction cutoff (percent) below which a region is
     judged sparse in recurring 4-grams, i.e. low-compressibility. Tuned on Silesia:
     the least-compressible region of each ratio-winning binary sits below 61%
@@ -1261,6 +1254,258 @@ def useH3Level (level : UInt8) : Bool := decide (6 ≤ level ∧ level ≤ 8)
 def useH3For (data : ByteArray) (level : UInt8) : Bool :=
   useH3Level level && (data.size < h3ProbeMinSize || h3IncompressibleScan data)
 
+/-- The content-selected matcher profiles available to level 7.
+
+    The names describe mechanisms rather than corpus members.  Keeping this
+    finite selector separate from `l7MatchConfig` lets timing sweeps retune the
+    matcher knobs without changing the content classifier. -/
+inductive L7Profile where
+  /-- The shallow, gated level-5 matcher. -/
+  | shallow
+  /-- The fast hash3 profile (the level-6 matcher). -/
+  | h3Fast
+  /-- The ratio-oriented hash3 profile (the level-7 matcher). -/
+  | h3Balanced
+  /-- Chain 64 with one depth-8 lazy probe. -/
+  | chain64Probe8
+  /-- Chain 64 with two depth-16 lazy probes. -/
+  | chain64Probe16
+  /-- Chain 96 with two depth-16 lazy probes. -/
+  | chain96Probe16
+  /-- Chain 128 with two depth-16 lazy probes. -/
+  | chain128Probe16
+  /-- Chain 128 with four depth-32 lazy probes. -/
+  | chain128Probe32
+  /-- Chain 128/depth 32 without the nice-length cutoff. -/
+  | chain128LongProbe32
+  /-- The deep level-8 matcher. -/
+  | deep
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+/-- Output-preparation policy for a retained level-7 content profile.
+
+    `arbitrate` is the conservative path: size both the whole-stream base and
+    observation-split candidates, then emit the smaller one.  The other two
+    constructors select a candidate whose winner was stable in the large-input
+    profile calibration, allowing production to skip preparation of the known
+    loser. -/
+inductive L7OutputRoute where
+  | arbitrate
+  | base
+  | split
+  deriving BEq, ReflBEq, LawfulBEq, Repr
+
+/-- Upper bound for the two size-sensitive small-input profiles whose split
+    winner was stable in both the calibration corpus and a held-out source-file
+    audit.  At and above this boundary they retain exact size arbitration. -/
+def l7SmallDirectSplitMaxSize : Nat := 160 * 1024
+
+/-- Select level 7's output-preparation route from input size and the already
+    retained content profile.
+
+    Most inputs below the large-profile threshold keep exact size arbitration:
+    that region uses a deliberately coarse adjacent-run classifier, and some
+    profiles change winner between samples (notably `chain128Probe16`).  Three
+    conservative exceptions were byte-identical to the arbitrated winner across
+    Canterbury and 123 held-out source files: `h3Fast`, plus `chain64Probe8` and
+    `shallow` below 160 KiB.  On large inputs, shallow and chain-128/depth-32
+    consistently selected the whole-stream base during calibration; the
+    remaining profiles selected the observation split. -/
+def l7OutputRouteFor (size : Nat) (profile : L7Profile) : L7OutputRoute :=
+  if size < h3ProbeMinSize then
+    match profile with
+    | .h3Fast => .split
+    | .chain64Probe8 | .shallow =>
+      if size < l7SmallDirectSplitMaxSize then .split else .arbitrate
+    | _ => .arbitrate
+  else
+    match profile with
+    | .shallow | .chain128Probe32 => .base
+    | _ => .split
+
+/-- Concrete lazy-matcher knobs selected by an `L7Profile`. -/
+structure L7MatchConfig where
+  chainDepth : Nat
+  goodMatch : Nat
+  niceLen : Nat
+  lazyDepth : Nat
+  useH3 : Bool
+  lazy2Steps : Nat
+
+/-- Matcher knobs for each level-7 content profile.  The shallow profile keeps
+    level 5's size-aware chain-22 retune on inputs of at least 4 MiB.  Split
+    cadence is intentionally separate (`l7SplitCheckTokensFor`), with its own
+    measured profile-and-size policy. -/
+def l7MatchConfig (data : ByteArray) : L7Profile → L7MatchConfig
+  | .shallow =>
+      let chain := if l5LargeInputMinSize ≤ data.size then 22 else 24
+      ⟨chain, 64, 65, chain / 4, false, 1⟩
+  | .h3Fast => ⟨64, 64, 65, 8, true, 1⟩
+  | .h3Balanced => ⟨64, 259, 65, 32, true, 4⟩
+  | .chain64Probe8 => ⟨64, 259, 65, 8, false, 1⟩
+  | .chain64Probe16 => ⟨64, 259, 65, 16, false, 2⟩
+  | .chain96Probe16 => ⟨96, 259, 65, 16, false, 2⟩
+  | .chain128Probe16 => ⟨128, 259, 65, 16, false, 2⟩
+  | .chain128Probe32 => ⟨128, 259, 65, 32, false, 4⟩
+  | .chain128LongProbe32 => ⟨128, 259, 258, 32, false, 4⟩
+  | .deep => ⟨512, 259, 258, 256, false, 1⟩
+
+/-- Whether the selected profile is the large-input shallow specialization. -/
+def l7UseLargeShallow (data : ByteArray) (profile : L7Profile) : Bool :=
+  profile == .shallow && l5LargeInputMinSize ≤ data.size
+
+/-- Count sampled adjacent equal bytes in the first 4 KiB.  At most 63 byte
+    pairs are read (offsets 64, 128, ...), so this small-input signal costs
+    about one microsecond and allocates no table. -/
+def l7AdjacentRunSamples (data : ByteArray) : Nat := Id.run do
+  let stop := min data.size 4096
+  let mut same := 0
+  let mut p := 64
+  while p < stop do
+    if data[p]! == data[p - 1]! then
+      same := same + 1
+    p := p + 64
+  return same
+
+/-- The small-input half of the level-7 classifier.  Thresholds are deliberately
+    stated over the cheap signal, separately from extraction, so golden tests
+    can pin the policy without running the compressor.
+
+    This policy was fitted to Canterbury: very sparse adjacent runs and very
+    easy run-heavy inputs do not repay a mid-depth chain, while the middle band
+    does.  It is a measured heuristic, not a general dominance theorem. -/
+def l7ClassifySmall (size adjacentRuns : Nat) : L7Profile :=
+  if size < 65536 then
+    if 8 ≤ adjacentRuns then .h3Fast else .chain64Probe16
+  else if 56 ≤ adjacentRuns then .chain128Probe16
+  else if adjacentRuns ≤ 2 || 10 ≤ adjacentRuns then .shallow
+  else .chain64Probe8
+
+/-- Mix a four-byte word before feeding it to the tiny cardinality sketch.
+    The avalanche is important: the low six bits choose a register, so the
+    multiplicative hash used by the match table alone would leave byte-layout
+    correlations between the register index and rank bits. -/
+@[inline] def l7Mix4 (x : UInt32) : UInt32 :=
+  let x := x ^^^ (x >>> 16)
+  let x := x * 0x7FEB352D
+  let x := x ^^^ (x >>> 15)
+  let x := x * 0x846CA68B
+  x ^^^ (x >>> 16)
+
+/-- Raise one packed four-bit cardinality-sketch register. -/
+@[inline] def l7RaiseRegister (word : UInt64) (slot rank : Nat) : UInt64 :=
+  let shift := (slot * 4).toUInt64
+  let old := ((word >>> shift) &&& 0xF).toNat
+  if old < rank then
+    (word &&& ~~~((0xF : UInt64) <<< shift)) ||| (rank.toUInt64 <<< shift)
+  else
+    word
+
+/-- Harmonic score for sixteen packed four-bit cardinality registers. -/
+def l7RegisterScore (word : UInt64) : Nat := Id.run do
+  let mut score := 0
+  for slot in [0:16] do
+    let rank := ((word >>> (slot * 4).toUInt64) &&& 0xF).toNat
+    score := score + (1 <<< (15 - rank))
+  return score
+
+/-- Approximate distinct-four-gram fraction (per mille) for one 32 KiB region.
+
+    This is a 64-register HyperLogLog-style sketch held in four `UInt64`s, not
+    a heap table.  Four-grams are sampled every four bytes.  `11616000 / score`
+    is the fixed-point form of the 64-register raw estimator divided by 8192
+    samples; the result is only a stable classifier signal, not a public
+    cardinality estimate. -/
+def l7RegionUniquePermille (data : ByteArray) (start stop : Nat) : Nat := Id.run do
+  let mut r0 : UInt64 := 0
+  let mut r1 : UInt64 := 0
+  let mut r2 : UInt64 := 0
+  let mut r3 : UInt64 := 0
+  let mut p := start
+  while p + 3 < stop do
+    let a := data[p]!.toUInt32
+    let b := data[p + 1]!.toUInt32
+    let c := data[p + 2]!.toUInt32
+    let d := data[p + 3]!.toUInt32
+    let h := l7Mix4 (a ||| (b <<< 8) ||| (c <<< 16) ||| (d <<< 24))
+    let bucket := (h &&& 63).toNat
+    let rank := min ((UInt64.ctz (h >>> 6).toUInt64).toNat + 1) 15
+    if bucket < 16 then
+      r0 := l7RaiseRegister r0 bucket rank
+    else if bucket < 32 then
+      r1 := l7RaiseRegister r1 (bucket - 16) rank
+    else if bucket < 48 then
+      r2 := l7RaiseRegister r2 (bucket - 32) rank
+    else
+      r3 := l7RaiseRegister r3 (bucket - 48) rank
+    p := p + 4
+  let score :=
+    l7RegisterScore r0 + l7RegisterScore r1 +
+      l7RegisterScore r2 + l7RegisterScore r3
+  return min 1000 (11616000 / max score 1)
+
+/-- The large-input half of the level-7 classifier, over the minimum, mean and
+    maximum per-region approximate unique-four-gram fractions (per mille).
+
+    These bands were fitted to the twelve Silesia files.  They express matcher
+    mechanisms—hash3 on sparse-match regions, deeper chains on dense or
+    heterogeneous regions—but the thresholds are corpus-trained and are not
+    claimed to generalize as a dominance guarantee. -/
+def l7ClassifyLarge (minUnique meanUnique maxUnique : Nat) : L7Profile :=
+  if 700 ≤ maxUnique || (380 ≤ minUnique && maxUnique < 450) then
+    if 950 ≤ maxUnique then .h3Fast else .h3Balanced
+  else if minUnique < 480 && 600 ≤ maxUnique && 500 ≤ meanUnique then .shallow
+  else if maxUnique ≤ 140 then .chain128LongProbe32
+  else if meanUnique ≤ 220 then .deep
+  else if 130 ≤ minUnique && meanUnique ≤ 300 then .chain128Probe16
+  else if minUnique < 80 then
+    if 315 ≤ meanUnique then .chain64Probe16 else .chain64Probe8
+  else if meanUnique < 545 then .chain128Probe32
+  else .chain96Probe16
+
+/-- Content-selected matcher profile for level 7.
+
+    Inputs below 1 MiB use the 63-probe adjacent-run signal.  Larger inputs use
+    four spread 32 KiB regions and the allocation-free four-word cardinality
+    sketch.  Only level 7 consults this selector; every other level retains its
+    existing matcher and output policy. -/
+def l7ProfileFor (data : ByteArray) : L7Profile := Id.run do
+  if data.size < h3ProbeMinSize then
+    return l7ClassifySmall data.size (l7AdjacentRunSamples data)
+  let regBytes := min prescanRegionBytes data.size
+  let span := data.size - regBytes
+  let mut minUnique := 1000
+  let mut maxUnique := 0
+  let mut sumUnique := 0
+  for r in [0:prescanRegions] do
+    let start :=
+      if prescanRegions ≤ 1 then 0
+      else min ((r * span) / (prescanRegions - 1)) span
+    let unique := l7RegionUniquePermille data start (min (start + regBytes) data.size)
+    minUnique := min minUnique unique
+    maxUnique := max maxUnique unique
+    sumUnique := sumUnique + unique
+  return l7ClassifyLarge minUnique (sumUnique / max prescanRegions 1) maxUnique
+
+/-- Boxed lazy matcher at an already-selected level-7 profile. -/
+def l7MatchFor (data : ByteArray) (profile : L7Profile) : Array LZ77Token :=
+  let cfg := l7MatchConfig data profile
+  lz77ChainLazyIter data cfg.chainDepth 32768 1000000000 cfg.goodMatch cfg.niceLen
+    cfg.lazyDepth cfg.useH3 cfg.lazy2Steps
+
+/-- Packed lazy matcher at an already-selected level-7 profile. -/
+def l7MatchPFor (data : ByteArray) (profile : L7Profile) : TokenArray :=
+  if l7UseLargeShallow data profile then
+    lz77ChainLazyIterPMergedL5Large data 32768 1000000000 64 65
+  else
+    let cfg := l7MatchConfig data profile
+    if cfg.useH3 then
+      lz77ChainLazyIterPMergedH3 data cfg.chainDepth 32768 1000000000 cfg.goodMatch
+        cfg.niceLen cfg.lazyDepth cfg.lazy2Steps
+    else
+      lz77ChainLazyIterPMergedNoH3 data cfg.chainDepth 32768 1000000000 cfg.goodMatch
+        cfg.niceLen cfg.lazyDepth cfg.lazy2Steps
+
 /-- Rolling lazy2 deferral steps per level (#2837): with steps > 1 the lazy
     matcher keeps deferring while each next position strictly improves
     (libdeflate `deflate_compress_lazy2`), catching cascading-improvement runs
@@ -1289,7 +1534,8 @@ def lazy2StepsLevel (level : UInt8) : Nat :=
     Levels 6–8 additionally enable the hash3 length-3 singleton, content-gated by
     `useH3For` (on only when the input classifies as low-compressibility). -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 5 ≤ level then lz77ChainLazyIter data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
+  if level == 7 then l7MatchFor data (l7ProfileFor data)
+  else if 5 ≤ level then lz77ChainLazyIter data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -1298,7 +1544,8 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : TokenArray :=
-  if 5 ≤ level then
+  if level == 7 then l7MatchPFor data (l7ProfileFor data)
+  else if 5 ≤ level then
     if useL5LargeInputPolicy data level then
       lz77ChainLazyIterPMergedL5Large data 32768
         (insertCap level) (goodMatch level) (niceLen level)
@@ -1486,6 +1733,54 @@ def splitNumClasses : Nat := 10
     `NUM_OBSERVATIONS_PER_BLOCK_CHECK`): the recent-window size in tokens. -/
 def splitCheckTokens : Nat := 512
 
+/-- Lower edge of the shallow-profile band that benefits from a 4096-token
+    split-check cadence. -/
+def l7ShallowCoarseMinSize : Nat := 384 * 1024
+
+/-- Upper edge of the shallow-profile 4096-token split-check band, and lower
+    edge of its 1024-token band. -/
+def l7ShallowCoarseMaxSize : Nat := 448 * 1024
+
+/-- Upper edge of the shallow-profile 1024-token split-check band. -/
+def l7ShallowMediumMaxSize : Nat := 512 * 1024
+
+/-- Upper input-size edge for the moderate-size `h3Balanced` 1024-token
+    split-check specialization. -/
+def l7BalancedMediumMaxSize : Nat := 7 * 1000 * 1000
+
+/-- Observation-window cadence paired with a selected level-7 profile and
+    input size.
+
+    This policy keeps the established 512-token default and the large-shallow
+    2016-token point.  A median-of-five Canterbury + Silesia production sweep
+    selected coarser checks where the saved boundary work repeated end to end:
+    4096 for medium-small shallow text, small `chain128Probe16`, and
+    `chain96Probe16`/`chain128LongProbe32`; 1024 for the next shallow size band,
+    moderate-size `h3Balanced`, large `chain64Probe16`, and large `h3Fast`.
+    The selector changes only a heuristic cut list; the emitter clamps arbitrary
+    cuts, so these size/profile choices add no roundtrip proof obligation. -/
+def l7SplitCheckTokensForSize (size : Nat) (profile : L7Profile) : Nat :=
+  if profile == .shallow && l5LargeInputMinSize ≤ size then 2016
+  else
+    match profile with
+    | .shallow =>
+        if l7ShallowCoarseMinSize ≤ size && size < l7ShallowCoarseMaxSize then 4096
+        else if l7ShallowCoarseMaxSize ≤ size && size < l7ShallowMediumMaxSize then 1024
+        else splitCheckTokens
+    | .h3Fast => if h3ProbeMinSize ≤ size then 1024 else splitCheckTokens
+    | .h3Balanced =>
+        if h3ProbeMinSize ≤ size && size < l7BalancedMediumMaxSize then 1024
+        else splitCheckTokens
+    | .chain64Probe16 => if h3ProbeMinSize ≤ size then 1024 else splitCheckTokens
+    | .chain96Probe16 => 4096
+    | .chain128LongProbe32 => 4096
+    | .chain128Probe16 => if size < h3ProbeMinSize then 4096 else splitCheckTokens
+    | _ => splitCheckTokens
+
+/-- `l7SplitCheckTokensForSize` at the input's actual size. -/
+def l7SplitCheckTokensFor (data : ByteArray) (profile : L7Profile) : Nat :=
+  l7SplitCheckTokensForSize data.size profile
+
 /-- Per-level observation-window cadence for the shared-block split heuristic.
     Large-stream L5 uses a coarser window: at its shallow chain, checking every
     2016 tokens preserves enough block adaptation that its 12-file geometric-mean
@@ -1494,9 +1789,12 @@ def splitCheckTokens : Nat := 512
     and tree-preparation overhead. Corpus-total bytes instead favor miniz_oxide by
     0.17%, led by `mozilla`; this is an intentional fixed-L5 ratio/speed trade.
     Small L5 streams and L6–L8 retain the established 512-token cadence, so their
-    bytes are unchanged. -/
+    bytes are unchanged. The cadence is independent of whether the scalar or
+    packed-counter walker implements the heuristic. -/
 def splitCheckTokensFor (data : ByteArray) (level : UInt8) : Nat :=
-  if useL5LargeInputPolicy data level then 2016 else splitCheckTokens
+  if level == 7 then l7SplitCheckTokensFor data (l7ProfileFor data)
+  else if useL5LargeInputPolicy data level then 2016
+  else splitCheckTokens
 
 /-- Floor on block *output* bytes, and on bytes remaining after a cut
     (libdeflate `MIN_BLOCK_LENGTH`): per-block tree headers stop paying for
@@ -2167,8 +2465,8 @@ termination_by endU.toNat - i.toNat
 decreasing_by all_goals rw [hstep]; omega
 
 /-- Guarded entry for the scalar native-word split walker. This is the direct
-    production route for small L5 and L6–L8, and the fallback/proof bridge for
-    the packed-counter large-L5 entry below. -/
+    production route for small L5 and the fallback/proof bridge for the packed
+    counter entry below. -/
 @[inline] def chooseSplitsHeuristicPU (toks : TokenArray) (totalBytes : Nat)
     (checkTokens : Nat := splitCheckTokens) : List Nat :=
   if totalBytes < 2 * splitMinBlockBytes then []
@@ -2401,9 +2699,10 @@ def emitSharedBlockP (bw : BitWriter) (data : ByteArray) (group : TokenArray)
     partition and the boundary heuristic stays proof-free. The clamping makes
     arbitrary cuts correctness-safe, not performance-safe: a pathological list
     (non-monotone, dense) degrades to one-token blocks, each paying a full tree
-    header. `deflateRaw` feeds it the scalar native-word walker's cuts, or the
-    packed-counter walker's cuts on large L5; both are proved equal to the
-    reference `chooseSplitsHeuristicP` cuts on the production token stream. -/
+    header. `deflateRaw` feeds it the scalar native-word walker's cuts on small
+    L5, or the packed-counter walker's cuts on large L5 and L6–L8; both are
+    proved equal to the reference `chooseSplitsHeuristicP` cuts on the
+    production token stream. -/
 def emitSharedBlocksAtP (data : ByteArray) (toks : TokenArray) (cuts : List Nat)
     (pos : Nat) (bw : BitWriter) : BitWriter :=
   let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
@@ -2418,11 +2717,12 @@ decreasing_by
 
 /-- The packed observation-divergence shared-window split candidate: emit the
     packed token stream as shared-window dynamic blocks at the given cut points
-    (in `deflateRaw`, scalar-native or large-L5 packed-counter boundaries, both
-    proved equal to `chooseSplitsHeuristicP`). Byte-identical to the boxed reference
+    (in `deflateRaw`, scalar-native small-L5 or packed-counter large-L5/L6–L8
+    boundaries, both proved equal to `chooseSplitsHeuristicP`). Byte-identical to
+    the boxed reference
     `deflateDynamicBlocksSharedAtTokens data (toks.map unpackTok) (fun _ => cuts)`
-    (`deflateDynamicBlocksSharedAtP_eq`), through which the roundtrip and
-    padding theorems transfer for **any** cut list. -/
+    (`deflateDynamicBlocksSharedAtP_eq`), through which the roundtrip and padding
+    theorems transfer for **any** cut list. -/
 def deflateDynamicBlocksSharedAtP (data : ByteArray) (toks : TokenArray)
     (cuts : List Nat) : ByteArray :=
   if data.size == 0 then
@@ -2520,6 +2820,27 @@ theorem sharedPartitionSizedP_fst_toArray (toks : TokenArray) (cuts : List Nat) 
     (sharedPartitionSizedP toks cuts pos).1 = (sharedPartitionSizedPArray toks.toArray cuts pos).1 := by
   rw [sharedPartitionSizedP_toArray]
 
+/-- Trees-only twin of `sharedPartitionSizedP`.
+
+    A direct split route does not compare candidate sizes, so computing each
+    block's exact bit count and folding the whole-stream frequencies is wasted
+    work.  This walker retains only the per-block Huffman trees needed by
+    `emitSharedBlocksAtSizedP`, with exactly the same clamped partition.  Its
+    equality to `sharedPartitionSizedP`'s tree component is proved in
+    `Zip.Spec.LZ77PackedCorrect`. -/
+def sharedPartitionTreesP (toks : TokenArray) (cuts : List Nat) (pos : Nat) :
+    List SizedTrees :=
+  let j := min (max (cuts.headD toks.size) (pos + 1)) toks.size
+  let f := tokenFreqsPTA (toks.extract pos j)
+  let t := sizedTrees f.1 f.2
+  if j ≥ toks.size then [t]
+  else t :: sharedPartitionTreesP toks cuts.tail j
+termination_by toks.size - pos
+decreasing_by
+  rename_i h
+  simp only [Nat.not_le] at h
+  omega
+
 /-- Fused twin of `sharedPartitionSizedP` (#2772): one pass over the clamped
     partition yields the same `(bits, per-block trees)` **and** the whole-stream
     frequencies, accumulated as the EOB-corrected element-wise sum of the per-block
@@ -2583,6 +2904,21 @@ def deflateDynamicBlocksSharedAtSizedP (data : ByteArray) (toks : TokenArray)
     ((sp.1 + 7) / 8,
       fun _ => (emitSharedBlocksAtSizedP data toks cuts sp.2 0
         (BitWriter.emptyWithCapacity ((sp.1 + 7) / 8))).flush)
+
+/-- Emit a known-winning observation split after preparing only its per-block
+    trees.  Unlike `deflateDynamicBlocksSharedAtSizedP`, this does not compute an
+    exact candidate size; unlike `deflateObsSplitSizedFreqsP`, it also does not
+    merge per-block histograms for a base candidate that will not be emitted.
+    The emitted bytes equal `deflateDynamicBlocksSharedAtP` for every cut list
+    (`deflateDynamicBlocksSharedAtTreesP_eq`). -/
+def deflateDynamicBlocksSharedAtTreesP (data : ByteArray) (toks : TokenArray)
+    (cuts : List Nat) : ByteArray :=
+  if data.size == 0 then
+    deflateDynamicBlocksSharedAtP data toks cuts
+  else
+    let trees := sharedPartitionTreesP toks cuts 0
+    (emitSharedBlocksAtSizedP data toks cuts trees 0
+      (BitWriter.emptyWithCapacity data.size)).flush
 
 /-- The obs-split candidate prep **paired with** the whole-stream frequencies,
     both from one fused sizing pass (`sharedPartitionSizedFreqsP`, #2772).
@@ -2858,7 +3194,8 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (5 ≤ lev
     rw [deflateRawBasePF_tokenFreqsP]
     unfold deflateRawBase lzMatchP chainDepth insertCap niceLen
     simp only [show ¬ (5 : UInt8) ≤ 1 by decide,
-      show (1 : UInt8) ≤ 1 by decide, show (1 : UInt8) ≤ 4 by decide, ↓reduceIte]
+      show (1 : UInt8) ≤ 1 by decide, show (1 : UInt8) ≤ 4 by decide,
+      show ¬((1 : UInt8) == 7) = true by decide, Bool.false_eq_true, ↓reduceIte]
   · rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
     unfold deflateRawBaseFLevel1Impl
     rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
@@ -2866,7 +3203,13 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (5 ≤ lev
     rw [← tokenFreqsPTA_toArray]
     rw [deflateRawBasePF_tokenFreqsP]
     unfold deflateRawBase lzMatchP
-    simp only [h, ↓reduceIte]
+    have hlevel7 : level ≠ 7 := by
+      intro heq
+      subst level
+      exact h (by decide)
+    have h7 : ¬(level == 7) = true := by
+      simpa only [beq_iff_eq] using hlevel7
+    simp only [h, h7, Bool.false_eq_true, ↓reduceIte]
 
 theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     (choose : Array LZ77Token → List Nat) (level : UInt8) :
@@ -3049,6 +3392,43 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
   -- Every region looked incompressible.
   return true
 
+/-- Size-arbitrate a packed-token base against one observation-split candidate.
+    The caller owns matcher/profile and cut selection; keeping this shared tail
+    independent of those heuristics lets level 7 retain its selected profile
+    once, without rescanning content before choosing the split cadence. -/
+def deflateRawSplitTierP (data : ByteArray) (ptokens : TokenArray)
+    (cuts : List Nat) : ByteArray :=
+  let withObs : Nat × (Unit → ByteArray) :=
+    if cuts.isEmpty then deflateRawBasePPrep data ptokens
+    else
+      let obsFreqs := deflateObsSplitSizedFreqsP data ptokens cuts
+      let basePrep := deflateRawBasePPrepF data ptokens obsFreqs.2
+      if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
+  withObs.2 ()
+
+/-- Level-7 output dispatch at a retained content profile.
+
+    Ambiguous small inputs use the established exact-size arbitration.  A
+    calibrated large base route skips all split preparation, while a calibrated
+    large split route uses the trees-only preparation above.  An empty cut list
+    is definitionally a one-block split and therefore takes the base path,
+    preserving the old arbitration result without constructing redundant
+    trees.  Cut selection itself is below the route match, so direct-base inputs
+    also skip the observation walker entirely. -/
+def deflateRawL7RouteP (data : ByteArray) (profile : L7Profile)
+    (ptokens : TokenArray) : ByteArray :=
+  match l7OutputRouteFor data.size profile with
+  | .arbitrate =>
+      let checkTokens := l7SplitCheckTokensFor data profile
+      let cuts := chooseSplitsHeuristicPUPacked ptokens data.size checkTokens
+      deflateRawSplitTierP data ptokens cuts
+  | .base => deflateRawBaseP data ptokens
+  | .split =>
+      let checkTokens := l7SplitCheckTokensFor data profile
+      let cuts := chooseSplitsHeuristicPUPacked ptokens data.size checkTokens
+      if cuts.isEmpty then deflateRawBaseP data ptokens
+      else deflateDynamicBlocksSharedAtTreesP data ptokens cuts
+
 /-- Unified raw DEFLATE compression dispatch. The native level range is **0–10**
     (wider than zlib's 0–9). Since #2638 the top of the ladder is:
 
@@ -3188,85 +3568,93 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     -- ptt5-class Canterbury bitmaps at L9, so weakening it changes real
     -- output. The floor's cost was never the matcher; it was the full base
     -- EMIT, now a sized prep below.)
-    let ptokens := lzMatchP data level
-    if level == 9 then
-      -- Level 9 (#2638): the cheaper **L9-fast** approximate-optimal parse — near
-      -- the crown's ratio at ~2× its speed, measured ~20% outside the L8↔L9
-      -- mixing frontier on Silesia (a genuine new Pareto point). As with the
-      -- exact candidate below, the split candidates are dropped on measured
-      -- evidence; keep `base` (reuses `ptokens`, ~free) as the safety floor and
-      -- emit `pickSmaller(base, fast-optimal)`. Above the `optimalMaxSize` memory
-      -- gate the same parse runs *windowed* (#2787): region-capped choice storage
-      -- gives byte-identical tokens in bounded memory, so the crown survives on
-      -- streams larger than 64 MiB instead of collapsing to the split ratio.
-      -- #2782 follow-up: size the floor (`deflateRawBasePPrep`, the #2753
-      -- tree-capturing prep) instead of emitting it — the optimal candidate is
-      -- strictly smaller on every corpus file (#2640), so the emit-both
-      -- `pickSmaller` paid a full discarded freq+tree+BitWriter pass. Same
-      -- winner, same bytes (prep size = flushed size, the #2753 invariant).
-      let opt := if data.size ≤ optimalMaxSize then
-        deflateDynamicBlocksOptimalFast data sharedTokChunk
-      else
-        deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk
-      let bp := deflateRawBasePPrep data ptokens
-      emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
-    else if 10 ≤ level then
-      -- Level ≥ 10: the exact backward-DP crown (the former level-9 behaviour,
-      -- #2640) — the max-ratio ceiling, kept reachable per the #2638 directive.
-      -- The fixed-cadence optimal candidate measured strictly smallest on every
-      -- Canterbury and Silesia file, so the split candidates are dropped here;
-      -- `pickSmaller(base, optimal)` is never worse than the lazy baseline. As at
-      -- level 9, above the memory gate the exact parse runs windowed (#2787).
-      -- Sized floor here too — see the level-9 arm.
-      let opt := if data.size ≤ optimalMaxSize then
-        deflateDynamicBlocksOptimal data sharedTokChunk
-      else
-        deflateDynamicBlocksOptimalWindowed data sharedTokChunk
-      let bp := deflateRawBasePPrep data ptokens
-      emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
+    if level == 7 then
+      -- Level 7 selects one content profile and retains it through matching and
+      -- split-cadence/output-route selection.  In particular, the large shallow
+      -- point needs the specialized L5 matcher, its 2016-token cadence, and the
+      -- direct base route; recomputing `l7ProfileFor` would pay the four-region
+      -- sketch twice.  Small inputs retain size arbitration except for the
+      -- held-out-safe direct-split profiles selected by `l7OutputRouteFor`.
+      let profile := l7ProfileFor data
+      let ptokens := l7MatchPFor data profile
+      deflateRawL7RouteP data profile ptokens
     else
-      -- Levels 5–8: base vs cross-block shared-window split at the
-      -- observation-divergence boundaries (#2737),
-      -- **size-arbitrated** (#2753). Both candidates are *prepared* — sized to
-      -- their flushed byte count with per-block trees captured
-      -- (`deflateRawBasePPrep` for the base, `deflateDynamicBlocksSharedAtSizedP`
-      -- for the cut list) — and only the winner is emitted, reusing the trees the
-      -- sizing pass already built, instead of emitting both and discarding the
-      -- larger via `pickSmaller`. The winner and its bytes are identical to the
-      -- retired emit-both dispatch. The tree capture is what makes this a net
-      -- win: sizing a dynamic block otherwise costs a full frequency + Huffman
-      -- pass, so without reuse "size both + emit winner" would not beat "emit
-      -- both" (measured — Silesia L6-L7 +5-12% with reuse). No cuts ⇒ the split
-      -- would be a single dynamic block the base already sizes, so skip it
-      -- entirely (every input under ~2·splitMinBlockBytes takes this path).
-      --
-      -- When there are cuts, the split-sizing pass already computes `tokenFreqsP`
-      -- per block; `deflateObsSplitSizedFreqsP` folds those into the whole-stream
-      -- frequencies (EOB-corrected, `tokenFreqsP_append`) and the base candidate
-      -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
-      -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
-      -- The packed-counter walker pays only on the large-L5 point it was tuned
-      -- for. L6–L8 and small L5 inputs retain the established scalar walker:
-      -- their shorter observation windows do not amortize packing, and keeping
-      -- that route also preserves their existing code shape/frontier points.
-      let cuts :=
-        if useL5LargeInputPolicy data level then
-          chooseSplitsHeuristicPUPacked ptokens data.size
-            (splitCheckTokensFor data level)
+      let ptokens := lzMatchP data level
+      if level == 9 then
+        -- Level 9 (#2638): the cheaper **L9-fast** approximate-optimal parse — near
+        -- the crown's ratio at ~2× its speed, measured ~20% outside the L8↔L9
+        -- mixing frontier on Silesia (a genuine new Pareto point). As with the
+        -- exact candidate below, the split candidates are dropped on measured
+        -- evidence; keep `base` (reuses `ptokens`, ~free) as the safety floor and
+        -- emit `pickSmaller(base, fast-optimal)`. Above the `optimalMaxSize` memory
+        -- gate the same parse runs *windowed* (#2787): region-capped choice storage
+        -- gives byte-identical tokens in bounded memory, so the crown survives on
+        -- streams larger than 64 MiB instead of collapsing to the split ratio.
+        -- #2782 follow-up: size the floor (`deflateRawBasePPrep`, the #2753
+        -- tree-capturing prep) instead of emitting it — the optimal candidate is
+        -- strictly smaller on every corpus file (#2640), so the emit-both
+        -- `pickSmaller` paid a full discarded freq+tree+BitWriter pass. Same
+        -- winner, same bytes (prep size = flushed size, the #2753 invariant).
+        let opt := if data.size ≤ optimalMaxSize then
+          deflateDynamicBlocksOptimalFast data sharedTokChunk
         else
-          chooseSplitsHeuristicPU ptokens data.size
-            (splitCheckTokensFor data level)
-      -- `withObs`: the base, or the size-arbitrated smaller of base and the
-      -- obs-divergence split — selected *eagerly* (the winning prep pair, tie →
-      -- the split, matching `pickSmaller`), so the loser's captured per-block
-      -- trees are dropped now. The winner's emit thunk stays unforced until then.
-      let withObs : Nat × (Unit → ByteArray) :=
-        if cuts.isEmpty then deflateRawBasePPrep data ptokens
+          deflateDynamicBlocksOptimalWindowedFast data sharedTokChunk
+        let bp := deflateRawBasePPrep data ptokens
+        emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
+      else if 10 ≤ level then
+        -- Level ≥ 10: the exact backward-DP crown (the former level-9 behaviour,
+        -- #2640) — the max-ratio ceiling, kept reachable per the #2638 directive.
+        -- The fixed-cadence optimal candidate measured strictly smallest on every
+        -- Canterbury and Silesia file, so the split candidates are dropped here;
+        -- `pickSmaller(base, optimal)` is never worse than the lazy baseline. As at
+        -- level 9, above the memory gate the exact parse runs windowed (#2787).
+        -- Sized floor here too — see the level-9 arm.
+        let opt := if data.size ≤ optimalMaxSize then
+          deflateDynamicBlocksOptimal data sharedTokChunk
         else
-          let obsFreqs := deflateObsSplitSizedFreqsP data ptokens cuts
-          let basePrep := deflateRawBasePPrepF data ptokens obsFreqs.2
-          if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
-      withObs.2 ()
+          deflateDynamicBlocksOptimalWindowed data sharedTokChunk
+        let bp := deflateRawBasePPrep data ptokens
+        emitSmallerBy bp.1 bp.2 opt.size (fun _ => opt)
+      else
+        -- Levels 5, 6 and 8: base vs cross-block shared-window split at the
+        -- observation-divergence boundaries (#2737),
+        -- **size-arbitrated** (#2753). Both candidates are *prepared* — sized to
+        -- their flushed byte count with per-block trees captured
+        -- (`deflateRawBasePPrep` for the base, `deflateDynamicBlocksSharedAtSizedP`
+        -- for the cut list) — and only the winner is emitted, reusing the trees the
+        -- sizing pass already built, instead of emitting both and discarding the
+        -- larger via `pickSmaller`. The winner and its bytes are identical to the
+        -- retired emit-both dispatch. The tree capture is what makes this a net
+        -- win: sizing a dynamic block otherwise costs a full frequency + Huffman
+        -- pass, so without reuse "size both + emit winner" would not beat "emit
+        -- both" (measured — Silesia L6-L7 +5-12% with reuse). No cuts ⇒ the split
+        -- would be a single dynamic block the base already sizes, so skip it
+        -- entirely (every input under ~2·splitMinBlockBytes takes this path).
+        --
+        -- When there are cuts, the split-sizing pass already computes `tokenFreqsP`
+        -- per block; `deflateObsSplitSizedFreqsP` folds those into the whole-stream
+        -- frequencies (EOB-corrected, `tokenFreqsP_append`) and the base candidate
+        -- reuses them via `deflateRawBasePPrepF` — replacing the base's second
+        -- whole-stream `tokenFreqsP` walk with a cheap ~316-entry summation (#2772).
+        -- The packed-counter walker is used for large L5 and all of L6–L8. It is
+        -- exactly equal to the scalar walker on `lzMatchP` streams
+        -- (`chooseSplitsHeuristicPUPacked_lzMatchP_eq`), while reducing the hot
+        -- loop's twenty counters to seven words. Small L5 retains the scalar
+        -- route, where setup dominates the shorter stream.
+        let cuts :=
+          if level == 5 then
+            if useL5LargeInputPolicy data level then
+              chooseSplitsHeuristicPUPacked ptokens data.size
+                (splitCheckTokensFor data level)
+            else
+              chooseSplitsHeuristicPU ptokens data.size
+                (splitCheckTokensFor data level)
+          else
+            chooseSplitsHeuristicPUPacked ptokens data.size
+              (splitCheckTokensFor data level)
+        -- `deflateRawSplitTierP`: the base, or the size-arbitrated smaller of
+        -- base and obs-split, with only the winning captured-tree thunk forced.
+        deflateRawSplitTierP data ptokens cuts
   else
     -- Greedy tier (levels 1–4): fuse the whole-stream `tokenFreqsP` walk into the
     -- matcher pass. `deflateRawBaseF` produces the tokens and their frequencies in

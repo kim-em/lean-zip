@@ -135,7 +135,10 @@ theorem chainWalkPackedUUSeededChecked_toNat (data : ByteArray) (prev : Array Na
     ⟨hg.1.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1⟩
   rw [dif_pos hg.1.1, dif_pos hold]
   rw [chainWalkPackedUU2_eq]
-  simpa only [hg.1.2.2.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1] using heq
+  split
+  · rw [chainWalkPackedUBelow_eq]
+    simpa only [hg.1.2.2.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1] using heq
+  · simpa only [hg.1.2.2.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1] using heq
 
 /-- The fully-native-word guarded wrapper is observationally identical to the
     existing mixed-`Nat`/`USize` guarded walk. -/
@@ -245,7 +248,7 @@ theorem lz77ChainLazyIterPMergedL5Large_eq (data : ByteArray)
       · dsimp only
         exact noH3SingleLoop_eq data windowSize 65536
           (min chainWinSize data.size) 22 insertCap goodMatch niceLen 5 1
-          (by omega) _ (Array.replicate 32768 data.size) 0 _
+          (by omega) _ (initialH3Table false data.size) 0 _
     _ = lz77ChainLazyIterP data 22 windowSize insertCap goodMatch niceLen
           5 false 1 :=
       lz77ChainLazyIterPMerged_eq data 22 windowSize insertCap goodMatch niceLen

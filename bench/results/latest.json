@@ -1,8 +1,8 @@
 {
  "meta": {
-  "date": "2026-07-26T04:20:54Z",
+  "date": "2026-07-26T19:17:29Z",
   "machine": "Linux chungus2 x86_64",
-  "git_commit": "9ecc49a5",
+  "git_commit": "01838380",
   "toolchain": "leanprover/lean4:v4.33.0-rc1",
   "timing_aggregation": "median",
   "timing_reps": 5,
@@ -16,8 +16,8 @@
    "level": 1,
    "out_size": 60457,
    "ratio": 0.3975,
-   "compress_mbps": 131.25,
-   "decompress_mbps": 305.69
+   "compress_mbps": 129.83,
+   "decompress_mbps": 306.85
   },
   {
    "compressor": "native",
@@ -26,8 +26,8 @@
    "level": 2,
    "out_size": 57085,
    "ratio": 0.3753,
-   "compress_mbps": 84.38,
-   "decompress_mbps": 344.82
+   "compress_mbps": 83.58,
+   "decompress_mbps": 346.18
   },
   {
    "compressor": "native",
@@ -36,8 +36,8 @@
    "level": 3,
    "out_size": 56060,
    "ratio": 0.3686,
-   "compress_mbps": 70.39,
-   "decompress_mbps": 362.15
+   "compress_mbps": 69.25,
+   "decompress_mbps": 365.33
   },
   {
    "compressor": "native",
@@ -46,8 +46,8 @@
    "level": 4,
    "out_size": 56053,
    "ratio": 0.3686,
-   "compress_mbps": 69.67,
-   "decompress_mbps": 346.73
+   "compress_mbps": 69.32,
+   "decompress_mbps": 350.1
   },
   {
    "compressor": "native",
@@ -56,8 +56,8 @@
    "level": 5,
    "out_size": 54623,
    "ratio": 0.3592,
-   "compress_mbps": 42.39,
-   "decompress_mbps": 341.01
+   "compress_mbps": 40.22,
+   "decompress_mbps": 343.31
   },
   {
    "compressor": "native",
@@ -66,18 +66,18 @@
    "level": 6,
    "out_size": 54398,
    "ratio": 0.3577,
-   "compress_mbps": 32.91,
-   "decompress_mbps": 347.94
+   "compress_mbps": 34.02,
+   "decompress_mbps": 351.89
   },
   {
    "compressor": "native",
    "pattern": "canterbury/alice29.txt",
    "size": 152089,
    "level": 7,
-   "out_size": 54338,
-   "ratio": 0.3573,
-   "compress_mbps": 31.42,
-   "decompress_mbps": 348.71
+   "out_size": 54155,
+   "ratio": 0.3561,
+   "compress_mbps": 40.94,
+   "decompress_mbps": 349.92
   },
   {
    "compressor": "native",
@@ -86,8 +86,8 @@
    "level": 8,
    "out_size": 54216,
    "ratio": 0.3565,
-   "compress_mbps": 25.41,
-   "decompress_mbps": 347.86
+   "compress_mbps": 25.13,
+   "decompress_mbps": 350.37
   },
   {
    "compressor": "native",
@@ -96,8 +96,8 @@
    "level": 9,
    "out_size": 52730,
    "ratio": 0.3467,
-   "compress_mbps": 4.54,
-   "decompress_mbps": 348.19
+   "compress_mbps": 4.41,
+   "decompress_mbps": 350.99
   },
   {
    "compressor": "native",
@@ -106,7 +106,7 @@
    "level": 10,
    "out_size": 52078,
    "ratio": 0.3424,
-   "compress_mbps": 2.48,
+   "compress_mbps": 2.46,
    "decompress_mbps": null
   },
   {
@@ -116,8 +116,8 @@
    "level": 1,
    "out_size": 53131,
    "ratio": 0.4244,
-   "compress_mbps": 112.32,
-   "decompress_mbps": 297.46
+   "compress_mbps": 114.05,
+   "decompress_mbps": 305.2
   },
   {
    "compressor": "native",
@@ -126,8 +126,8 @@
    "level": 2,
    "out_size": 50676,
    "ratio": 0.4048,
-   "compress_mbps": 73.9,
-   "decompress_mbps": 320.84
+   "compress_mbps": 73.76,
+   "decompress_mbps": 321.97
   },
   {
    "compressor": "native",
@@ -136,8 +136,8 @@
    "level": 3,
    "out_size": 50013,
    "ratio": 0.3995,
-   "compress_mbps": 63.64,
-   "decompress_mbps": 333.92
+   "compress_mbps": 62.77,
+   "decompress_mbps": 334.74
   },
   {
    "compressor": "native",
@@ -146,8 +146,8 @@
    "level": 4,
    "out_size": 50007,
    "ratio": 0.3995,
-   "compress_mbps": 63.54,
-   "decompress_mbps": 315.99
+   "compress_mbps": 62.65,
+   "decompress_mbps": 314.87
   },
   {
    "compressor": "native",
@@ -156,8 +156,8 @@
    "level": 5,
    "out_size": 48703,
    "ratio": 0.3891,
-   "compress_mbps": 38.2,
-   "decompress_mbps": 311.23
+   "compress_mbps": 36.27,
+   "decompress_mbps": 312.33
   },
   {
    "compressor": "native",
@@ -166,18 +166,18 @@
    "level": 6,
    "out_size": 49012,
    "ratio": 0.3915,
-   "compress_mbps": 33.16,
-   "decompress_mbps": 314.68
+   "compress_mbps": 34.17,
+   "decompress_mbps": 318.42
   },
   {
    "compressor": "native",
    "pattern": "canterbury/asyoulik.txt",
    "size": 125179,
    "level": 7,
-   "out_size": 48796,
-   "ratio": 0.3898,
-   "compress_mbps": 28.79,
-   "decompress_mbps": 316.31
+   "out_size": 48703,
+   "ratio": 0.3891,
+   "compress_mbps": 41.89,
+   "decompress_mbps": 316.72
   },
   {
    "compressor": "native",
@@ -186,8 +186,8 @@
    "level": 8,
    "out_size": 48839,
    "ratio": 0.3902,
-   "compress_mbps": 26.52,
-   "decompress_mbps": 315.45
+   "compress_mbps": 27.33,
+   "decompress_mbps": 319.8
   },
   {
    "compressor": "native",
@@ -196,8 +196,8 @@
    "level": 9,
    "out_size": 47433,
    "ratio": 0.3789,
-   "compress_mbps": 4.88,
-   "decompress_mbps": 315.46
+   "compress_mbps": 4.8,
+   "decompress_mbps": 317.56
   },
   {
    "compressor": "native",
@@ -206,7 +206,7 @@
    "level": 10,
    "out_size": 46866,
    "ratio": 0.3744,
-   "compress_mbps": 2.86,
+   "compress_mbps": 2.82,
    "decompress_mbps": null
   },
   {
@@ -216,8 +216,8 @@
    "level": 1,
    "out_size": 8485,
    "ratio": 0.3449,
-   "compress_mbps": 99.23,
-   "decompress_mbps": 291.36
+   "compress_mbps": 101.08,
+   "decompress_mbps": 292.11
   },
   {
    "compressor": "native",
@@ -226,8 +226,8 @@
    "level": 2,
    "out_size": 8248,
    "ratio": 0.3352,
-   "compress_mbps": 77.41,
-   "decompress_mbps": 303.07
+   "compress_mbps": 75.24,
+   "decompress_mbps": 303.71
   },
   {
    "compressor": "native",
@@ -236,8 +236,8 @@
    "level": 3,
    "out_size": 8111,
    "ratio": 0.3297,
-   "compress_mbps": 69.1,
-   "decompress_mbps": 308.5
+   "compress_mbps": 69.65,
+   "decompress_mbps": 309.68
   },
   {
    "compressor": "native",
@@ -246,8 +246,8 @@
    "level": 4,
    "out_size": 8079,
    "ratio": 0.3284,
-   "compress_mbps": 69.36,
-   "decompress_mbps": 314.55
+   "compress_mbps": 69.58,
+   "decompress_mbps": 315.71
   },
   {
    "compressor": "native",
@@ -256,8 +256,8 @@
    "level": 5,
    "out_size": 7970,
    "ratio": 0.3239,
-   "compress_mbps": 52.41,
-   "decompress_mbps": 324.55
+   "compress_mbps": 53.23,
+   "decompress_mbps": 326.87
   },
   {
    "compressor": "native",
@@ -266,18 +266,18 @@
    "level": 6,
    "out_size": 7961,
    "ratio": 0.3236,
-   "compress_mbps": 41.29,
-   "decompress_mbps": 320.51
+   "compress_mbps": 42.88,
+   "decompress_mbps": 327.23
   },
   {
    "compressor": "native",
    "pattern": "canterbury/cp.html",
    "size": 24603,
    "level": 7,
-   "out_size": 7942,
-   "ratio": 0.3228,
-   "compress_mbps": 38.43,
-   "decompress_mbps": 327.22
+   "out_size": 7914,
+   "ratio": 0.3217,
+   "compress_mbps": 50.95,
+   "decompress_mbps": 332.6
   },
   {
    "compressor": "native",
@@ -286,8 +286,8 @@
    "level": 8,
    "out_size": 7934,
    "ratio": 0.3225,
-   "compress_mbps": 35.21,
-   "decompress_mbps": 318.61
+   "compress_mbps": 36.15,
+   "decompress_mbps": 329.29
   },
   {
    "compressor": "native",
@@ -296,8 +296,8 @@
    "level": 9,
    "out_size": 7803,
    "ratio": 0.3172,
-   "compress_mbps": 5.08,
-   "decompress_mbps": 331.03
+   "compress_mbps": 5.07,
+   "decompress_mbps": 330.25
   },
   {
    "compressor": "native",
@@ -306,7 +306,7 @@
    "level": 10,
    "out_size": 7737,
    "ratio": 0.3145,
-   "compress_mbps": 2.98,
+   "compress_mbps": 2.96,
    "decompress_mbps": null
   },
   {
@@ -316,8 +316,8 @@
    "level": 1,
    "out_size": 3509,
    "ratio": 0.3147,
-   "compress_mbps": 64.27,
-   "decompress_mbps": 196.21
+   "compress_mbps": 65.75,
+   "decompress_mbps": 197.3
   },
   {
    "compressor": "native",
@@ -326,8 +326,8 @@
    "level": 2,
    "out_size": 3316,
    "ratio": 0.2974,
-   "compress_mbps": 56.46,
-   "decompress_mbps": 200.27
+   "compress_mbps": 54.9,
+   "decompress_mbps": 200.76
   },
   {
    "compressor": "native",
@@ -336,8 +336,8 @@
    "level": 3,
    "out_size": 3227,
    "ratio": 0.2894,
-   "compress_mbps": 52.28,
-   "decompress_mbps": 205.63
+   "compress_mbps": 52.15,
+   "decompress_mbps": 202.26
   },
   {
    "compressor": "native",
@@ -346,8 +346,8 @@
    "level": 4,
    "out_size": 3215,
    "ratio": 0.2883,
-   "compress_mbps": 53.03,
-   "decompress_mbps": 210.48
+   "compress_mbps": 51.23,
+   "decompress_mbps": 209.13
   },
   {
    "compressor": "native",
@@ -356,8 +356,8 @@
    "level": 5,
    "out_size": 3150,
    "ratio": 0.2825,
-   "compress_mbps": 42.81,
-   "decompress_mbps": 209.43
+   "compress_mbps": 43.76,
+   "decompress_mbps": 209.74
   },
   {
    "compressor": "native",
@@ -366,18 +366,18 @@
    "level": 6,
    "out_size": 3136,
    "ratio": 0.2813,
-   "compress_mbps": 35.94,
-   "decompress_mbps": 209.95
+   "compress_mbps": 37.03,
+   "decompress_mbps": 210.91
   },
   {
    "compressor": "native",
    "pattern": "canterbury/fields.c",
    "size": 11150,
    "level": 7,
-   "out_size": 3113,
-   "ratio": 0.2792,
-   "compress_mbps": 34.32,
-   "decompress_mbps": 210.89
+   "out_size": 3120,
+   "ratio": 0.2798,
+   "compress_mbps": 44.23,
+   "decompress_mbps": 210.31
   },
   {
    "compressor": "native",
@@ -386,8 +386,8 @@
    "level": 8,
    "out_size": 3117,
    "ratio": 0.2796,
-   "compress_mbps": 32.38,
-   "decompress_mbps": 210.49
+   "compress_mbps": 33.21,
+   "decompress_mbps": 210.52
   },
   {
    "compressor": "native",
@@ -396,8 +396,8 @@
    "level": 9,
    "out_size": 3056,
    "ratio": 0.2741,
-   "compress_mbps": 5.68,
-   "decompress_mbps": 212.05
+   "compress_mbps": 5.7,
+   "decompress_mbps": 209.94
   },
   {
    "compressor": "native",
@@ -406,7 +406,7 @@
    "level": 10,
    "out_size": 3031,
    "ratio": 0.2718,
-   "compress_mbps": 3.11,
+   "compress_mbps": 3.17,
    "decompress_mbps": null
   },
   {
@@ -416,8 +416,8 @@
    "level": 1,
    "out_size": 1283,
    "ratio": 0.3448,
-   "compress_mbps": 27.12,
-   "decompress_mbps": 90.53
+   "compress_mbps": 29.26,
+   "decompress_mbps": 91.59
   },
   {
    "compressor": "native",
@@ -426,8 +426,8 @@
    "level": 2,
    "out_size": 1234,
    "ratio": 0.3316,
-   "compress_mbps": 25.53,
-   "decompress_mbps": 90.79
+   "compress_mbps": 26.8,
+   "decompress_mbps": 90.57
   },
   {
    "compressor": "native",
@@ -436,8 +436,8 @@
    "level": 3,
    "out_size": 1223,
    "ratio": 0.3287,
-   "compress_mbps": 24.58,
-   "decompress_mbps": 91.15
+   "compress_mbps": 26.49,
+   "decompress_mbps": 90.36
   },
   {
    "compressor": "native",
@@ -446,8 +446,8 @@
    "level": 4,
    "out_size": 1223,
    "ratio": 0.3287,
-   "compress_mbps": 25.09,
-   "decompress_mbps": 90.53
+   "compress_mbps": 27.45,
+   "decompress_mbps": 90.68
   },
   {
    "compressor": "native",
@@ -456,8 +456,8 @@
    "level": 5,
    "out_size": 1210,
    "ratio": 0.3252,
-   "compress_mbps": 22.29,
-   "decompress_mbps": 91.14
+   "compress_mbps": 24.26,
+   "decompress_mbps": 91.65
   },
   {
    "compressor": "native",
@@ -466,18 +466,18 @@
    "level": 6,
    "out_size": 1220,
    "ratio": 0.3279,
-   "compress_mbps": 21.08,
-   "decompress_mbps": 91.99
+   "compress_mbps": 20.91,
+   "decompress_mbps": 90.76
   },
   {
    "compressor": "native",
    "pattern": "canterbury/grammar.lsp",
    "size": 3721,
    "level": 7,
-   "out_size": 1216,
-   "ratio": 0.3268,
-   "compress_mbps": 20.48,
-   "decompress_mbps": 91.55
+   "out_size": 1209,
+   "ratio": 0.3249,
+   "compress_mbps": 25.4,
+   "decompress_mbps": 91.18
   },
   {
    "compressor": "native",
@@ -486,8 +486,8 @@
    "level": 8,
    "out_size": 1219,
    "ratio": 0.3276,
-   "compress_mbps": 20.31,
-   "decompress_mbps": 90.44
+   "compress_mbps": 20.81,
+   "decompress_mbps": 92.42
   },
   {
    "compressor": "native",
@@ -496,8 +496,8 @@
    "level": 9,
    "out_size": 1205,
    "ratio": 0.3238,
-   "compress_mbps": 5.18,
-   "decompress_mbps": 90.56
+   "compress_mbps": 5.26,
+   "decompress_mbps": 93.51
   },
   {
    "compressor": "native",
@@ -506,7 +506,7 @@
    "level": 10,
    "out_size": 1191,
    "ratio": 0.3201,
-   "compress_mbps": 3.04,
+   "compress_mbps": 3.1,
    "decompress_mbps": null
   },
   {
@@ -516,8 +516,8 @@
    "level": 1,
    "out_size": 251776,
    "ratio": 0.2445,
-   "compress_mbps": 305.28,
-   "decompress_mbps": 449.15
+   "compress_mbps": 307.11,
+   "decompress_mbps": 450.31
   },
   {
    "compressor": "native",
@@ -526,8 +526,8 @@
    "level": 2,
    "out_size": 244115,
    "ratio": 0.2371,
-   "compress_mbps": 169.5,
-   "decompress_mbps": 419.78
+   "compress_mbps": 167.62,
+   "decompress_mbps": 420.86
   },
   {
    "compressor": "native",
@@ -536,8 +536,8 @@
    "level": 3,
    "out_size": 242552,
    "ratio": 0.2355,
-   "compress_mbps": 130.41,
-   "decompress_mbps": 443.72
+   "compress_mbps": 130.81,
+   "decompress_mbps": 450.25
   },
   {
    "compressor": "native",
@@ -546,8 +546,8 @@
    "level": 4,
    "out_size": 242552,
    "ratio": 0.2355,
-   "compress_mbps": 132.6,
-   "decompress_mbps": 501.06
+   "compress_mbps": 131.0,
+   "decompress_mbps": 504.74
   },
   {
    "compressor": "native",
@@ -556,8 +556,8 @@
    "level": 5,
    "out_size": 203000,
    "ratio": 0.1971,
-   "compress_mbps": 57.19,
-   "decompress_mbps": 494.78
+   "compress_mbps": 54.26,
+   "decompress_mbps": 497.28
   },
   {
    "compressor": "native",
@@ -566,18 +566,18 @@
    "level": 6,
    "out_size": 202429,
    "ratio": 0.1966,
-   "compress_mbps": 45.8,
-   "decompress_mbps": 510.03
+   "compress_mbps": 47.26,
+   "decompress_mbps": 515.58
   },
   {
    "compressor": "native",
    "pattern": "canterbury/kennedy.xls",
    "size": 1029744,
    "level": 7,
-   "out_size": 202351,
-   "ratio": 0.1965,
-   "compress_mbps": 40.68,
-   "decompress_mbps": 522.2
+   "out_size": 203000,
+   "ratio": 0.1971,
+   "compress_mbps": 58.83,
+   "decompress_mbps": 526.69
   },
   {
    "compressor": "native",
@@ -586,8 +586,8 @@
    "level": 8,
    "out_size": 200869,
    "ratio": 0.1951,
-   "compress_mbps": 24.11,
-   "decompress_mbps": 543.51
+   "compress_mbps": 24.63,
+   "decompress_mbps": 545.75
   },
   {
    "compressor": "native",
@@ -596,8 +596,8 @@
    "level": 9,
    "out_size": 182510,
    "ratio": 0.1772,
-   "compress_mbps": 3.64,
-   "decompress_mbps": 544.83
+   "compress_mbps": 3.56,
+   "decompress_mbps": 545.46
   },
   {
    "compressor": "native",
@@ -606,7 +606,7 @@
    "level": 10,
    "out_size": 178069,
    "ratio": 0.1729,
-   "compress_mbps": 1.51,
+   "compress_mbps": 1.49,
    "decompress_mbps": null
   },
   {
@@ -616,8 +616,8 @@
    "level": 1,
    "out_size": 160681,
    "ratio": 0.3765,
-   "compress_mbps": 140.49,
-   "decompress_mbps": 324.25
+   "compress_mbps": 139.25,
+   "decompress_mbps": 322.63
   },
   {
    "compressor": "native",
@@ -626,8 +626,8 @@
    "level": 2,
    "out_size": 151586,
    "ratio": 0.3552,
-   "compress_mbps": 88.53,
-   "decompress_mbps": 336.78
+   "compress_mbps": 87.33,
+   "decompress_mbps": 338.3
   },
   {
    "compressor": "native",
@@ -636,8 +636,8 @@
    "level": 3,
    "out_size": 148849,
    "ratio": 0.3488,
-   "compress_mbps": 71.6,
-   "decompress_mbps": 365.61
+   "compress_mbps": 71.28,
+   "decompress_mbps": 368.94
   },
   {
    "compressor": "native",
@@ -646,8 +646,8 @@
    "level": 4,
    "out_size": 148760,
    "ratio": 0.3486,
-   "compress_mbps": 71.89,
-   "decompress_mbps": 345.82
+   "compress_mbps": 71.06,
+   "decompress_mbps": 347.93
   },
   {
    "compressor": "native",
@@ -656,8 +656,8 @@
    "level": 5,
    "out_size": 145147,
    "ratio": 0.3401,
-   "compress_mbps": 43.99,
-   "decompress_mbps": 342.67
+   "compress_mbps": 41.71,
+   "decompress_mbps": 344.73
   },
   {
    "compressor": "native",
@@ -666,18 +666,18 @@
    "level": 6,
    "out_size": 144871,
    "ratio": 0.3395,
-   "compress_mbps": 33.63,
-   "decompress_mbps": 349.48
+   "compress_mbps": 34.86,
+   "decompress_mbps": 349.33
   },
   {
    "compressor": "native",
    "pattern": "canterbury/lcet10.txt",
    "size": 426754,
    "level": 7,
-   "out_size": 144263,
-   "ratio": 0.338,
-   "compress_mbps": 29.74,
-   "decompress_mbps": 349.24
+   "out_size": 145333,
+   "ratio": 0.3406,
+   "compress_mbps": 47.28,
+   "decompress_mbps": 351.5
   },
   {
    "compressor": "native",
@@ -686,8 +686,8 @@
    "level": 8,
    "out_size": 144045,
    "ratio": 0.3375,
-   "compress_mbps": 25.23,
-   "decompress_mbps": 349.4
+   "compress_mbps": 26.0,
+   "decompress_mbps": 350.19
   },
   {
    "compressor": "native",
@@ -696,8 +696,8 @@
    "level": 9,
    "out_size": 140323,
    "ratio": 0.3288,
-   "compress_mbps": 4.42,
-   "decompress_mbps": 348.9
+   "compress_mbps": 4.39,
+   "decompress_mbps": 352.34
   },
   {
    "compressor": "native",
@@ -706,7 +706,7 @@
    "level": 10,
    "out_size": 138833,
    "ratio": 0.3253,
-   "compress_mbps": 2.52,
+   "compress_mbps": 2.51,
    "decompress_mbps": null
   },
   {
@@ -716,8 +716,8 @@
    "level": 1,
    "out_size": 212553,
    "ratio": 0.4411,
-   "compress_mbps": 114.99,
-   "decompress_mbps": 291.83
+   "compress_mbps": 115.39,
+   "decompress_mbps": 292.56
   },
   {
    "compressor": "native",
@@ -726,8 +726,8 @@
    "level": 2,
    "out_size": 202261,
    "ratio": 0.4197,
-   "compress_mbps": 74.1,
-   "decompress_mbps": 316.5
+   "compress_mbps": 72.81,
+   "decompress_mbps": 317.66
   },
   {
    "compressor": "native",
@@ -736,8 +736,8 @@
    "level": 3,
    "out_size": 199930,
    "ratio": 0.4149,
-   "compress_mbps": 61.7,
-   "decompress_mbps": 328.41
+   "compress_mbps": 60.76,
+   "decompress_mbps": 329.42
   },
   {
    "compressor": "native",
@@ -746,8 +746,8 @@
    "level": 4,
    "out_size": 199933,
    "ratio": 0.4149,
-   "compress_mbps": 61.76,
-   "decompress_mbps": 303.55
+   "compress_mbps": 60.72,
+   "decompress_mbps": 305.82
   },
   {
    "compressor": "native",
@@ -756,8 +756,8 @@
    "level": 5,
    "out_size": 195481,
    "ratio": 0.4057,
-   "compress_mbps": 38.08,
-   "decompress_mbps": 294.88
+   "compress_mbps": 36.07,
+   "decompress_mbps": 297.01
   },
   {
    "compressor": "native",
@@ -766,18 +766,18 @@
    "level": 6,
    "out_size": 195634,
    "ratio": 0.406,
-   "compress_mbps": 30.3,
-   "decompress_mbps": 299.47
+   "compress_mbps": 31.08,
+   "decompress_mbps": 302.03
   },
   {
    "compressor": "native",
    "pattern": "canterbury/plrabn12.txt",
    "size": 481861,
    "level": 7,
-   "out_size": 194724,
-   "ratio": 0.4041,
-   "compress_mbps": 25.86,
-   "decompress_mbps": 302.13
+   "out_size": 195481,
+   "ratio": 0.4057,
+   "compress_mbps": 40.13,
+   "decompress_mbps": 302.07
   },
   {
    "compressor": "native",
@@ -786,8 +786,8 @@
    "level": 8,
    "out_size": 194355,
    "ratio": 0.4033,
-   "compress_mbps": 21.9,
-   "decompress_mbps": 298.86
+   "compress_mbps": 22.42,
+   "decompress_mbps": 299.4
   },
   {
    "compressor": "native",
@@ -796,8 +796,8 @@
    "level": 9,
    "out_size": 189368,
    "ratio": 0.393,
-   "compress_mbps": 4.2,
-   "decompress_mbps": 301.1
+   "compress_mbps": 4.14,
+   "decompress_mbps": 300.77
   },
   {
    "compressor": "native",
@@ -806,7 +806,7 @@
    "level": 10,
    "out_size": 186146,
    "ratio": 0.3863,
-   "compress_mbps": 2.51,
+   "compress_mbps": 2.52,
    "decompress_mbps": null
   },
   {
@@ -816,8 +816,8 @@
    "level": 1,
    "out_size": 60159,
    "ratio": 0.1172,
-   "compress_mbps": 421.54,
-   "decompress_mbps": 689.91
+   "compress_mbps": 417.99,
+   "decompress_mbps": 694.8
   },
   {
    "compressor": "native",
@@ -826,8 +826,8 @@
    "level": 2,
    "out_size": 58606,
    "ratio": 0.1142,
-   "compress_mbps": 290.31,
-   "decompress_mbps": 725.92
+   "compress_mbps": 287.03,
+   "decompress_mbps": 730.48
   },
   {
    "compressor": "native",
@@ -836,8 +836,8 @@
    "level": 3,
    "out_size": 57686,
    "ratio": 0.1124,
-   "compress_mbps": 232.84,
-   "decompress_mbps": 767.47
+   "compress_mbps": 230.51,
+   "decompress_mbps": 768.78
   },
   {
    "compressor": "native",
@@ -846,8 +846,8 @@
    "level": 4,
    "out_size": 57302,
    "ratio": 0.1117,
-   "compress_mbps": 203.2,
-   "decompress_mbps": 752.19
+   "compress_mbps": 201.94,
+   "decompress_mbps": 752.83
   },
   {
    "compressor": "native",
@@ -856,8 +856,8 @@
    "level": 5,
    "out_size": 55376,
    "ratio": 0.1079,
-   "compress_mbps": 92.26,
-   "decompress_mbps": 772.26
+   "compress_mbps": 89.46,
+   "decompress_mbps": 773.12
   },
   {
    "compressor": "native",
@@ -866,18 +866,18 @@
    "level": 6,
    "out_size": 55673,
    "ratio": 0.1085,
-   "compress_mbps": 80.98,
-   "decompress_mbps": 789.65
+   "compress_mbps": 82.73,
+   "decompress_mbps": 794.01
   },
   {
    "compressor": "native",
    "pattern": "canterbury/ptt5",
    "size": 513216,
    "level": 7,
-   "out_size": 55216,
-   "ratio": 0.1076,
-   "compress_mbps": 73.55,
-   "decompress_mbps": 812.99
+   "out_size": 55006,
+   "ratio": 0.1072,
+   "compress_mbps": 105.56,
+   "decompress_mbps": 820.14
   },
   {
    "compressor": "native",
@@ -886,8 +886,8 @@
    "level": 8,
    "out_size": 53384,
    "ratio": 0.104,
-   "compress_mbps": 48.43,
-   "decompress_mbps": 835.43
+   "compress_mbps": 49.41,
+   "decompress_mbps": 838.23
   },
   {
    "compressor": "native",
@@ -896,8 +896,8 @@
    "level": 9,
    "out_size": 52603,
    "ratio": 0.1025,
-   "compress_mbps": 5.98,
-   "decompress_mbps": 845.04
+   "compress_mbps": 5.92,
+   "decompress_mbps": 850.36
   },
   {
    "compressor": "native",
@@ -916,8 +916,8 @@
    "level": 1,
    "out_size": 14248,
    "ratio": 0.3726,
-   "compress_mbps": 93.44,
-   "decompress_mbps": 251.63
+   "compress_mbps": 92.22,
+   "decompress_mbps": 251.55
   },
   {
    "compressor": "native",
@@ -926,8 +926,8 @@
    "level": 2,
    "out_size": 13836,
    "ratio": 0.3618,
-   "compress_mbps": 71.57,
-   "decompress_mbps": 255.1
+   "compress_mbps": 70.89,
+   "decompress_mbps": 255.52
   },
   {
    "compressor": "native",
@@ -936,8 +936,8 @@
    "level": 3,
    "out_size": 13760,
    "ratio": 0.3598,
-   "compress_mbps": 67.45,
-   "decompress_mbps": 245.88
+   "compress_mbps": 66.42,
+   "decompress_mbps": 249.72
   },
   {
    "compressor": "native",
@@ -946,8 +946,8 @@
    "level": 4,
    "out_size": 13747,
    "ratio": 0.3595,
-   "compress_mbps": 66.5,
-   "decompress_mbps": 258.76
+   "compress_mbps": 65.48,
+   "decompress_mbps": 258.82
   },
   {
    "compressor": "native",
@@ -956,8 +956,8 @@
    "level": 5,
    "out_size": 13004,
    "ratio": 0.3401,
-   "compress_mbps": 25.96,
-   "decompress_mbps": 267.73
+   "compress_mbps": 25.81,
+   "decompress_mbps": 267.49
   },
   {
    "compressor": "native",
@@ -966,18 +966,18 @@
    "level": 6,
    "out_size": 12675,
    "ratio": 0.3315,
-   "compress_mbps": 23.1,
-   "decompress_mbps": 269.54
+   "compress_mbps": 23.97,
+   "decompress_mbps": 268.07
   },
   {
    "compressor": "native",
    "pattern": "canterbury/sum",
    "size": 38240,
    "level": 7,
-   "out_size": 12639,
-   "ratio": 0.3305,
-   "compress_mbps": 21.99,
-   "decompress_mbps": 275.34
+   "out_size": 12675,
+   "ratio": 0.3315,
+   "compress_mbps": 31.22,
+   "decompress_mbps": 270.94
   },
   {
    "compressor": "native",
@@ -986,8 +986,8 @@
    "level": 8,
    "out_size": 12632,
    "ratio": 0.3303,
-   "compress_mbps": 18.72,
-   "decompress_mbps": 274.5
+   "compress_mbps": 19.15,
+   "decompress_mbps": 274.35
   },
   {
    "compressor": "native",
@@ -996,8 +996,8 @@
    "level": 9,
    "out_size": 12427,
    "ratio": 0.325,
-   "compress_mbps": 5.69,
-   "decompress_mbps": 277.01
+   "compress_mbps": 5.67,
+   "decompress_mbps": 278.75
   },
   {
    "compressor": "native",
@@ -1006,7 +1006,7 @@
    "level": 10,
    "out_size": 12273,
    "ratio": 0.3209,
-   "compress_mbps": 3.21,
+   "compress_mbps": 3.16,
    "decompress_mbps": null
   },
   {
@@ -1016,8 +1016,8 @@
    "level": 1,
    "out_size": 1800,
    "ratio": 0.4258,
-   "compress_mbps": 32.85,
-   "decompress_mbps": 98.05
+   "compress_mbps": 31.45,
+   "decompress_mbps": 97.75
   },
   {
    "compressor": "native",
@@ -1026,8 +1026,8 @@
    "level": 2,
    "out_size": 1756,
    "ratio": 0.4154,
-   "compress_mbps": 29.17,
-   "decompress_mbps": 98.78
+   "compress_mbps": 29.93,
+   "decompress_mbps": 97.99
   },
   {
    "compressor": "native",
@@ -1036,8 +1036,8 @@
    "level": 3,
    "out_size": 1741,
    "ratio": 0.4119,
-   "compress_mbps": 28.42,
-   "decompress_mbps": 97.65
+   "compress_mbps": 30.05,
+   "decompress_mbps": 98.95
   },
   {
    "compressor": "native",
@@ -1046,8 +1046,8 @@
    "level": 4,
    "out_size": 1741,
    "ratio": 0.4119,
-   "compress_mbps": 28.71,
-   "decompress_mbps": 100.45
+   "compress_mbps": 29.3,
+   "decompress_mbps": 99.4
   },
   {
    "compressor": "native",
@@ -1056,8 +1056,8 @@
    "level": 5,
    "out_size": 1722,
    "ratio": 0.4074,
-   "compress_mbps": 24.6,
-   "decompress_mbps": 99.81
+   "compress_mbps": 26.03,
+   "decompress_mbps": 100.0
   },
   {
    "compressor": "native",
@@ -1066,18 +1066,18 @@
    "level": 6,
    "out_size": 1735,
    "ratio": 0.4105,
-   "compress_mbps": 22.13,
-   "decompress_mbps": 100.18
+   "compress_mbps": 22.15,
+   "decompress_mbps": 99.04
   },
   {
    "compressor": "native",
    "pattern": "canterbury/xargs.1",
    "size": 4227,
    "level": 7,
-   "out_size": 1735,
-   "ratio": 0.4105,
-   "compress_mbps": 21.92,
-   "decompress_mbps": 99.27
+   "out_size": 1723,
+   "ratio": 0.4076,
+   "compress_mbps": 27.64,
+   "decompress_mbps": 99.38
   },
   {
    "compressor": "native",
@@ -1086,8 +1086,8 @@
    "level": 8,
    "out_size": 1734,
    "ratio": 0.4102,
-   "compress_mbps": 22.16,
-   "decompress_mbps": 100.69
+   "compress_mbps": 22.3,
+   "decompress_mbps": 100.5
   },
   {
    "compressor": "native",
@@ -1096,8 +1096,8 @@
    "level": 9,
    "out_size": 1708,
    "ratio": 0.4041,
-   "compress_mbps": 5.74,
-   "decompress_mbps": 100.56
+   "compress_mbps": 5.86,
+   "decompress_mbps": 99.39
   },
   {
    "compressor": "native",
@@ -1106,7 +1106,7 @@
    "level": 10,
    "out_size": 1693,
    "ratio": 0.4005,
-   "compress_mbps": 3.4,
+   "compress_mbps": 3.37,
    "decompress_mbps": null
   },
   {
@@ -4416,8 +4416,8 @@
    "level": 1,
    "out_size": 4259441,
    "ratio": 0.4179,
-   "compress_mbps": 127.7,
-   "decompress_mbps": 300.23
+   "compress_mbps": 131.98,
+   "decompress_mbps": 299.72
   },
   {
    "compressor": "native",
@@ -4426,8 +4426,8 @@
    "level": 2,
    "out_size": 4028700,
    "ratio": 0.3953,
-   "compress_mbps": 79.67,
-   "decompress_mbps": 316.82
+   "compress_mbps": 77.46,
+   "decompress_mbps": 324.92
   },
   {
    "compressor": "native",
@@ -4436,8 +4436,8 @@
    "level": 3,
    "out_size": 3970549,
    "ratio": 0.3896,
-   "compress_mbps": 65.28,
-   "decompress_mbps": 338.14
+   "compress_mbps": 63.75,
+   "decompress_mbps": 337.38
   },
   {
    "compressor": "native",
@@ -4446,8 +4446,8 @@
    "level": 4,
    "out_size": 3970459,
    "ratio": 0.3895,
-   "compress_mbps": 65.6,
-   "decompress_mbps": 312.33
+   "compress_mbps": 63.92,
+   "decompress_mbps": 308.81
   },
   {
    "compressor": "native",
@@ -4456,8 +4456,8 @@
    "level": 5,
    "out_size": 3890977,
    "ratio": 0.3818,
-   "compress_mbps": 43.81,
-   "decompress_mbps": 304.22
+   "compress_mbps": 44.03,
+   "decompress_mbps": 303.31
   },
   {
    "compressor": "native",
@@ -4466,18 +4466,18 @@
    "level": 6,
    "out_size": 3858402,
    "ratio": 0.3786,
-   "compress_mbps": 35.15,
-   "decompress_mbps": 323.0
+   "compress_mbps": 36.1,
+   "decompress_mbps": 323.14
   },
   {
    "compressor": "native",
    "pattern": "silesia/dickens",
    "size": 10192446,
    "level": 7,
-   "out_size": 3841904,
+   "out_size": 3841249,
    "ratio": 0.3769,
-   "compress_mbps": 30.21,
-   "decompress_mbps": 323.95
+   "compress_mbps": 33.66,
+   "decompress_mbps": 323.24
   },
   {
    "compressor": "native",
@@ -4486,8 +4486,8 @@
    "level": 8,
    "out_size": 3833946,
    "ratio": 0.3762,
-   "compress_mbps": 24.65,
-   "decompress_mbps": 323.12
+   "compress_mbps": 25.39,
+   "decompress_mbps": 323.61
   },
   {
    "compressor": "native",
@@ -4496,8 +4496,8 @@
    "level": 9,
    "out_size": 3766567,
    "ratio": 0.3695,
-   "compress_mbps": 4.35,
-   "decompress_mbps": 314.19
+   "compress_mbps": 4.27,
+   "decompress_mbps": 317.89
   },
   {
    "compressor": "native",
@@ -4506,7 +4506,7 @@
    "level": 10,
    "out_size": 3711205,
    "ratio": 0.3641,
-   "compress_mbps": 2.52,
+   "compress_mbps": 2.5,
    "decompress_mbps": null
   },
   {
@@ -4516,8 +4516,8 @@
    "level": 1,
    "out_size": 21266943,
    "ratio": 0.4152,
-   "compress_mbps": 156.86,
-   "decompress_mbps": 268.48
+   "compress_mbps": 154.3,
+   "decompress_mbps": 267.81
   },
   {
    "compressor": "native",
@@ -4526,8 +4526,8 @@
    "level": 2,
    "out_size": 20833469,
    "ratio": 0.4067,
-   "compress_mbps": 101.97,
-   "decompress_mbps": 275.6
+   "compress_mbps": 99.99,
+   "decompress_mbps": 275.96
   },
   {
    "compressor": "native",
@@ -4536,8 +4536,8 @@
    "level": 3,
    "out_size": 20636498,
    "ratio": 0.4029,
-   "compress_mbps": 88.87,
-   "decompress_mbps": 283.52
+   "compress_mbps": 87.79,
+   "decompress_mbps": 284.45
   },
   {
    "compressor": "native",
@@ -4546,8 +4546,8 @@
    "level": 4,
    "out_size": 20612118,
    "ratio": 0.4024,
-   "compress_mbps": 88.07,
-   "decompress_mbps": 287.15
+   "compress_mbps": 85.55,
+   "decompress_mbps": 286.59
   },
   {
    "compressor": "native",
@@ -4556,8 +4556,8 @@
    "level": 5,
    "out_size": 19375980,
    "ratio": 0.3783,
-   "compress_mbps": 49.72,
-   "decompress_mbps": 296.94
+   "compress_mbps": 49.93,
+   "decompress_mbps": 297.17
   },
   {
    "compressor": "native",
@@ -4566,8 +4566,8 @@
    "level": 6,
    "out_size": 18875477,
    "ratio": 0.3685,
-   "compress_mbps": 32.7,
-   "decompress_mbps": 301.86
+   "compress_mbps": 34.24,
+   "decompress_mbps": 302.28
   },
   {
    "compressor": "native",
@@ -4576,8 +4576,8 @@
    "level": 7,
    "out_size": 18825061,
    "ratio": 0.3675,
-   "compress_mbps": 29.84,
-   "decompress_mbps": 304.28
+   "compress_mbps": 34.43,
+   "decompress_mbps": 303.29
   },
   {
    "compressor": "native",
@@ -4586,8 +4586,8 @@
    "level": 8,
    "out_size": 18776999,
    "ratio": 0.3666,
-   "compress_mbps": 20.97,
-   "decompress_mbps": 303.52
+   "compress_mbps": 21.72,
+   "decompress_mbps": 304.87
   },
   {
    "compressor": "native",
@@ -4596,8 +4596,8 @@
    "level": 9,
    "out_size": 18688185,
    "ratio": 0.3649,
-   "compress_mbps": 4.58,
-   "decompress_mbps": 303.33
+   "compress_mbps": 4.56,
+   "decompress_mbps": 304.12
   },
   {
    "compressor": "native",
@@ -4606,7 +4606,7 @@
    "level": 10,
    "out_size": 18541658,
    "ratio": 0.362,
-   "compress_mbps": 2.42,
+   "compress_mbps": 2.4,
    "decompress_mbps": null
   },
   {
@@ -4616,8 +4616,8 @@
    "level": 1,
    "out_size": 3864312,
    "ratio": 0.3876,
-   "compress_mbps": 166.01,
-   "decompress_mbps": 303.34
+   "compress_mbps": 163.13,
+   "decompress_mbps": 313.16
   },
   {
    "compressor": "native",
@@ -4626,8 +4626,8 @@
    "level": 2,
    "out_size": 3772187,
    "ratio": 0.3783,
-   "compress_mbps": 103.57,
-   "decompress_mbps": 326.51
+   "compress_mbps": 102.43,
+   "decompress_mbps": 323.24
   },
   {
    "compressor": "native",
@@ -4636,8 +4636,8 @@
    "level": 3,
    "out_size": 3733471,
    "ratio": 0.3744,
-   "compress_mbps": 86.05,
-   "decompress_mbps": 352.15
+   "compress_mbps": 85.3,
+   "decompress_mbps": 343.17
   },
   {
    "compressor": "native",
@@ -4646,8 +4646,8 @@
    "level": 4,
    "out_size": 3733389,
    "ratio": 0.3744,
-   "compress_mbps": 84.94,
-   "decompress_mbps": 320.14
+   "compress_mbps": 83.93,
+   "decompress_mbps": 235.4
   },
   {
    "compressor": "native",
@@ -4656,8 +4656,8 @@
    "level": 5,
    "out_size": 3631125,
    "ratio": 0.3642,
-   "compress_mbps": 51.36,
-   "decompress_mbps": 313.4
+   "compress_mbps": 51.23,
+   "decompress_mbps": 232.97
   },
   {
    "compressor": "native",
@@ -4666,18 +4666,18 @@
    "level": 6,
    "out_size": 3595869,
    "ratio": 0.3606,
-   "compress_mbps": 37.54,
-   "decompress_mbps": 324.83
+   "compress_mbps": 38.97,
+   "decompress_mbps": 323.76
   },
   {
    "compressor": "native",
    "pattern": "silesia/mr",
    "size": 9970564,
    "level": 7,
-   "out_size": 3586846,
-   "ratio": 0.3597,
-   "compress_mbps": 32.7,
-   "decompress_mbps": 311.77
+   "out_size": 3594763,
+   "ratio": 0.3605,
+   "compress_mbps": 42.97,
+   "decompress_mbps": 323.08
   },
   {
    "compressor": "native",
@@ -4686,8 +4686,8 @@
    "level": 8,
    "out_size": 3581042,
    "ratio": 0.3592,
-   "compress_mbps": 26.22,
-   "decompress_mbps": 316.07
+   "compress_mbps": 27.02,
+   "decompress_mbps": 331.78
   },
   {
    "compressor": "native",
@@ -4696,8 +4696,8 @@
    "level": 9,
    "out_size": 3581643,
    "ratio": 0.3592,
-   "compress_mbps": 4.99,
-   "decompress_mbps": 324.18
+   "compress_mbps": 4.88,
+   "decompress_mbps": 323.23
   },
   {
    "compressor": "native",
@@ -4706,7 +4706,7 @@
    "level": 10,
    "out_size": 3513019,
    "ratio": 0.3523,
-   "compress_mbps": 3.05,
+   "compress_mbps": 3.01,
    "decompress_mbps": null
   },
   {
@@ -4716,8 +4716,8 @@
    "level": 1,
    "out_size": 3786285,
    "ratio": 0.1128,
-   "compress_mbps": 488.35,
-   "decompress_mbps": 871.2
+   "compress_mbps": 475.77,
+   "decompress_mbps": 891.91
   },
   {
    "compressor": "native",
@@ -4726,8 +4726,8 @@
    "level": 2,
    "out_size": 3601079,
    "ratio": 0.1073,
-   "compress_mbps": 311.79,
-   "decompress_mbps": 961.96
+   "compress_mbps": 298.89,
+   "decompress_mbps": 976.5
   },
   {
    "compressor": "native",
@@ -4736,8 +4736,8 @@
    "level": 3,
    "out_size": 3447302,
    "ratio": 0.1027,
-   "compress_mbps": 230.44,
-   "decompress_mbps": 1040.85
+   "compress_mbps": 220.67,
+   "decompress_mbps": 1061.87
   },
   {
    "compressor": "native",
@@ -4746,8 +4746,8 @@
    "level": 4,
    "out_size": 3367858,
    "ratio": 0.1004,
-   "compress_mbps": 208.71,
-   "decompress_mbps": 1021.67
+   "compress_mbps": 196.68,
+   "decompress_mbps": 1039.35
   },
   {
    "compressor": "native",
@@ -4756,8 +4756,8 @@
    "level": 5,
    "out_size": 3213092,
    "ratio": 0.0958,
-   "compress_mbps": 144.53,
-   "decompress_mbps": 1086.09
+   "compress_mbps": 141.03,
+   "decompress_mbps": 1112.39
   },
   {
    "compressor": "native",
@@ -4766,18 +4766,18 @@
    "level": 6,
    "out_size": 3164635,
    "ratio": 0.0943,
-   "compress_mbps": 116.66,
-   "decompress_mbps": 1143.51
+   "compress_mbps": 117.7,
+   "decompress_mbps": 1172.86
   },
   {
    "compressor": "native",
    "pattern": "silesia/nci",
    "size": 33553445,
    "level": 7,
-   "out_size": 3085646,
-   "ratio": 0.092,
-   "compress_mbps": 97.59,
-   "decompress_mbps": 1144.99
+   "out_size": 3060352,
+   "ratio": 0.0912,
+   "compress_mbps": 97.14,
+   "decompress_mbps": 1174.34
   },
   {
    "compressor": "native",
@@ -4786,8 +4786,8 @@
    "level": 8,
    "out_size": 3045154,
    "ratio": 0.0908,
-   "compress_mbps": 62.44,
-   "decompress_mbps": 1145.3
+   "compress_mbps": 62.6,
+   "decompress_mbps": 1181.08
   },
   {
    "compressor": "native",
@@ -4796,8 +4796,8 @@
    "level": 9,
    "out_size": 3031660,
    "ratio": 0.0904,
-   "compress_mbps": 3.66,
-   "decompress_mbps": 1170.66
+   "compress_mbps": 3.59,
+   "decompress_mbps": 1186.57
   },
   {
    "compressor": "native",
@@ -4806,7 +4806,7 @@
    "level": 10,
    "out_size": 2902284,
    "ratio": 0.0865,
-   "compress_mbps": 2.04,
+   "compress_mbps": 2.01,
    "decompress_mbps": null
   },
   {
@@ -4816,8 +4816,8 @@
    "level": 1,
    "out_size": 3356724,
    "ratio": 0.5456,
-   "compress_mbps": 107.23,
-   "decompress_mbps": 187.85
+   "compress_mbps": 104.93,
+   "decompress_mbps": 186.6
   },
   {
    "compressor": "native",
@@ -4826,8 +4826,8 @@
    "level": 2,
    "out_size": 3292155,
    "ratio": 0.5351,
-   "compress_mbps": 70.99,
-   "decompress_mbps": 191.81
+   "compress_mbps": 69.88,
+   "decompress_mbps": 190.98
   },
   {
    "compressor": "native",
@@ -4836,8 +4836,8 @@
    "level": 3,
    "out_size": 3273579,
    "ratio": 0.5321,
-   "compress_mbps": 65.13,
-   "decompress_mbps": 197.95
+   "compress_mbps": 64.41,
+   "decompress_mbps": 197.69
   },
   {
    "compressor": "native",
@@ -4846,8 +4846,8 @@
    "level": 4,
    "out_size": 3271315,
    "ratio": 0.5317,
-   "compress_mbps": 64.58,
-   "decompress_mbps": 200.53
+   "compress_mbps": 63.69,
+   "decompress_mbps": 200.12
   },
   {
    "compressor": "native",
@@ -4856,8 +4856,8 @@
    "level": 5,
    "out_size": 3175090,
    "ratio": 0.5161,
-   "compress_mbps": 41.1,
-   "decompress_mbps": 204.99
+   "compress_mbps": 41.0,
+   "decompress_mbps": 205.82
   },
   {
    "compressor": "native",
@@ -4866,18 +4866,18 @@
    "level": 6,
    "out_size": 3087228,
    "ratio": 0.5018,
-   "compress_mbps": 28.35,
-   "decompress_mbps": 207.47
+   "compress_mbps": 29.73,
+   "decompress_mbps": 209.72
   },
   {
    "compressor": "native",
    "pattern": "silesia/ooffice",
    "size": 6152192,
    "level": 7,
-   "out_size": 3080992,
-   "ratio": 0.5008,
-   "compress_mbps": 26.28,
-   "decompress_mbps": 213.92
+   "out_size": 3082223,
+   "ratio": 0.501,
+   "compress_mbps": 30.94,
+   "decompress_mbps": 210.94
   },
   {
    "compressor": "native",
@@ -4886,8 +4886,8 @@
    "level": 8,
    "out_size": 3078530,
    "ratio": 0.5004,
-   "compress_mbps": 24.04,
-   "decompress_mbps": 211.42
+   "compress_mbps": 25.1,
+   "decompress_mbps": 211.1
   },
   {
    "compressor": "native",
@@ -4896,8 +4896,8 @@
    "level": 9,
    "out_size": 3049021,
    "ratio": 0.4956,
-   "compress_mbps": 5.31,
-   "decompress_mbps": 209.4
+   "compress_mbps": 5.3,
+   "decompress_mbps": 210.74
   },
   {
    "compressor": "native",
@@ -4906,7 +4906,7 @@
    "level": 10,
    "out_size": 3022129,
    "ratio": 0.4912,
-   "compress_mbps": 3.28,
+   "compress_mbps": 3.29,
    "decompress_mbps": null
   },
   {
@@ -4916,8 +4916,8 @@
    "level": 1,
    "out_size": 3838864,
    "ratio": 0.3806,
-   "compress_mbps": 183.82,
-   "decompress_mbps": 308.55
+   "compress_mbps": 182.34,
+   "decompress_mbps": 304.82
   },
   {
    "compressor": "native",
@@ -4926,8 +4926,8 @@
    "level": 2,
    "out_size": 3791321,
    "ratio": 0.3759,
-   "compress_mbps": 113.15,
-   "decompress_mbps": 303.93
+   "compress_mbps": 111.44,
+   "decompress_mbps": 321.84
   },
   {
    "compressor": "native",
@@ -4936,8 +4936,8 @@
    "level": 3,
    "out_size": 3759670,
    "ratio": 0.3728,
-   "compress_mbps": 96.09,
-   "decompress_mbps": 318.41
+   "compress_mbps": 93.03,
+   "decompress_mbps": 323.73
   },
   {
    "compressor": "native",
@@ -4946,8 +4946,8 @@
    "level": 4,
    "out_size": 3758505,
    "ratio": 0.3727,
-   "compress_mbps": 94.19,
-   "decompress_mbps": 334.61
+   "compress_mbps": 92.69,
+   "decompress_mbps": 337.43
   },
   {
    "compressor": "native",
@@ -4956,8 +4956,8 @@
    "level": 5,
    "out_size": 3652998,
    "ratio": 0.3622,
-   "compress_mbps": 72.5,
-   "decompress_mbps": 335.66
+   "compress_mbps": 71.75,
+   "decompress_mbps": 338.78
   },
   {
    "compressor": "native",
@@ -4966,18 +4966,18 @@
    "level": 6,
    "out_size": 3661350,
    "ratio": 0.363,
-   "compress_mbps": 47.46,
-   "decompress_mbps": 349.96
+   "compress_mbps": 52.62,
+   "decompress_mbps": 352.73
   },
   {
    "compressor": "native",
    "pattern": "silesia/osdb",
    "size": 10085684,
    "level": 7,
-   "out_size": 3659473,
-   "ratio": 0.3628,
-   "compress_mbps": 44.67,
-   "decompress_mbps": 354.98
+   "out_size": 3652998,
+   "ratio": 0.3622,
+   "compress_mbps": 78.7,
+   "decompress_mbps": 359.88
   },
   {
    "compressor": "native",
@@ -4986,8 +4986,8 @@
    "level": 8,
    "out_size": 3659136,
    "ratio": 0.3628,
-   "compress_mbps": 45.48,
-   "decompress_mbps": 354.34
+   "compress_mbps": 50.18,
+   "decompress_mbps": 358.69
   },
   {
    "compressor": "native",
@@ -4996,8 +4996,8 @@
    "level": 9,
    "out_size": 3648156,
    "ratio": 0.3617,
-   "compress_mbps": 6.21,
-   "decompress_mbps": 347.95
+   "compress_mbps": 6.2,
+   "decompress_mbps": 344.01
   },
   {
    "compressor": "native",
@@ -5006,7 +5006,7 @@
    "level": 10,
    "out_size": 3647385,
    "ratio": 0.3616,
-   "compress_mbps": 3.52,
+   "compress_mbps": 3.54,
    "decompress_mbps": null
   },
   {
@@ -5016,8 +5016,8 @@
    "level": 1,
    "out_size": 2254058,
    "ratio": 0.3401,
-   "compress_mbps": 165.0,
-   "decompress_mbps": 354.77
+   "compress_mbps": 162.12,
+   "decompress_mbps": 351.71
   },
   {
    "compressor": "native",
@@ -5026,8 +5026,8 @@
    "level": 2,
    "out_size": 2090388,
    "ratio": 0.3154,
-   "compress_mbps": 101.43,
-   "decompress_mbps": 377.34
+   "compress_mbps": 99.57,
+   "decompress_mbps": 369.49
   },
   {
    "compressor": "native",
@@ -5036,8 +5036,8 @@
    "level": 3,
    "out_size": 2017838,
    "ratio": 0.3045,
-   "compress_mbps": 77.63,
-   "decompress_mbps": 394.3
+   "compress_mbps": 75.93,
+   "decompress_mbps": 392.57
   },
   {
    "compressor": "native",
@@ -5046,8 +5046,8 @@
    "level": 4,
    "out_size": 2016751,
    "ratio": 0.3043,
-   "compress_mbps": 77.61,
-   "decompress_mbps": 391.23
+   "compress_mbps": 75.86,
+   "decompress_mbps": 381.68
   },
   {
    "compressor": "native",
@@ -5056,8 +5056,8 @@
    "level": 5,
    "out_size": 1917513,
    "ratio": 0.2893,
-   "compress_mbps": 51.86,
-   "decompress_mbps": 369.12
+   "compress_mbps": 51.96,
+   "decompress_mbps": 368.34
   },
   {
    "compressor": "native",
@@ -5066,18 +5066,18 @@
    "level": 6,
    "out_size": 1867430,
    "ratio": 0.2818,
-   "compress_mbps": 35.34,
-   "decompress_mbps": 394.34
+   "compress_mbps": 36.66,
+   "decompress_mbps": 381.55
   },
   {
    "compressor": "native",
    "pattern": "silesia/reymont",
    "size": 6627202,
    "level": 7,
-   "out_size": 1851454,
-   "ratio": 0.2794,
-   "compress_mbps": 28.26,
-   "decompress_mbps": 399.28
+   "out_size": 1840013,
+   "ratio": 0.2776,
+   "compress_mbps": 29.35,
+   "decompress_mbps": 385.52
   },
   {
    "compressor": "native",
@@ -5086,8 +5086,8 @@
    "level": 8,
    "out_size": 1820123,
    "ratio": 0.2746,
-   "compress_mbps": 15.73,
-   "decompress_mbps": 398.61
+   "compress_mbps": 16.15,
+   "decompress_mbps": 383.49
   },
   {
    "compressor": "native",
@@ -5096,8 +5096,8 @@
    "level": 9,
    "out_size": 1773453,
    "ratio": 0.2676,
-   "compress_mbps": 3.04,
-   "decompress_mbps": 381.66
+   "compress_mbps": 3.02,
+   "decompress_mbps": 384.18
   },
   {
    "compressor": "native",
@@ -5106,7 +5106,7 @@
    "level": 10,
    "out_size": 1718510,
    "ratio": 0.2593,
-   "compress_mbps": 1.64,
+   "compress_mbps": 1.63,
    "decompress_mbps": null
   },
   {
@@ -5116,8 +5116,8 @@
    "level": 1,
    "out_size": 6406738,
    "ratio": 0.2965,
-   "compress_mbps": 215.19,
-   "decompress_mbps": 424.6
+   "compress_mbps": 209.3,
+   "decompress_mbps": 426.84
   },
   {
    "compressor": "native",
@@ -5126,8 +5126,8 @@
    "level": 2,
    "out_size": 6135939,
    "ratio": 0.284,
-   "compress_mbps": 141.33,
-   "decompress_mbps": 442.71
+   "compress_mbps": 139.13,
+   "decompress_mbps": 431.0
   },
   {
    "compressor": "native",
@@ -5136,8 +5136,8 @@
    "level": 3,
    "out_size": 6008062,
    "ratio": 0.2781,
-   "compress_mbps": 116.83,
-   "decompress_mbps": 454.54
+   "compress_mbps": 114.12,
+   "decompress_mbps": 458.19
   },
   {
    "compressor": "native",
@@ -5146,8 +5146,8 @@
    "level": 4,
    "out_size": 5979294,
    "ratio": 0.2767,
-   "compress_mbps": 113.6,
-   "decompress_mbps": 453.8
+   "compress_mbps": 111.21,
+   "decompress_mbps": 454.54
   },
   {
    "compressor": "native",
@@ -5156,8 +5156,8 @@
    "level": 5,
    "out_size": 5465943,
    "ratio": 0.253,
-   "compress_mbps": 75.65,
-   "decompress_mbps": 461.36
+   "compress_mbps": 75.01,
+   "decompress_mbps": 463.9
   },
   {
    "compressor": "native",
@@ -5166,18 +5166,18 @@
    "level": 6,
    "out_size": 5422031,
    "ratio": 0.2509,
-   "compress_mbps": 53.38,
-   "decompress_mbps": 471.94
+   "compress_mbps": 55.54,
+   "decompress_mbps": 471.64
   },
   {
    "compressor": "native",
    "pattern": "silesia/samba",
    "size": 21606400,
    "level": 7,
-   "out_size": 5398225,
-   "ratio": 0.2498,
-   "compress_mbps": 47.88,
-   "decompress_mbps": 472.34
+   "out_size": 5408935,
+   "ratio": 0.2503,
+   "compress_mbps": 61.69,
+   "decompress_mbps": 467.84
   },
   {
    "compressor": "native",
@@ -5186,8 +5186,8 @@
    "level": 8,
    "out_size": 5390057,
    "ratio": 0.2495,
-   "compress_mbps": 37.92,
-   "decompress_mbps": 473.99
+   "compress_mbps": 39.2,
+   "decompress_mbps": 472.97
   },
   {
    "compressor": "native",
@@ -5196,8 +5196,8 @@
    "level": 9,
    "out_size": 5236016,
    "ratio": 0.2423,
-   "compress_mbps": 4.99,
-   "decompress_mbps": 468.74
+   "compress_mbps": 4.96,
+   "decompress_mbps": 473.87
   },
   {
    "compressor": "native",
@@ -5206,7 +5206,7 @@
    "level": 10,
    "out_size": 5177679,
    "ratio": 0.2396,
-   "compress_mbps": 2.68,
+   "compress_mbps": 2.64,
    "decompress_mbps": null
   },
   {
@@ -5216,8 +5216,8 @@
    "level": 1,
    "out_size": 5612654,
    "ratio": 0.774,
-   "compress_mbps": 90.6,
-   "decompress_mbps": 180.66
+   "compress_mbps": 86.73,
+   "decompress_mbps": 178.33
   },
   {
    "compressor": "native",
@@ -5226,8 +5226,8 @@
    "level": 2,
    "out_size": 5553471,
    "ratio": 0.7658,
-   "compress_mbps": 58.64,
-   "decompress_mbps": 186.25
+   "compress_mbps": 57.38,
+   "decompress_mbps": 184.06
   },
   {
    "compressor": "native",
@@ -5236,8 +5236,8 @@
    "level": 3,
    "out_size": 5534068,
    "ratio": 0.7631,
-   "compress_mbps": 52.61,
-   "decompress_mbps": 189.64
+   "compress_mbps": 51.66,
+   "decompress_mbps": 187.8
   },
   {
    "compressor": "native",
@@ -5246,8 +5246,8 @@
    "level": 4,
    "out_size": 5534068,
    "ratio": 0.7631,
-   "compress_mbps": 52.76,
-   "decompress_mbps": 191.74
+   "compress_mbps": 51.72,
+   "decompress_mbps": 188.24
   },
   {
    "compressor": "native",
@@ -5256,8 +5256,8 @@
    "level": 5,
    "out_size": 5499643,
    "ratio": 0.7584,
-   "compress_mbps": 34.99,
-   "decompress_mbps": 188.51
+   "compress_mbps": 35.01,
+   "decompress_mbps": 189.25
   },
   {
    "compressor": "native",
@@ -5266,8 +5266,8 @@
    "level": 6,
    "out_size": 5346710,
    "ratio": 0.7373,
-   "compress_mbps": 24.44,
-   "decompress_mbps": 191.66
+   "compress_mbps": 26.68,
+   "decompress_mbps": 192.14
   },
   {
    "compressor": "native",
@@ -5276,8 +5276,8 @@
    "level": 7,
    "out_size": 5336619,
    "ratio": 0.7359,
-   "compress_mbps": 22.79,
-   "decompress_mbps": 191.54
+   "compress_mbps": 26.02,
+   "decompress_mbps": 191.76
   },
   {
    "compressor": "native",
@@ -5286,8 +5286,8 @@
    "level": 8,
    "out_size": 5330970,
    "ratio": 0.7351,
-   "compress_mbps": 21.95,
-   "decompress_mbps": 190.91
+   "compress_mbps": 23.78,
+   "decompress_mbps": 191.32
   },
   {
    "compressor": "native",
@@ -5296,8 +5296,8 @@
    "level": 9,
    "out_size": 5284691,
    "ratio": 0.7287,
-   "compress_mbps": 5.49,
-   "decompress_mbps": 187.01
+   "compress_mbps": 5.66,
+   "decompress_mbps": 187.73
   },
   {
    "compressor": "native",
@@ -5306,7 +5306,7 @@
    "level": 10,
    "out_size": 5262385,
    "ratio": 0.7257,
-   "compress_mbps": 3.92,
+   "compress_mbps": 3.91,
    "decompress_mbps": null
   },
   {
@@ -5316,8 +5316,8 @@
    "level": 1,
    "out_size": 13726828,
    "ratio": 0.3311,
-   "compress_mbps": 157.76,
-   "decompress_mbps": 346.9
+   "compress_mbps": 155.13,
+   "decompress_mbps": 348.07
   },
   {
    "compressor": "native",
@@ -5326,8 +5326,8 @@
    "level": 2,
    "out_size": 12919747,
    "ratio": 0.3116,
-   "compress_mbps": 104.03,
-   "decompress_mbps": 364.3
+   "compress_mbps": 102.18,
+   "decompress_mbps": 367.89
   },
   {
    "compressor": "native",
@@ -5336,8 +5336,8 @@
    "level": 3,
    "out_size": 12580450,
    "ratio": 0.3034,
-   "compress_mbps": 86.64,
-   "decompress_mbps": 386.13
+   "compress_mbps": 84.19,
+   "decompress_mbps": 387.59
   },
   {
    "compressor": "native",
@@ -5346,8 +5346,8 @@
    "level": 4,
    "out_size": 12564454,
    "ratio": 0.3031,
-   "compress_mbps": 86.42,
-   "decompress_mbps": 357.27
+   "compress_mbps": 84.08,
+   "decompress_mbps": 358.62
   },
   {
    "compressor": "native",
@@ -5356,8 +5356,8 @@
    "level": 5,
    "out_size": 12283291,
    "ratio": 0.2963,
-   "compress_mbps": 61.08,
-   "decompress_mbps": 355.57
+   "compress_mbps": 60.9,
+   "decompress_mbps": 358.18
   },
   {
    "compressor": "native",
@@ -5366,18 +5366,18 @@
    "level": 6,
    "out_size": 12150624,
    "ratio": 0.2931,
-   "compress_mbps": 49.01,
-   "decompress_mbps": 363.0
+   "compress_mbps": 50.84,
+   "decompress_mbps": 365.92
   },
   {
    "compressor": "native",
    "pattern": "silesia/webster",
    "size": 41458703,
    "level": 7,
-   "out_size": 12069231,
-   "ratio": 0.2911,
-   "compress_mbps": 42.96,
-   "decompress_mbps": 364.69
+   "out_size": 12029742,
+   "ratio": 0.2902,
+   "compress_mbps": 44.16,
+   "decompress_mbps": 367.83
   },
   {
    "compressor": "native",
@@ -5386,8 +5386,8 @@
    "level": 8,
    "out_size": 12019926,
    "ratio": 0.2899,
-   "compress_mbps": 31.93,
-   "decompress_mbps": 365.67
+   "compress_mbps": 32.75,
+   "decompress_mbps": 368.12
   },
   {
    "compressor": "native",
@@ -5396,8 +5396,8 @@
    "level": 9,
    "out_size": 11806374,
    "ratio": 0.2848,
-   "compress_mbps": 4.07,
-   "decompress_mbps": 364.54
+   "compress_mbps": 3.99,
+   "decompress_mbps": 367.64
   },
   {
    "compressor": "native",
@@ -5406,7 +5406,7 @@
    "level": 10,
    "out_size": 11636804,
    "ratio": 0.2807,
-   "compress_mbps": 1.94,
+   "compress_mbps": 2.07,
    "decompress_mbps": null
   },
   {
@@ -5416,8 +5416,8 @@
    "level": 1,
    "out_size": 6438263,
    "ratio": 0.7597,
-   "compress_mbps": 80.5,
-   "decompress_mbps": 182.33
+   "compress_mbps": 77.34,
+   "decompress_mbps": 183.65
   },
   {
    "compressor": "native",
@@ -5426,8 +5426,8 @@
    "level": 2,
    "out_size": 6392141,
    "ratio": 0.7543,
-   "compress_mbps": 58.64,
-   "decompress_mbps": 187.19
+   "compress_mbps": 56.75,
+   "decompress_mbps": 187.66
   },
   {
    "compressor": "native",
@@ -5436,8 +5436,8 @@
    "level": 3,
    "out_size": 6392125,
    "ratio": 0.7543,
-   "compress_mbps": 57.56,
-   "decompress_mbps": 193.52
+   "compress_mbps": 57.03,
+   "decompress_mbps": 192.05
   },
   {
    "compressor": "native",
@@ -5446,8 +5446,8 @@
    "level": 4,
    "out_size": 6392125,
    "ratio": 0.7543,
-   "compress_mbps": 57.82,
-   "decompress_mbps": 160.51
+   "compress_mbps": 56.45,
+   "decompress_mbps": 161.64
   },
   {
    "compressor": "native",
@@ -5456,8 +5456,8 @@
    "level": 5,
    "out_size": 6246845,
    "ratio": 0.7372,
-   "compress_mbps": 40.19,
-   "decompress_mbps": 168.01
+   "compress_mbps": 40.15,
+   "decompress_mbps": 167.41
   },
   {
    "compressor": "native",
@@ -5466,18 +5466,18 @@
    "level": 6,
    "out_size": 6036622,
    "ratio": 0.7123,
-   "compress_mbps": 26.69,
-   "decompress_mbps": 163.98
+   "compress_mbps": 28.8,
+   "decompress_mbps": 168.7
   },
   {
    "compressor": "native",
    "pattern": "silesia/x-ray",
    "size": 8474240,
    "level": 7,
-   "out_size": 6036764,
-   "ratio": 0.7124,
-   "compress_mbps": 26.27,
-   "decompress_mbps": 163.77
+   "out_size": 6033708,
+   "ratio": 0.712,
+   "compress_mbps": 32.26,
+   "decompress_mbps": 169.04
   },
   {
    "compressor": "native",
@@ -5486,8 +5486,8 @@
    "level": 8,
    "out_size": 6036614,
    "ratio": 0.7123,
-   "compress_mbps": 26.64,
-   "decompress_mbps": 165.22
+   "compress_mbps": 28.8,
+   "decompress_mbps": 168.59
   },
   {
    "compressor": "native",
@@ -5496,8 +5496,8 @@
    "level": 9,
    "out_size": 5952975,
    "ratio": 0.7025,
-   "compress_mbps": 6.56,
-   "decompress_mbps": 165.31
+   "compress_mbps": 6.57,
+   "decompress_mbps": 168.32
   },
   {
    "compressor": "native",
@@ -5506,7 +5506,7 @@
    "level": 10,
    "out_size": 5849157,
    "ratio": 0.6902,
-   "compress_mbps": 4.7,
+   "compress_mbps": 4.69,
    "decompress_mbps": null
   },
   {
@@ -5516,8 +5516,8 @@
    "level": 1,
    "out_size": 858646,
    "ratio": 0.1606,
-   "compress_mbps": 348.71,
-   "decompress_mbps": 660.56
+   "compress_mbps": 348.9,
+   "decompress_mbps": 675.35
   },
   {
    "compressor": "native",
@@ -5526,8 +5526,8 @@
    "level": 2,
    "out_size": 798646,
    "ratio": 0.1494,
-   "compress_mbps": 226.8,
-   "decompress_mbps": 729.5
+   "compress_mbps": 227.07,
+   "decompress_mbps": 742.57
   },
   {
    "compressor": "native",
@@ -5536,8 +5536,8 @@
    "level": 3,
    "out_size": 762005,
    "ratio": 0.1426,
-   "compress_mbps": 172.63,
-   "decompress_mbps": 792.74
+   "compress_mbps": 173.43,
+   "decompress_mbps": 805.52
   },
   {
    "compressor": "native",
@@ -5546,8 +5546,8 @@
    "level": 4,
    "out_size": 758078,
    "ratio": 0.1418,
-   "compress_mbps": 160.62,
-   "decompress_mbps": 726.79
+   "compress_mbps": 162.77,
+   "decompress_mbps": 764.13
   },
   {
    "compressor": "native",
@@ -5556,8 +5556,8 @@
    "level": 5,
    "out_size": 706184,
    "ratio": 0.1321,
-   "compress_mbps": 107.85,
-   "decompress_mbps": 798.31
+   "compress_mbps": 110.79,
+   "decompress_mbps": 813.22
   },
   {
    "compressor": "native",
@@ -5566,18 +5566,18 @@
    "level": 6,
    "out_size": 687781,
    "ratio": 0.1287,
-   "compress_mbps": 73.91,
-   "decompress_mbps": 822.88
+   "compress_mbps": 82.43,
+   "decompress_mbps": 872.61
   },
   {
    "compressor": "native",
    "pattern": "silesia/xml",
    "size": 5345280,
    "level": 7,
-   "out_size": 675400,
-   "ratio": 0.1264,
-   "compress_mbps": 68.9,
-   "decompress_mbps": 868.89
+   "out_size": 660492,
+   "ratio": 0.1236,
+   "compress_mbps": 55.4,
+   "decompress_mbps": 878.79
   },
   {
    "compressor": "native",
@@ -5586,8 +5586,8 @@
    "level": 8,
    "out_size": 660492,
    "ratio": 0.1236,
-   "compress_mbps": 48.6,
-   "decompress_mbps": 875.26
+   "compress_mbps": 51.08,
+   "decompress_mbps": 891.71
   },
   {
    "compressor": "native",
@@ -5596,8 +5596,8 @@
    "level": 9,
    "out_size": 659426,
    "ratio": 0.1234,
-   "compress_mbps": 4.64,
-   "decompress_mbps": 879.76
+   "compress_mbps": 4.67,
+   "decompress_mbps": 887.89
   },
   {
    "compressor": "native",
@@ -5606,7 +5606,7 @@
    "level": 10,
    "out_size": 643099,
    "ratio": 0.1203,
-   "compress_mbps": 3.06,
+   "compress_mbps": 3.07,
    "decompress_mbps": null
   },
   {
@@ -18486,8 +18486,8 @@
    "level": 1,
    "out_size": 6023620,
    "ratio": 0.591,
-   "compress_mbps": 284.55,
-   "decompress_mbps": 544.76
+   "compress_mbps": 286.46,
+   "decompress_mbps": 544.91
   },
   {
    "compressor": "zlib_rs",
@@ -18496,8 +18496,8 @@
    "level": 2,
    "out_size": 4303512,
    "ratio": 0.4222,
-   "compress_mbps": 155.76,
-   "decompress_mbps": 664.21
+   "compress_mbps": 154.12,
+   "decompress_mbps": 663.43
   },
   {
    "compressor": "zlib_rs",
@@ -18506,8 +18506,8 @@
    "level": 3,
    "out_size": 4053195,
    "ratio": 0.3977,
-   "compress_mbps": 128.32,
-   "decompress_mbps": 750.78
+   "compress_mbps": 127.87,
+   "decompress_mbps": 756.95
   },
   {
    "compressor": "zlib_rs",
@@ -18516,8 +18516,8 @@
    "level": 4,
    "out_size": 3958360,
    "ratio": 0.3884,
-   "compress_mbps": 89.95,
-   "decompress_mbps": 776.03
+   "compress_mbps": 89.5,
+   "decompress_mbps": 774.92
   },
   {
    "compressor": "zlib_rs",
@@ -18527,7 +18527,7 @@
    "out_size": 3916998,
    "ratio": 0.3843,
    "compress_mbps": 81.5,
-   "decompress_mbps": 774.87
+   "decompress_mbps": 776.37
   },
   {
    "compressor": "zlib_rs",
@@ -18536,8 +18536,8 @@
    "level": 6,
    "out_size": 3895451,
    "ratio": 0.3822,
-   "compress_mbps": 63.6,
-   "decompress_mbps": 779.67
+   "compress_mbps": 63.16,
+   "decompress_mbps": 780.37
   },
   {
    "compressor": "zlib_rs",
@@ -18546,8 +18546,8 @@
    "level": 7,
    "out_size": 3840989,
    "ratio": 0.3768,
-   "compress_mbps": 38.89,
-   "decompress_mbps": 712.39
+   "compress_mbps": 38.83,
+   "decompress_mbps": 708.46
   },
   {
    "compressor": "zlib_rs",
@@ -18556,8 +18556,8 @@
    "level": 8,
    "out_size": 3840386,
    "ratio": 0.3768,
-   "compress_mbps": 36.02,
-   "decompress_mbps": 708.92
+   "compress_mbps": 35.89,
+   "decompress_mbps": 709.73
   },
   {
    "compressor": "zlib_rs",
@@ -18566,8 +18566,8 @@
    "level": 9,
    "out_size": 3859102,
    "ratio": 0.3786,
-   "compress_mbps": 29.33,
-   "decompress_mbps": 826.75
+   "compress_mbps": 29.35,
+   "decompress_mbps": 784.35
   },
   {
    "compressor": "zlib_rs",
@@ -18576,8 +18576,8 @@
    "level": 1,
    "out_size": 23990827,
    "ratio": 0.4684,
-   "compress_mbps": 321.71,
-   "decompress_mbps": 668.04
+   "compress_mbps": 323.03,
+   "decompress_mbps": 654.17
   },
   {
    "compressor": "zlib_rs",
@@ -18586,8 +18586,8 @@
    "level": 2,
    "out_size": 20547087,
    "ratio": 0.4011,
-   "compress_mbps": 162.24,
-   "decompress_mbps": 632.44
+   "compress_mbps": 160.87,
+   "decompress_mbps": 624.14
   },
   {
    "compressor": "zlib_rs",
@@ -18596,8 +18596,8 @@
    "level": 3,
    "out_size": 19902272,
    "ratio": 0.3886,
-   "compress_mbps": 133.76,
-   "decompress_mbps": 647.77
+   "compress_mbps": 132.29,
+   "decompress_mbps": 635.83
   },
   {
    "compressor": "zlib_rs",
@@ -18606,8 +18606,8 @@
    "level": 4,
    "out_size": 19682090,
    "ratio": 0.3843,
-   "compress_mbps": 115.36,
-   "decompress_mbps": 654.37
+   "compress_mbps": 114.33,
+   "decompress_mbps": 640.23
   },
   {
    "compressor": "zlib_rs",
@@ -18616,8 +18616,8 @@
    "level": 5,
    "out_size": 19459674,
    "ratio": 0.3799,
-   "compress_mbps": 107.72,
-   "decompress_mbps": 671.03
+   "compress_mbps": 106.85,
+   "decompress_mbps": 655.92
   },
   {
    "compressor": "zlib_rs",
@@ -18626,8 +18626,8 @@
    "level": 6,
    "out_size": 19419263,
    "ratio": 0.3791,
-   "compress_mbps": 88.34,
-   "decompress_mbps": 674.0
+   "compress_mbps": 88.28,
+   "decompress_mbps": 661.88
   },
   {
    "compressor": "zlib_rs",
@@ -18636,8 +18636,8 @@
    "level": 7,
    "out_size": 19352619,
    "ratio": 0.3778,
-   "compress_mbps": 51.64,
-   "decompress_mbps": 682.72
+   "compress_mbps": 51.71,
+   "decompress_mbps": 668.94
   },
   {
    "compressor": "zlib_rs",
@@ -18646,8 +18646,8 @@
    "level": 8,
    "out_size": 19340718,
    "ratio": 0.3776,
-   "compress_mbps": 22.75,
-   "decompress_mbps": 683.39
+   "compress_mbps": 22.78,
+   "decompress_mbps": 672.04
   },
   {
    "compressor": "zlib_rs",
@@ -18656,8 +18656,8 @@
    "level": 9,
    "out_size": 19031967,
    "ratio": 0.3716,
-   "compress_mbps": 28.45,
-   "decompress_mbps": 678.51
+   "compress_mbps": 28.39,
+   "decompress_mbps": 664.84
   },
   {
    "compressor": "zlib_rs",
@@ -18666,8 +18666,8 @@
    "level": 1,
    "out_size": 5285467,
    "ratio": 0.5301,
-   "compress_mbps": 358.79,
-   "decompress_mbps": 747.22
+   "compress_mbps": 362.48,
+   "decompress_mbps": 750.84
   },
   {
    "compressor": "zlib_rs",
@@ -18676,8 +18676,8 @@
    "level": 2,
    "out_size": 3775727,
    "ratio": 0.3787,
-   "compress_mbps": 189.01,
-   "decompress_mbps": 792.43
+   "compress_mbps": 188.43,
+   "decompress_mbps": 793.53
   },
   {
    "compressor": "zlib_rs",
@@ -18686,8 +18686,8 @@
    "level": 3,
    "out_size": 3682017,
    "ratio": 0.3693,
-   "compress_mbps": 161.05,
-   "decompress_mbps": 822.77
+   "compress_mbps": 160.05,
+   "decompress_mbps": 820.67
   },
   {
    "compressor": "zlib_rs",
@@ -18696,8 +18696,8 @@
    "level": 4,
    "out_size": 3623194,
    "ratio": 0.3634,
-   "compress_mbps": 117.73,
-   "decompress_mbps": 848.6
+   "compress_mbps": 117.32,
+   "decompress_mbps": 845.45
   },
   {
    "compressor": "zlib_rs",
@@ -18706,8 +18706,8 @@
    "level": 5,
    "out_size": 3610006,
    "ratio": 0.3621,
-   "compress_mbps": 102.63,
-   "decompress_mbps": 839.9
+   "compress_mbps": 102.44,
+   "decompress_mbps": 832.35
   },
   {
    "compressor": "zlib_rs",
@@ -18716,8 +18716,8 @@
    "level": 6,
    "out_size": 3596306,
    "ratio": 0.3607,
-   "compress_mbps": 73.14,
-   "decompress_mbps": 845.21
+   "compress_mbps": 72.99,
+   "decompress_mbps": 837.54
   },
   {
    "compressor": "zlib_rs",
@@ -18726,8 +18726,8 @@
    "level": 7,
    "out_size": 3605712,
    "ratio": 0.3616,
-   "compress_mbps": 49.29,
-   "decompress_mbps": 810.61
+   "compress_mbps": 49.21,
+   "decompress_mbps": 804.23
   },
   {
    "compressor": "zlib_rs",
@@ -18736,8 +18736,8 @@
    "level": 8,
    "out_size": 3605125,
    "ratio": 0.3616,
-   "compress_mbps": 38.34,
-   "decompress_mbps": 811.85
+   "compress_mbps": 37.66,
+   "decompress_mbps": 807.62
   },
   {
    "compressor": "zlib_rs",
@@ -18746,8 +18746,8 @@
    "level": 9,
    "out_size": 3656164,
    "ratio": 0.3667,
-   "compress_mbps": 29.95,
-   "decompress_mbps": 864.93
+   "compress_mbps": 30.01,
+   "decompress_mbps": 865.62
   },
   {
    "compressor": "zlib_rs",
@@ -18756,8 +18756,8 @@
    "level": 1,
    "out_size": 5394705,
    "ratio": 0.1608,
-   "compress_mbps": 968.76,
-   "decompress_mbps": 1509.51
+   "compress_mbps": 957.51,
+   "decompress_mbps": 1531.82
   },
   {
    "compressor": "zlib_rs",
@@ -18766,8 +18766,8 @@
    "level": 2,
    "out_size": 4129398,
    "ratio": 0.1231,
-   "compress_mbps": 568.27,
-   "decompress_mbps": 1661.35
+   "compress_mbps": 565.48,
+   "decompress_mbps": 1650.86
   },
   {
    "compressor": "zlib_rs",
@@ -18776,8 +18776,8 @@
    "level": 3,
    "out_size": 3687336,
    "ratio": 0.1099,
-   "compress_mbps": 403.88,
-   "decompress_mbps": 1760.71
+   "compress_mbps": 399.8,
+   "decompress_mbps": 1747.88
   },
   {
    "compressor": "zlib_rs",
@@ -18786,8 +18786,8 @@
    "level": 4,
    "out_size": 3448167,
    "ratio": 0.1028,
-   "compress_mbps": 341.05,
-   "decompress_mbps": 1843.33
+   "compress_mbps": 340.01,
+   "decompress_mbps": 1853.5
   },
   {
    "compressor": "zlib_rs",
@@ -18796,8 +18796,8 @@
    "level": 5,
    "out_size": 3211116,
    "ratio": 0.0957,
-   "compress_mbps": 283.11,
-   "decompress_mbps": 1760.29
+   "compress_mbps": 282.71,
+   "decompress_mbps": 1834.52
   },
   {
    "compressor": "zlib_rs",
@@ -18806,8 +18806,8 @@
    "level": 6,
    "out_size": 3143330,
    "ratio": 0.0937,
-   "compress_mbps": 218.86,
-   "decompress_mbps": 1852.26
+   "compress_mbps": 217.63,
+   "decompress_mbps": 1872.37
   },
   {
    "compressor": "zlib_rs",
@@ -18816,8 +18816,8 @@
    "level": 7,
    "out_size": 3083618,
    "ratio": 0.0919,
-   "compress_mbps": 158.13,
-   "decompress_mbps": 1823.32
+   "compress_mbps": 159.04,
+   "decompress_mbps": 1783.89
   },
   {
    "compressor": "zlib_rs",
@@ -18826,8 +18826,8 @@
    "level": 8,
    "out_size": 2981829,
    "ratio": 0.0889,
-   "compress_mbps": 71.07,
-   "decompress_mbps": 1815.0
+   "compress_mbps": 70.8,
+   "decompress_mbps": 1817.91
   },
   {
    "compressor": "zlib_rs",
@@ -18836,8 +18836,8 @@
    "level": 9,
    "out_size": 2998518,
    "ratio": 0.0894,
-   "compress_mbps": 74.59,
-   "decompress_mbps": 1841.77
+   "compress_mbps": 74.72,
+   "decompress_mbps": 1809.62
   },
   {
    "compressor": "zlib_rs",
@@ -18846,8 +18846,8 @@
    "level": 1,
    "out_size": 3897216,
    "ratio": 0.6335,
-   "compress_mbps": 226.33,
-   "decompress_mbps": 523.38
+   "compress_mbps": 228.9,
+   "decompress_mbps": 517.64
   },
   {
    "compressor": "zlib_rs",
@@ -18856,8 +18856,8 @@
    "level": 2,
    "out_size": 3315552,
    "ratio": 0.5389,
-   "compress_mbps": 109.1,
-   "decompress_mbps": 477.85
+   "compress_mbps": 108.7,
+   "decompress_mbps": 471.52
   },
   {
    "compressor": "zlib_rs",
@@ -18866,8 +18866,8 @@
    "level": 3,
    "out_size": 3233371,
    "ratio": 0.5256,
-   "compress_mbps": 92.86,
-   "decompress_mbps": 490.4
+   "compress_mbps": 92.56,
+   "decompress_mbps": 484.33
   },
   {
    "compressor": "zlib_rs",
@@ -18876,8 +18876,8 @@
    "level": 4,
    "out_size": 3211925,
    "ratio": 0.5221,
-   "compress_mbps": 83.3,
-   "decompress_mbps": 496.41
+   "compress_mbps": 82.92,
+   "decompress_mbps": 488.43
   },
   {
    "compressor": "zlib_rs",
@@ -18886,8 +18886,8 @@
    "level": 5,
    "out_size": 3191351,
    "ratio": 0.5187,
-   "compress_mbps": 79.56,
-   "decompress_mbps": 505.56
+   "compress_mbps": 79.8,
+   "decompress_mbps": 499.09
   },
   {
    "compressor": "zlib_rs",
@@ -18896,8 +18896,8 @@
    "level": 6,
    "out_size": 3187658,
    "ratio": 0.5181,
-   "compress_mbps": 74.14,
-   "decompress_mbps": 503.47
+   "compress_mbps": 74.08,
+   "decompress_mbps": 499.03
   },
   {
    "compressor": "zlib_rs",
@@ -18906,8 +18906,8 @@
    "level": 7,
    "out_size": 3168780,
    "ratio": 0.5151,
-   "compress_mbps": 54.03,
-   "decompress_mbps": 523.7
+   "compress_mbps": 54.29,
+   "decompress_mbps": 517.96
   },
   {
    "compressor": "zlib_rs",
@@ -18916,8 +18916,8 @@
    "level": 8,
    "out_size": 3167582,
    "ratio": 0.5149,
-   "compress_mbps": 43.81,
-   "decompress_mbps": 523.96
+   "compress_mbps": 44.03,
+   "decompress_mbps": 517.24
   },
   {
    "compressor": "zlib_rs",
@@ -18926,8 +18926,8 @@
    "level": 9,
    "out_size": 3078267,
    "ratio": 0.5004,
-   "compress_mbps": 32.37,
-   "decompress_mbps": 486.3
+   "compress_mbps": 32.3,
+   "decompress_mbps": 475.27
   },
   {
    "compressor": "zlib_rs",
@@ -18936,8 +18936,8 @@
    "level": 1,
    "out_size": 4568313,
    "ratio": 0.453,
-   "compress_mbps": 418.41,
-   "decompress_mbps": 983.18
+   "compress_mbps": 419.63,
+   "decompress_mbps": 985.99
   },
   {
    "compressor": "zlib_rs",
@@ -18946,8 +18946,8 @@
    "level": 2,
    "out_size": 3904433,
    "ratio": 0.3871,
-   "compress_mbps": 211.34,
-   "decompress_mbps": 868.14
+   "compress_mbps": 209.56,
+   "decompress_mbps": 865.76
   },
   {
    "compressor": "zlib_rs",
@@ -18956,8 +18956,8 @@
    "level": 3,
    "out_size": 3825199,
    "ratio": 0.3793,
-   "compress_mbps": 154.38,
-   "decompress_mbps": 897.03
+   "compress_mbps": 153.61,
+   "decompress_mbps": 894.06
   },
   {
    "compressor": "zlib_rs",
@@ -18966,8 +18966,8 @@
    "level": 4,
    "out_size": 3774735,
    "ratio": 0.3743,
-   "compress_mbps": 132.38,
-   "decompress_mbps": 897.0
+   "compress_mbps": 131.32,
+   "decompress_mbps": 899.72
   },
   {
    "compressor": "zlib_rs",
@@ -18976,8 +18976,8 @@
    "level": 5,
    "out_size": 3678300,
    "ratio": 0.3647,
-   "compress_mbps": 128.15,
-   "decompress_mbps": 967.7
+   "compress_mbps": 127.2,
+   "decompress_mbps": 969.51
   },
   {
    "compressor": "zlib_rs",
@@ -18986,8 +18986,8 @@
    "level": 6,
    "out_size": 3676108,
    "ratio": 0.3645,
-   "compress_mbps": 126.23,
-   "decompress_mbps": 970.57
+   "compress_mbps": 125.07,
+   "decompress_mbps": 969.72
   },
   {
    "compressor": "zlib_rs",
@@ -18996,8 +18996,8 @@
    "level": 7,
    "out_size": 3663157,
    "ratio": 0.3632,
-   "compress_mbps": 107.58,
-   "decompress_mbps": 966.75
+   "compress_mbps": 107.9,
+   "decompress_mbps": 966.44
   },
   {
    "compressor": "zlib_rs",
@@ -19006,8 +19006,8 @@
    "level": 8,
    "out_size": 3663159,
    "ratio": 0.3632,
-   "compress_mbps": 103.57,
-   "decompress_mbps": 969.06
+   "compress_mbps": 107.4,
+   "decompress_mbps": 973.72
   },
   {
    "compressor": "zlib_rs",
@@ -19016,8 +19016,8 @@
    "level": 9,
    "out_size": 3667502,
    "ratio": 0.3636,
-   "compress_mbps": 67.57,
-   "decompress_mbps": 913.44
+   "compress_mbps": 67.68,
+   "decompress_mbps": 912.81
   },
   {
    "compressor": "zlib_rs",
@@ -19026,8 +19026,8 @@
    "level": 1,
    "out_size": 3185858,
    "ratio": 0.4807,
-   "compress_mbps": 380.0,
-   "decompress_mbps": 764.64
+   "compress_mbps": 380.57,
+   "decompress_mbps": 763.4
   },
   {
    "compressor": "zlib_rs",
@@ -19036,8 +19036,8 @@
    "level": 2,
    "out_size": 2272542,
    "ratio": 0.3429,
-   "compress_mbps": 207.2,
-   "decompress_mbps": 939.91
+   "compress_mbps": 205.67,
+   "decompress_mbps": 937.89
   },
   {
    "compressor": "zlib_rs",
@@ -19046,8 +19046,8 @@
    "level": 3,
    "out_size": 2077027,
    "ratio": 0.3134,
-   "compress_mbps": 163.4,
-   "decompress_mbps": 1062.26
+   "compress_mbps": 162.13,
+   "decompress_mbps": 1059.68
   },
   {
    "compressor": "zlib_rs",
@@ -19056,8 +19056,8 @@
    "level": 4,
    "out_size": 1972118,
    "ratio": 0.2976,
-   "compress_mbps": 107.91,
-   "decompress_mbps": 1139.95
+   "compress_mbps": 107.4,
+   "decompress_mbps": 1133.65
   },
   {
    "compressor": "zlib_rs",
@@ -19066,8 +19066,8 @@
    "level": 5,
    "out_size": 1919142,
    "ratio": 0.2896,
-   "compress_mbps": 91.02,
-   "decompress_mbps": 1140.13
+   "compress_mbps": 90.72,
+   "decompress_mbps": 1138.49
   },
   {
    "compressor": "zlib_rs",
@@ -19076,8 +19076,8 @@
    "level": 6,
    "out_size": 1876526,
    "ratio": 0.2832,
-   "compress_mbps": 52.19,
-   "decompress_mbps": 1167.76
+   "compress_mbps": 52.0,
+   "decompress_mbps": 1164.57
   },
   {
    "compressor": "zlib_rs",
@@ -19087,7 +19087,7 @@
    "out_size": 1827382,
    "ratio": 0.2757,
    "compress_mbps": 29.36,
-   "decompress_mbps": 1016.49
+   "decompress_mbps": 1007.23
   },
   {
    "compressor": "zlib_rs",
@@ -19096,8 +19096,8 @@
    "level": 8,
    "out_size": 1820698,
    "ratio": 0.2747,
-   "compress_mbps": 19.01,
-   "decompress_mbps": 1001.73
+   "compress_mbps": 19.03,
+   "decompress_mbps": 979.86
   },
   {
    "compressor": "zlib_rs",
@@ -19106,8 +19106,8 @@
    "level": 9,
    "out_size": 1826397,
    "ratio": 0.2756,
-   "compress_mbps": 25.56,
-   "decompress_mbps": 1082.96
+   "compress_mbps": 25.53,
+   "decompress_mbps": 1073.52
   },
   {
    "compressor": "zlib_rs",
@@ -19116,8 +19116,8 @@
    "level": 1,
    "out_size": 7543749,
    "ratio": 0.3491,
-   "compress_mbps": 462.21,
-   "decompress_mbps": 858.12
+   "compress_mbps": 467.69,
+   "decompress_mbps": 880.37
   },
   {
    "compressor": "zlib_rs",
@@ -19126,8 +19126,8 @@
    "level": 2,
    "out_size": 6102427,
    "ratio": 0.2824,
-   "compress_mbps": 242.45,
-   "decompress_mbps": 911.33
+   "compress_mbps": 241.25,
+   "decompress_mbps": 926.07
   },
   {
    "compressor": "zlib_rs",
@@ -19136,8 +19136,8 @@
    "level": 3,
    "out_size": 5736964,
    "ratio": 0.2655,
-   "compress_mbps": 193.93,
-   "decompress_mbps": 976.86
+   "compress_mbps": 193.51,
+   "decompress_mbps": 987.0
   },
   {
    "compressor": "zlib_rs",
@@ -19146,8 +19146,8 @@
    "level": 4,
    "out_size": 5610373,
    "ratio": 0.2597,
-   "compress_mbps": 156.48,
-   "decompress_mbps": 969.37
+   "compress_mbps": 157.05,
+   "decompress_mbps": 1016.6
   },
   {
    "compressor": "zlib_rs",
@@ -19156,8 +19156,8 @@
    "level": 5,
    "out_size": 5519771,
    "ratio": 0.2555,
-   "compress_mbps": 143.34,
-   "decompress_mbps": 988.62
+   "compress_mbps": 143.15,
+   "decompress_mbps": 1009.82
   },
   {
    "compressor": "zlib_rs",
@@ -19166,8 +19166,8 @@
    "level": 6,
    "out_size": 5501141,
    "ratio": 0.2546,
-   "compress_mbps": 114.16,
-   "decompress_mbps": 955.9
+   "compress_mbps": 113.96,
+   "decompress_mbps": 1014.3
   },
   {
    "compressor": "zlib_rs",
@@ -19176,8 +19176,8 @@
    "level": 7,
    "out_size": 5420718,
    "ratio": 0.2509,
-   "compress_mbps": 76.63,
-   "decompress_mbps": 968.6
+   "compress_mbps": 77.06,
+   "decompress_mbps": 1002.81
   },
   {
    "compressor": "zlib_rs",
@@ -19186,8 +19186,8 @@
    "level": 8,
    "out_size": 5409347,
    "ratio": 0.2504,
-   "compress_mbps": 55.1,
-   "decompress_mbps": 988.61
+   "compress_mbps": 55.33,
+   "decompress_mbps": 997.08
   },
   {
    "compressor": "zlib_rs",
@@ -19196,8 +19196,8 @@
    "level": 9,
    "out_size": 5406346,
    "ratio": 0.2502,
-   "compress_mbps": 52.64,
-   "decompress_mbps": 1037.57
+   "compress_mbps": 52.61,
+   "decompress_mbps": 1052.22
   },
   {
    "compressor": "zlib_rs",
@@ -19206,8 +19206,8 @@
    "level": 1,
    "out_size": 6267384,
    "ratio": 0.8642,
-   "compress_mbps": 172.71,
-   "decompress_mbps": 489.38
+   "compress_mbps": 184.54,
+   "decompress_mbps": 489.96
   },
   {
    "compressor": "zlib_rs",
@@ -19216,8 +19216,8 @@
    "level": 2,
    "out_size": 5549280,
    "ratio": 0.7652,
-   "compress_mbps": 88.26,
-   "decompress_mbps": 500.67
+   "compress_mbps": 87.65,
+   "decompress_mbps": 493.71
   },
   {
    "compressor": "zlib_rs",
@@ -19226,8 +19226,8 @@
    "level": 3,
    "out_size": 5497477,
    "ratio": 0.7581,
-   "compress_mbps": 76.82,
-   "decompress_mbps": 506.48
+   "compress_mbps": 76.15,
+   "decompress_mbps": 503.96
   },
   {
    "compressor": "zlib_rs",
@@ -19236,8 +19236,8 @@
    "level": 4,
    "out_size": 5461348,
    "ratio": 0.7531,
-   "compress_mbps": 63.86,
-   "decompress_mbps": 498.19
+   "compress_mbps": 63.4,
+   "decompress_mbps": 498.55
   },
   {
    "compressor": "zlib_rs",
@@ -19246,8 +19246,8 @@
    "level": 5,
    "out_size": 5441963,
    "ratio": 0.7504,
-   "compress_mbps": 59.76,
-   "decompress_mbps": 492.08
+   "compress_mbps": 60.79,
+   "decompress_mbps": 494.65
   },
   {
    "compressor": "zlib_rs",
@@ -19256,8 +19256,8 @@
    "level": 6,
    "out_size": 5437924,
    "ratio": 0.7499,
-   "compress_mbps": 57.48,
-   "decompress_mbps": 497.84
+   "compress_mbps": 57.76,
+   "decompress_mbps": 495.09
   },
   {
    "compressor": "zlib_rs",
@@ -19266,8 +19266,8 @@
    "level": 7,
    "out_size": 5427910,
    "ratio": 0.7485,
-   "compress_mbps": 47.32,
-   "decompress_mbps": 498.39
+   "compress_mbps": 47.64,
+   "decompress_mbps": 497.86
   },
   {
    "compressor": "zlib_rs",
@@ -19276,8 +19276,8 @@
    "level": 8,
    "out_size": 5427657,
    "ratio": 0.7484,
-   "compress_mbps": 46.21,
-   "decompress_mbps": 498.38
+   "compress_mbps": 46.52,
+   "decompress_mbps": 496.18
   },
   {
    "compressor": "zlib_rs",
@@ -19286,8 +19286,8 @@
    "level": 9,
    "out_size": 5318080,
    "ratio": 0.7333,
-   "compress_mbps": 37.3,
-   "decompress_mbps": 476.62
+   "compress_mbps": 36.88,
+   "decompress_mbps": 474.3
   },
   {
    "compressor": "zlib_rs",
@@ -19296,8 +19296,8 @@
    "level": 1,
    "out_size": 18913196,
    "ratio": 0.4562,
-   "compress_mbps": 345.38,
-   "decompress_mbps": 617.17
+   "compress_mbps": 348.61,
+   "decompress_mbps": 627.25
   },
   {
    "compressor": "zlib_rs",
@@ -19306,8 +19306,8 @@
    "level": 2,
    "out_size": 14152942,
    "ratio": 0.3414,
-   "compress_mbps": 184.08,
-   "decompress_mbps": 687.45
+   "compress_mbps": 182.79,
+   "decompress_mbps": 684.83
   },
   {
    "compressor": "zlib_rs",
@@ -19316,8 +19316,8 @@
    "level": 3,
    "out_size": 13004993,
    "ratio": 0.3137,
-   "compress_mbps": 150.68,
-   "decompress_mbps": 763.19
+   "compress_mbps": 149.71,
+   "decompress_mbps": 759.1
   },
   {
    "compressor": "zlib_rs",
@@ -19326,8 +19326,8 @@
    "level": 4,
    "out_size": 12551202,
    "ratio": 0.3027,
-   "compress_mbps": 119.15,
-   "decompress_mbps": 783.32
+   "compress_mbps": 118.99,
+   "decompress_mbps": 779.69
   },
   {
    "compressor": "zlib_rs",
@@ -19336,8 +19336,8 @@
    "level": 5,
    "out_size": 12295652,
    "ratio": 0.2966,
-   "compress_mbps": 108.78,
-   "decompress_mbps": 771.78
+   "compress_mbps": 107.92,
+   "decompress_mbps": 764.32
   },
   {
    "compressor": "zlib_rs",
@@ -19346,8 +19346,8 @@
    "level": 6,
    "out_size": 12198396,
    "ratio": 0.2942,
-   "compress_mbps": 79.49,
-   "decompress_mbps": 781.69
+   "compress_mbps": 79.26,
+   "decompress_mbps": 779.21
   },
   {
    "compressor": "zlib_rs",
@@ -19356,8 +19356,8 @@
    "level": 7,
    "out_size": 12042221,
    "ratio": 0.2905,
-   "compress_mbps": 53.3,
-   "decompress_mbps": 736.9
+   "compress_mbps": 53.36,
+   "decompress_mbps": 739.22
   },
   {
    "compressor": "zlib_rs",
@@ -19366,8 +19366,8 @@
    "level": 8,
    "out_size": 12008961,
    "ratio": 0.2897,
-   "compress_mbps": 42.66,
-   "decompress_mbps": 737.06
+   "compress_mbps": 42.67,
+   "decompress_mbps": 738.97
   },
   {
    "compressor": "zlib_rs",
@@ -19376,8 +19376,8 @@
    "level": 9,
    "out_size": 12114312,
    "ratio": 0.2922,
-   "compress_mbps": 45.19,
-   "decompress_mbps": 854.71
+   "compress_mbps": 45.03,
+   "decompress_mbps": 846.03
   },
   {
    "compressor": "zlib_rs",
@@ -19386,8 +19386,8 @@
    "level": 1,
    "out_size": 7872341,
    "ratio": 0.929,
-   "compress_mbps": 156.48,
-   "decompress_mbps": 451.45
+   "compress_mbps": 163.22,
+   "decompress_mbps": 453.07
   },
   {
    "compressor": "zlib_rs",
@@ -19396,8 +19396,8 @@
    "level": 2,
    "out_size": 6329428,
    "ratio": 0.7469,
-   "compress_mbps": 79.85,
-   "decompress_mbps": 427.25
+   "compress_mbps": 78.61,
+   "decompress_mbps": 426.81
   },
   {
    "compressor": "zlib_rs",
@@ -19406,8 +19406,8 @@
    "level": 3,
    "out_size": 6282849,
    "ratio": 0.7414,
-   "compress_mbps": 70.55,
-   "decompress_mbps": 427.35
+   "compress_mbps": 69.77,
+   "decompress_mbps": 426.01
   },
   {
    "compressor": "zlib_rs",
@@ -19416,8 +19416,8 @@
    "level": 4,
    "out_size": 6282760,
    "ratio": 0.7414,
-   "compress_mbps": 70.54,
-   "decompress_mbps": 428.21
+   "compress_mbps": 69.6,
+   "decompress_mbps": 426.56
   },
   {
    "compressor": "zlib_rs",
@@ -19426,8 +19426,8 @@
    "level": 5,
    "out_size": 6281076,
    "ratio": 0.7412,
-   "compress_mbps": 69.23,
-   "decompress_mbps": 427.09
+   "compress_mbps": 68.99,
+   "decompress_mbps": 426.98
   },
   {
    "compressor": "zlib_rs",
@@ -19436,8 +19436,8 @@
    "level": 6,
    "out_size": 6281057,
    "ratio": 0.7412,
-   "compress_mbps": 69.26,
-   "decompress_mbps": 427.65
+   "compress_mbps": 69.63,
+   "decompress_mbps": 426.81
   },
   {
    "compressor": "zlib_rs",
@@ -19446,8 +19446,8 @@
    "level": 7,
    "out_size": 6254304,
    "ratio": 0.738,
-   "compress_mbps": 71.41,
-   "decompress_mbps": 436.33
+   "compress_mbps": 72.1,
+   "decompress_mbps": 436.4
   },
   {
    "compressor": "zlib_rs",
@@ -19456,8 +19456,8 @@
    "level": 8,
    "out_size": 6254302,
    "ratio": 0.738,
-   "compress_mbps": 71.86,
-   "decompress_mbps": 438.21
+   "compress_mbps": 72.42,
+   "decompress_mbps": 435.24
   },
   {
    "compressor": "zlib_rs",
@@ -19466,8 +19466,8 @@
    "level": 9,
    "out_size": 5957201,
    "ratio": 0.703,
-   "compress_mbps": 46.68,
-   "decompress_mbps": 483.0
+   "compress_mbps": 46.6,
+   "decompress_mbps": 481.02
   },
   {
    "compressor": "zlib_rs",
@@ -19476,8 +19476,8 @@
    "level": 1,
    "out_size": 1183174,
    "ratio": 0.2213,
-   "compress_mbps": 778.62,
-   "decompress_mbps": 1569.3
+   "compress_mbps": 780.42,
+   "decompress_mbps": 1587.87
   },
   {
    "compressor": "zlib_rs",
@@ -19486,8 +19486,8 @@
    "level": 2,
    "out_size": 897536,
    "ratio": 0.1679,
-   "compress_mbps": 420.22,
-   "decompress_mbps": 1741.5
+   "compress_mbps": 416.32,
+   "decompress_mbps": 1732.59
   },
   {
    "compressor": "zlib_rs",
@@ -19496,8 +19496,8 @@
    "level": 3,
    "out_size": 813568,
    "ratio": 0.1522,
-   "compress_mbps": 311.56,
-   "decompress_mbps": 1915.91
+   "compress_mbps": 309.04,
+   "decompress_mbps": 1900.4
   },
   {
    "compressor": "zlib_rs",
@@ -19506,8 +19506,8 @@
    "level": 4,
    "out_size": 742252,
    "ratio": 0.1389,
-   "compress_mbps": 250.73,
-   "decompress_mbps": 2030.02
+   "compress_mbps": 249.37,
+   "decompress_mbps": 2021.82
   },
   {
    "compressor": "zlib_rs",
@@ -19516,8 +19516,8 @@
    "level": 5,
    "out_size": 701126,
    "ratio": 0.1312,
-   "compress_mbps": 219.84,
-   "decompress_mbps": 2012.26
+   "compress_mbps": 216.65,
+   "decompress_mbps": 2002.15
   },
   {
    "compressor": "zlib_rs",
@@ -19526,8 +19526,8 @@
    "level": 6,
    "out_size": 681876,
    "ratio": 0.1276,
-   "compress_mbps": 161.94,
-   "decompress_mbps": 2063.69
+   "compress_mbps": 160.21,
+   "decompress_mbps": 2063.22
   },
   {
    "compressor": "zlib_rs",
@@ -19536,8 +19536,8 @@
    "level": 7,
    "out_size": 670651,
    "ratio": 0.1255,
-   "compress_mbps": 115.6,
-   "decompress_mbps": 1976.39
+   "compress_mbps": 116.13,
+   "decompress_mbps": 1975.09
   },
   {
    "compressor": "zlib_rs",
@@ -19546,8 +19546,8 @@
    "level": 8,
    "out_size": 659186,
    "ratio": 0.1233,
-   "compress_mbps": 72.96,
-   "decompress_mbps": 1990.89
+   "compress_mbps": 73.04,
+   "decompress_mbps": 1979.77
   },
   {
    "compressor": "zlib_rs",
@@ -19556,8 +19556,8 @@
    "level": 9,
    "out_size": 661881,
    "ratio": 0.1238,
-   "compress_mbps": 83.89,
-   "decompress_mbps": 2104.3
+   "compress_mbps": 84.02,
+   "decompress_mbps": 2093.54
   },
   {
    "compressor": "zlib_ng",
