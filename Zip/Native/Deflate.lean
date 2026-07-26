@@ -966,6 +966,13 @@ def tooFar3 : Nat := 4096
     hash3Probe data (min windowSize tooFar3) pos (headProbeGuarded h3tab (hash3Single data pos hlt)) hlt
   else 0
 
+/-- Allocate the length-3 singleton table only for matcher profiles that use it.
+    Every access and update is guarded by the same `useH3`; the empty table on
+    the false branch is therefore observationally identical to an initialized
+    32K table while avoiding a fixed allocation on no-H3 inputs. -/
+@[inline] def initialH3Table (useH3 : Bool) (sentinel : Nat) : Array Nat :=
+  if useH3 then .replicate 32768 sentinel else #[]
+
 /-- Interior-position hash3-singleton insertion, the length-3 twin of
     `lz77Chain.updateHashes`' chain insertion: for each `j ∈ [j, matchLen)` (also
     `≤ insertCap`) with three readable bytes, store `pos+j` into
@@ -1740,7 +1747,7 @@ def lz77ChainLazy (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 32768
     let hashSize := 65536
     (lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray
+      (initialH3Table useH3 data.size) 0 insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray
 
 /-! Iterative (accumulator) twin of the rolling-lazy2 boxed `mutual`
     (`lz77ChainLazy.mainLoop`/`rollDefer`), threading the `lazy2Steps` knob (rung 2
@@ -1893,7 +1900,7 @@ def lz77ChainLazyIter (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 3
     let hashSize := 65536
     lz77ChainLazyIter.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0 #[]
+      (initialH3Table useH3 data.size) 0 #[]
 
 /-! ## Packed-token matcher twins (Wave 3b stage A)
 
@@ -2120,7 +2127,7 @@ def lz77ChainLazyIterP (data : ByteArray) (maxChain : Nat) (windowSize : Nat := 
     let hashSize := 65536
     lz77ChainLazyIterP.mainLoop data windowSize hashSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
       (.replicate hashSize data.size) (.replicate (min chainWinSize data.size) data.size)
-      (.replicate 32768 data.size) 0
+      (initialH3Table useH3 data.size) 0
       (TokenArray.emptyWithCapacity data.size)
 
 /-! ## SPIKE (#2767 salvage): merged-array lazy matcher (single `Array Nat`)
@@ -2620,7 +2627,7 @@ def lz77ChainLazyIterPMerged (data : ByteArray) (maxChain : Nat) (windowSize : N
     let hashSize := 65536
     let prevSize := min chainWinSize data.size
     lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps useH3
-      (.replicate (prevSize + hashSize) data.size) (.replicate 32768 data.size) 0 0 0 0
+      (.replicate (prevSize + hashSize) data.size) (initialH3Table useH3 data.size) 0 0 0 0
       (TokenArray.emptyWithCapacity data.size)
 
 /-- Merged-array twin of `lz77ChainIterP.mainLoop` (the greedy tier, levels
