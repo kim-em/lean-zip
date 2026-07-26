@@ -2,7 +2,7 @@ import Zip
 /-! # Fast-L1 matcher-policy sweep (issue #2726, candidate A)
 
 For each Silesia file and each `(chainDepth, insertCap)` config, measure the
-*matcher* throughput (`lz77ChainIterP`, greedy — the level 1-3 `deflate_fast`
+*matcher* throughput (`lz77ChainIterP`, greedy — the level 1-4 fast
 arm), the *true* end-to-end throughput (match + emit fused, directly timing
 `deflateRawBaseP data (lz77ChainIterP ...)` so the token-count coupling is
 captured, not estimated), and the resulting base ratio. The fast corner is read

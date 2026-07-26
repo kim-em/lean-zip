@@ -3,8 +3,8 @@ import Zip.Spec.LZ77ChainCorrect
 /-!
 # Correctness of the merged-array matchers (#2767, greedy port)
 
-`lz77ChainLazyIterPMerged` (lazy tier, levels 4–8) and `lz77ChainIterPMerged`
-(greedy tier, levels 1–3) hold the chain state (`hashTable`, `prev`) in a
+`lz77ChainLazyIterPMerged` (lazy tier, levels 5–8) and `lz77ChainIterPMerged`
+(greedy tier, levels 1–4) hold the chain state (`hashTable`, `prev`) in a
 single combined `Array Nat`, laid out as `prev ++ hashTable` — the `prev` ring
 at offset `[0, prevSize)`, the hash table at `[prevSize, prevSize + hashSize)`.
 This deletes the per-matched-position `(hashTable, prev)` Prod that

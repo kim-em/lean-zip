@@ -186,9 +186,8 @@ def analyzeFile (name : String) (data : ByteArray) (iters reps : Nat) : IO Unit 
 
 /-! ## Stage-1 production A/B: unfused `deflateRawBase` vs fused `deflateRawBaseF`
 
-Both full-compress paths exist in-code (`deflateRawBase` is the pre-fusion path,
-still used at levels 4-5; `deflateRawBaseF` is what `deflateRaw` now dispatches to
-at levels 1-3), so this A/B isolates the fusion on the whole compress inside one
+Both full-compress paths exist in-code (`deflateRawBase` is the unfused reference;
+`deflateRawBaseF` is what `deflateRaw` dispatches to at levels 1–4), so this A/B isolates the fusion on the whole compress inside one
 binary, with a same-binary noise floor (unfused timed twice). -/
 
 @[noinline] def opBaseOld (data : ByteArray) (level : UInt8) (salt : Nat) : Nat :=

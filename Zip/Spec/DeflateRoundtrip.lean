@@ -37,8 +37,8 @@ namespace Zip.Native.Deflate
 
 open Zip.Spec.DeflateStoredCorrect (inflate_deflateStoredPure)
 
-/-- The level-dispatched token stream (`lzMatch`: greedy chain at levels 1–3, lazy
-    chain at ≥ 4). The three contracts (`cEnc`/`cEmpty`/`cRes`) are what
+/-- The level-dispatched token stream (`lzMatch`: greedy chain at levels 1–4, lazy
+    chain at ≥ 5). The three contracts (`cEnc`/`cEmpty`/`cRes`) are what
     `inflate_deflateFixedBlock` / `inflate_deflateDynamicBlock` / their `_spec`s
     consume; each delegates to the `lzMatch_*` trio (which cases on the level). -/
 private theorem cEnc (data : ByteArray) (level : UInt8) :
@@ -211,13 +211,10 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
                   (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
           · -- levels 5–8: obs-split candidate, `hwithObs`
             exact hwithObs _ _ rfl
-      · split
-        · -- level 4: the lazy-tier base candidate, unchanged
-          exact inflate_deflateRawBase data level _ hsize
-        · -- levels 1–3: fused greedy base candidate, byte-identical to
-          -- `deflateRawBase` (`deflateRawBaseF_eq`)
-          rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
-          exact inflate_deflateRawBase data level _ hsize
+      · -- levels 1–4: fused greedy base candidate, byte-identical to
+        -- `deflateRawBase` (`deflateRawBaseF_eq`)
+        rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
+        exact inflate_deflateRawBase data level _ hsize
 
 /-- Padding decomposition for the compressed-block dispatch. -/
 theorem deflateCompressed_pad (data : ByteArray) (level : UInt8) :
@@ -370,12 +367,9 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
                   (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
           · -- levels 5–8
             exact hwithObs _ _ rfl
-      · split
-        · -- level 4: lazy-tier base, unchanged
-          exact deflateRawBase_pad data level
-        · -- levels 1–3: fused greedy base (`deflateRawBaseF_eq`)
-          rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
-          exact deflateRawBase_pad data level
+      · -- levels 1–4: fused greedy base (`deflateRawBaseF_eq`)
+        rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
+        exact deflateRawBase_pad data level
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
     the level 2-4 path and the level ≥ 5 fixed candidate (both `= deflateLazy`). -/
@@ -606,12 +600,9 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
                   (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
           · -- levels 5–8
             exact hwithObs _ _ rfl
-      · split
-        · -- level 4: lazy-tier base, unchanged
-          exact deflateRawBase_goR_pad data level
-        · -- levels 1–3: fused greedy base (`deflateRawBaseF_eq`)
-          rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
-          exact deflateRawBase_goR_pad data level
+      · -- levels 1–4: fused greedy base (`deflateRawBaseF_eq`)
+        rw [Zip.Native.Deflate.deflateRawBaseF_eq data level (by assumption)]
+        exact deflateRawBase_goR_pad data level
 
 /-- The encoder always produces exactly one valid raw-DEFLATE stream for its
     input, as judged by the independent formal bitstream specification. -/

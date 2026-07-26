@@ -965,10 +965,14 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     cost; the `chainWalk` early-stop keeps repetitive input fast at any depth.
     The ratio gain saturates around 256–512 (measured), so level 9 caps there.
 
-    The mid-band values are the `mid-sweep` optimum for the #2737 ladder
-    (Silesia grid over chain × `goodMatch` × split, then interleaved pinned
-    timing): L4 = 64 (with the lazy gate, the old L5 point). **L5 = 24 since
-    the L5 re-grid** (`gate-sweep`, run after the hash3 singleton #2824, gm/ld
+    **L4 is chain 16 in the greedy tier**, paired with `insertCap = 128`.
+    Pinned production median-of-5 measurements place its 0.340536 geometric-
+    mean Silesia ratio above the proper L3↔L5 time-per-byte interpolation.
+    The former lazy chain-64 L4 measured about 57.4 MB/s at 0.331300 and was
+    strictly dominated by L5 (about 59.0 MB/s at 0.327256) in the committed
+    baseline.
+
+    **L5 = 24 since the L5 re-grid** (`gate-sweep`, run after the hash3 singleton #2824, gm/ld
     re-grid #2825, and greedy re-grid #2830 landings): the old L5 = (128,
     single-block, gate off) had fallen ~14% inside the L4↔L6 mixing line — the
     recent landings made the split tier so much cheaper that a shallow-chain
@@ -995,7 +999,10 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     balance): with the `niceLen` cutoff disabled (see there), (chain 8, cap 8)
     matches the old L2's weighted-Silesia ratio exactly at +12% speed, and
     (chain 16, cap 32) beats the old L3 on both axes — the old rows sat ~10%
-    below the greedy-band mixing frontier.
+    below the greedy-band mixing frontier. After the L4 retune, the complete
+    median-of-5 refresh places L3 about 0.5% inside the direct L2↔L4 mixing
+    curve on both headline corpora; other matched runs straddled zero, so L3 is
+    a marginal point and the next natural ladder re-grid target.
 
     Level 1 is the `deflate_fast` corner (#2726): depth `4` is exactly zlib
     `-1`'s `max_chain`. A tokens-held-constant attribution on Silesia (see
@@ -1013,16 +1020,16 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
 def chainDepth (level : UInt8) : Nat :=
   if level ≤ 1 then 4
   else if level ≤ 2 then 8
-  else if level ≤ 3 then 16
-  else if level ≤ 4 then 64
+  else if level ≤ 4 then 16
   else if level ≤ 5 then 24
   else if level ≤ 7 then 64
   else if level ≤ 8 then 512
   else 1024
 
 /-- Per-level interior-insertion cap (zlib's `deflate_fast`/`deflate_slow` split):
-    fast levels (1–3) defer most interior `updateHashes` insertions for speed at a
-    ratio cost; levels ≥ 4 insert every position (best ratio). Level 1 uses the
+    greedy levels (1–4) defer interior `updateHashes` insertions for speed at a
+    ratio cost; lazy levels ≥ 5 insert every position. Level 4 uses cap 128, the
+    measured knee that places it above the L3↔L5 frontier. Level 1 uses the
     aggressive `deflate_fast` cap of `2` (#2726): a re-measured Silesia sweep
     (`ZipL1Sweep`) showed the older `cap = 16` claim ("below ~16 is
     counterproductive") no longer holds for the packed emit path — at chain depth
@@ -1036,6 +1043,7 @@ def insertCap (level : UInt8) : Nat :=
   if level ≤ 1 then 2
   else if level ≤ 2 then 8
   else if level ≤ 3 then 32
+  else if level ≤ 4 then 128
   else 1000000000
 
 /-- Lazy `good_match` threshold (zlib-style): the lazy matcher skips the
@@ -1043,10 +1051,9 @@ def insertCap (level : UInt8) : Nat :=
     long first match is rarely improved by deferral. Lower → more gating (faster,
     slightly worse ratio). `259 > 258` disables gating.
 
-    Only L4 keeps the full gate (#2737 `mid-sweep`): disabling it gains ~16bp of
-    Silesia geomean ratio at *any* chain depth — more ratio per cycle than
-    deepening the chain. **Exception: L6 gates at 64 since the hash3-singleton
-    re-grid** — with the singleton paying the ratio bill, (gate 64, ld/8)
+    L4's table entry `8` is historical and no longer consulted now that L4 uses
+    the greedy matcher. **L6 gates at 64 since the hash3-singleton re-grid** —
+    with the singleton paying the ratio bill, (gate 64, ld/8)
     buys +8% weighted speed for +0.09pp, the point that strictly dominates
     miniz_oxide L6; L7 keeps the gate off and the old L6 ratio point.
     **L5 also gates at 64 since the L5 re-grid** (`gate-sweep`, see
@@ -1070,12 +1077,10 @@ def goodMatch (level : UInt8) : Nat :=
     frontier. Level 1 keeps `258` (no early-out) as before — at chain depth 4
     the walk is already short, so a cutoff buys little there.
 
-    The mid-band values were re-gridded for the #2737 remapped ladder
-    (`mid-sweep --time`, Silesia): **L4 disables the cutoff** — at chain 64
-    with the lazy gate on, every `niceLen` value times identically (the gate
-    already skips the probes the cutoff would save) and lower cutoffs only
-    cost ratio (nl30 +11bp, nl65 +3.5bp corpus-total), so the early-out is a
-    pure loss there. L5–L7 sit at the measured knee `65` (nl30
+    L4 also disables the cutoff at its greedy chain-16 point; lower cutoffs
+    spend ratio that is better bought with the insertion cap. The earlier
+    lazy-L4 `mid-sweep --time` reached the same conclusion: lower cutoffs only
+    cost ratio. L5–L7 sit at the measured knee `65` (nl30
     gains ~3% speed for +10bp — a poor trade; nl130/258 return ≤1bp for the
     speed given up; since the post-singleton re-grid L7 runs the old L6
     config, chain 64, so the old chain-256 `130` knee no longer applies);
@@ -1121,8 +1126,8 @@ def niceLen (level : UInt8) : Nat :=
     at 5 — deep enough to keep the deferral wins the gate lets through, roughly
     half the cost of the `/2` default.
 
-    Only levels ≥ 4 (the lazy `deflate_slow` tier) consult this; the greedy
-    matcher (1–3) has no lookahead. Depth is a pure heuristic — the chain is
+    Only levels ≥ 5 (the lazy `deflate_slow` tier) consult this; the greedy
+    matcher (1–4) has no lookahead. Depth is a pure heuristic — the chain is
     re-verified at emission (`chainWalk_spec` holds for any fuel) — so any value
     keeps the encoder contracts. -/
 def lazyDepth (level : UInt8) : Nat :=
@@ -1274,8 +1279,8 @@ def lazy2StepsLevel (level : UInt8) : Nat :=
   if level == 7 then 4
   else 1
 
-/-- The per-level LZ77 matcher (zlib-faithful): levels 1–3 (`deflate_fast`) use the
-    greedy hash-chain matcher; levels ≥ 4 (`deflate_slow`) use the one-byte-lookahead
+/-- The per-level LZ77 matcher: levels 1–4 use the greedy hash-chain matcher;
+    levels ≥ 5 use the one-byte-lookahead
     lazy variant, which improves ratio at equal window/chain depth. Both share the
     same `(chainDepth, insertCap, niceLen)` ladder and satisfy the same encoder
     contracts (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the
@@ -1284,7 +1289,7 @@ def lazy2StepsLevel (level : UInt8) : Nat :=
     Levels 6–8 additionally enable the hash3 length-3 singleton, content-gated by
     `useH3For` (on only when the input classifies as low-compressibility). -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
-  if 4 ≤ level then lz77ChainLazyIter data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
+  if 5 ≤ level then lz77ChainLazyIter data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
 /-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
@@ -1293,7 +1298,7 @@ def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
     downstream consumers still run on `lzMatch` — stage B moves them here. -/
 def lzMatchP (data : ByteArray) (level : UInt8) : TokenArray :=
-  if 4 ≤ level then
+  if 5 ≤ level then
     if useL5LargeInputPolicy data level then
       lz77ChainLazyIterPMergedL5Large data 32768
         (insertCap level) (goodMatch level) (niceLen level)
@@ -2802,7 +2807,7 @@ theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseP data (lzMatchP data level) = deflateRawBase data level := rfl
 
 /-- Boxed-histogram fused base path. Level one uses the specialized native-word
-    outer loop; levels two and three retain the generic fused matcher. -/
+    outer loop; levels two through four retain the generic fused matcher. -/
 def deflateRawBaseFLevel1Impl (data : ByteArray) (level : UInt8) : ByteArray :=
   let fused :=
     if level == 1 then lz77ChainIterPMergedF1U data
@@ -2825,8 +2830,8 @@ theorem deflateRawBaseFU64Level1_eq (data : ByteArray) :
   rw [lz77ChainIterPMergedF1U64_eq]
   simp
 
-/-- The greedy-tier (levels 1–3) base candidate computed from **one fused pass**.
-    Level 1 uses the guarded wide-counter matcher; levels 2–3 use the established
+/-- The greedy-tier (levels 1–4) base candidate computed from **one fused pass**.
+    Level 1 uses the guarded wide-counter matcher; levels 2–4 use the established
     boxed fused matcher.  Both produce the packed tokens and `tokenFreqsP`
     histograms together, so base sizing/emission avoids a second token walk.
     Byte-identical to `deflateRawBase` on the greedy tier (`deflateRawBaseF_eq`). -/
@@ -2834,11 +2839,11 @@ def deflateRawBaseF (data : ByteArray) (level : UInt8) : ByteArray :=
   if level == 1 then deflateRawBaseFU64Level1 data
   else deflateRawBaseFLevel1Impl data level
 
-/-- On the greedy tier (`level ≤ 3`, i.e. `¬ 4 ≤ level`) the fused base candidate
+/-- On the greedy tier (`level ≤ 4`, i.e. `¬ 5 ≤ level`) the fused base candidate
     is byte-identical to `deflateRawBase`: the fused matcher returns exactly the
     plain matcher's tokens and `tokenFreqsP` (`lz77ChainIterPMergedF_eq`), and at
     those frequencies `deflateRawBasePF` is `deflateRawBaseP`. -/
-theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ level)) :
+theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (5 ≤ level)) :
     deflateRawBaseF data level = deflateRawBase data level := by
   unfold deflateRawBaseF
   by_cases hlevel : level = 1
@@ -2852,7 +2857,7 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (4 ≤ lev
     rw [← tokenFreqsPTA_toArray]
     rw [deflateRawBasePF_tokenFreqsP]
     unfold deflateRawBase lzMatchP chainDepth insertCap niceLen
-    simp only [show ¬ (4 : UInt8) ≤ 1 by decide,
+    simp only [show ¬ (5 : UInt8) ≤ 1 by decide,
       show (1 : UInt8) ≤ 1 by decide, show (1 : UInt8) ≤ 4 by decide, ↓reduceIte]
   · rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
     unfold deflateRawBaseFLevel1Impl
@@ -3055,8 +3060,9 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     So callers pinning `level = 9` for absolute best ratio should now pass 10.
     (The zlib/FFI bindings are a separate 0–9 path and are unchanged.)
 
-    Level 0 = stored; levels 1–5 run the single-block cost-model dispatch
-    (`deflateRawBase`); levels 5–8 (#2737, L5 since the L5 re-grid) additionally try the cross-block
+    Level 0 = stored; levels 1–4 run the fused greedy single-block cost-model
+    dispatch (`deflateRawBaseF`). Levels 5–8 (#2737, L5 since the L5 re-grid)
+    size-arbitrate that level's packed base candidate against the cross-block
     (shared-window) split candidate — one whole-file match pass, token stream
     partitioned per block, references cross block boundaries — with the
     partition chosen by the scalar-native observation-divergence heuristic,
@@ -3072,7 +3078,7 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     the base already sizes, so the dispatch skips it and small inputs pay
     nothing.
 
-    The mid-band ladder (L4–L8) is the `mid-sweep`-chosen union of the old
+    Historically, the #2737 mid-band ladder (L4–L8) was the `mid-sweep`-chosen union of the old
     single-block frontier and the split frontier, so neither trades territory
     for the other (Silesia geomean, pinned interleaved timing):
 
@@ -3090,6 +3096,9 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
 
     Every old L4–L8 point is dominated by (or within 1% of) the new curve's
     mixing frontier, and the split points sit far outside the old one.
+    L4 has since moved again: the fused greedy chain-16/cap-128 point is
+    measured above the current L3↔L5 time-per-byte interpolation on both
+    headline corpora.
 
     At level 8 this **replaces** the arbitrated split
     (`chooseSplitsArbitrated` + `deflateDynamicBlocksSharedSized`, retired
@@ -3149,15 +3158,14 @@ def incompressiblePrescan (data : ByteArray) : Bool := Id.run do
     `deflateDynamicBlocksSharedAtSizedP`) and only the winner is emitted
     (#2753), reusing the trees the sizing pass already built — so exactly one
     emit pass runs instead of two (three at L8). Level 4 stays single-block on
-    purpose — it carries the old mid-band's high-speed point (even a size-only
-    split pass would push it off that territory). L5 joined the split tier in
+    purpose — its fused greedy policy is the high-speed frontier point. L5 joined the split tier in
     the re-grid: post-#2824/#2825/#2830 the old single-block L5 sat ~14%
     inside the L4↔L6 mixing line, and a shallow split point (chain 24, gate
     64, probe /4, no singleton) matches its speed at −0.53pp weighted-Silesia
     ratio — the split's per-block trees buy more than the deep chain did.
     Inputs of at least 4 MiB subsequently move to chain 22 and a 2016-token
     split cadence; smaller L5 inputs retain the chain-24/512-token point.
-    Levels 1–3 (`deflate_fast`, emit-bound) stay single-block greedy.
+    Levels 1–4 stay single-block greedy.
 
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
     short-circuited on the first compressible region) and, on unambiguously
@@ -3259,9 +3267,8 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
           let basePrep := deflateRawBasePPrepF data ptokens obsFreqs.2
           if basePrep.1 < obsFreqs.1.1 then basePrep else obsFreqs.1
       withObs.2 ()
-  else if 4 ≤ level then deflateRawBase data level
   else
-    -- Greedy tier (levels 1–3): fuse the whole-stream `tokenFreqsP` walk into the
+    -- Greedy tier (levels 1–4): fuse the whole-stream `tokenFreqsP` walk into the
     -- matcher pass. `deflateRawBaseF` produces the tokens and their frequencies in
     -- one pass and sizes/emits the base candidate from them, byte-identical to
     -- `deflateRawBase data level` (`deflateRawBaseF_eq`) — it removes the separate

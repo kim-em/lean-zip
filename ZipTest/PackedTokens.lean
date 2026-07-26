@@ -14,10 +14,10 @@ namespace ZipTest.PackedTokens
 open Zip.Native.Deflate
 
 /-- Check `(lzMatchP data level).map unpackTok == lzMatch data level`
-    element-wise at levels 1 (greedy fast), 4 (lazy shallow), 6 (lazy
-    default) and 9 (lazy deep). -/
+    element-wise at levels 1 (greedy fast), 4 (greedy high-speed), 5 (lazy
+    shallow), 6 (lazy default), and 9 (lazy deep). -/
 private def checkView (label : String) (data : ByteArray) : IO Unit := do
-  for level in [(1 : UInt8), 4, 6, 9] do
+  for level in [(1 : UInt8), 4, 5, 6, 9] do
     let boxed := lzMatch data level
     let packed := lzMatchP data level
     unless packed.size == boxed.size do
@@ -36,7 +36,7 @@ private def checkView (label : String) (data : ByteArray) : IO Unit := do
     equality; this test keeps the compiled packed pipeline (`tokenFreqsP`,
     emit-boundary unpacking) honest against it. -/
 private def checkBaseP (label : String) (data : ByteArray) : IO Unit := do
-  for level in [(1 : UInt8), 4, 6, 9] do
+  for level in [(1 : UInt8), 4, 5, 6, 9] do
     let packed := deflateRawBaseP data (lzMatchP data level)
     let boxed := deflateRawBaseTokens data (lzMatch data level)
     unless packed == boxed do
@@ -54,7 +54,7 @@ private def checkBaseP (label : String) (data : ByteArray) : IO Unit := do
     (`emitTokensP`/`emitTokensWithCodesP` and their opaque reference-arm
     helpers) honest against them. -/
 private def checkCoresP (label : String) (data : ByteArray) : IO Unit := do
-  for level in [(1 : UInt8), 4, 6, 9] do
+  for level in [(1 : UInt8), 4, 5, 6, 9] do
     let ptoks := lzMatchP data level
     let toks := ptoks.toArray.map unpackTok
     let fixedP := deflateFixedBlockP data ptoks
@@ -179,7 +179,7 @@ private def checkFlatDynamicP (label : String) (data : ByteArray) : IO Unit := d
     adversarial cut lists (empty, non-monotone/out-of-range, all-ones), which
     both emitters must clamp identically. -/
 private def checkSplitP (label : String) (data : ByteArray) : IO Unit := do
-  for level in [(4 : UInt8), 6, 8] do
+  for level in [(5 : UInt8), 6, 8] do
     let ptoks := lzMatchP data level
     let toks := ptoks.toArray.map unpackTok
     let cutsP := chooseSplitsHeuristicP ptoks data.size

@@ -380,7 +380,7 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
   | .ok result => assert! result == largeCyclic
   | .error e => throw (IO.userError s!"deflateRaw(1) 256KB roundtrip failed: {e}")
 
-  -- Lazy chain matcher (zlib deflate_slow): levels ≥ 4 dispatch to lz77ChainLazyIter.
+  -- Lazy chain matcher: levels ≥ 5 dispatch to lz77ChainLazyIter.
   -- lz77ChainLazyIter must equal the recursive lz77ChainLazy (the Array==List bridge).
   for (name, data) in [("empty", ByteArray.empty), ("single", singleByte),
                         ("hello", helloBytes), ("big", big),
@@ -406,8 +406,8 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       throw (IO.userError s!"lz77ChainLazyIterP vs lz77ChainLazyIter (lazyDepth=32) mismatch on {name}: \
         {packedShallow.size} vs {iterShallow.size} tokens")
 
-  -- deflateRaw at every lazy level (4–9) → native inflate AND FFI decompress, on
-  -- varied shapes incl. edge cases. Exercises the lazy path end to end.
+  -- deflateRaw at every mid/high level (4–9) → native inflate AND FFI decompress,
+  -- on varied shapes incl. edge cases. Exercises greedy L4 and lazy L5–L9.
   let lazyShapes : List (String × ByteArray) :=
     [("empty", ByteArray.empty), ("single", singleByte), ("hello", helloBytes),
      ("text64K", mkTextData 65536), ("cyclic128K", mkCyclicData 131072),
@@ -505,12 +505,12 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
     unless decomp == data do
       throw (IO.userError s!"arbitrated shared split→FFI inflate mismatch on {name}")
 
-  -- Observation-divergence dispatch (#2737): levels 6–8 route through the
+  -- Observation-divergence dispatch (#2737): levels 5–8 route through the
   -- packed split candidate whenever the heuristic proposes cuts. On the
   -- heterogeneous input it must (assert, so this test really exercises the
   -- multi-block dispatch path), and the emitted stream must roundtrip via
-  -- both inflate implementations across the mid-band (4–5 single-block,
-  -- 6–8 split).
+  -- both inflate implementations across the mid-band (L4 fused single-block,
+  -- L5–L8 split tier).
   unless (Zip.Native.Deflate.chooseSplitsHeuristicP
       (Zip.Native.Deflate.lzMatchP hetero 6) hetero.size).length ≥ 1 do
     throw (IO.userError "chooseSplitsHeuristicP found no cuts on heterogeneous input")
@@ -533,9 +533,8 @@ def ZipTest.NativeDeflate.tests : IO Unit := do
       throw (IO.userError "deflateDynamicBlocksShared(tokChunk=1)→inflate mismatch on text")
   | .error e => throw (IO.userError s!"deflateDynamicBlocksShared(tokChunk=1)→inflate failed: {e}")
 
-  -- deflateRaw at the max-compression tiers (≥ 8) considers the shared-window
-  -- split via pickSmaller; level 7 is the top single-block point (#2698). Verify
-  -- roundtrip across the single-block/split boundary on text and large inputs.
+  -- Exercise the upper shared-window split tier (L7–L8) and the L9-fast
+  -- approximate-optimal tier on text and large inputs.
   for level in [7, 8, 9] do
     for (name, data) in [("text", textRepeat), ("256K-cyclic", largeCyclic),
                           ("256K-prng", mkPrngData 262144)] do
