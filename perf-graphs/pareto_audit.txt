@@ -1,0 +1,177 @@
+LEAN-ZIP BEFORE/AFTER PARETO AUDIT
+evidence mode: FINAL — complete native L1-L10 + hardened paired metadata required
+evidence date: 2026-07-27T22:00:15.232219+00:00
+generator: pareto_evidence.py | sha256=bdcd19023b2afe71e98d186ac8b0d5b544d215cbb352383d956849f248c761d5
+metric: compress_mbps
+aggregation: exact per-file out_size/size ratios; geometric mean over files; median-of-5 throughput
+provenance roles: native before/after are required to use one machine and one Lean toolchain; non-native rows are reused read-only from the established expanded reference snapshot
+frontier method: lower convex hull in (ratio, 1/throughput); arbitrary byte-fraction mixtures; same-or-better-ratio capability
+scope: the breakpoint proof is exact for the dashboard's plotted geomean-endpoint mixing model; as bench/plot.py documents, mixing corpus geomeans is a close aggregate proxy rather than a literal single-workload mixture
+proof of pointwise comparison: evaluate the union of both piecewise-linear hull breakpoint sets
+allowed frontier slowdown: 3.000000%
+
+references: latest.json | sha256=7e871e467e184f85875df2b48217f00ddb5746afd57ce0ab22cc844da3a3760e | commit=db16e7ed | date=2026-07-27T02:52:32Z | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
+    before: final-v4-before.137e00f7.json | sha256=0c05f285f9a424ad515f8da6357f8b3a55e24802d7c8f64ddf999c6abadde8c4 | commit=88ed5fa0 | date=2026-07-27T22:00:15.232219+00:00 | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
+     after: final-v4-after.137e00f7.json | sha256=ad0067359e1d5ea4baedcb868cd400cc4d0db19fb6685fb73e8a6f148678b55c | commit=137e00f7 | date=2026-07-27T22:00:15.232219+00:00 | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
+
+canterbury: native measured levels
+ lvl    ratio-before   ratio-after      before       after    speed factor      Δratio
+ L1       0.328260      0.353859     108.234     165.062       1.5251x   +0.0255988
+ L2       0.315171      0.324697      80.398     111.419       1.3858x   +0.0095256
+ L3       0.310893      0.310893      69.912      71.264       1.0193x   +0.0000000
+ L4       0.310437      0.310437      68.446      70.156       1.0250x   +0.0000000
+ L5       0.298732      0.298732      42.732      42.387       0.9919x   +0.0000000
+ L6       0.298826      0.298826      36.155      36.581       1.0118x   +0.0000000
+ L7       0.297201      0.297201      44.049      44.020       0.9993x   +0.0000000
+ L8       0.296163      0.296163      27.429      27.334       0.9965x   +0.0000000
+ L9       0.288216      0.288216       4.917       4.936       1.0039x   +0.0000000
+ L10      0.284736      0.284736       2.801       2.823       1.0080x   +0.0000000
+
+canterbury: exact per-row ratio delta: worst +0.043160697 at canterbury/lcet10.txt L1; best +0.000000000 at canterbury/alice29.txt L3; max |Δ| 0.043160697 at canterbury/lcet10.txt L1; changed out_size rows 22/110
+
+canterbury: achievable native frontier
+ before: L10@(0.284736, 2.801) → L9@(0.288216, 4.917) → L8@(0.296163, 27.429) → L7@(0.297201, 44.049) → L3@(0.310893, 69.912) → L2@(0.315171, 80.398) → L1@(0.328260, 108.234)
+ after : L10@(0.284736, 2.823) → L9@(0.288216, 4.936) → L8@(0.296163, 27.334) → L7@(0.297201, 44.020) → L4@(0.310437, 70.156) → L3@(0.310893, 71.264) → L2@(0.324697, 111.419) → L1@(0.353859, 165.062)
+ ratio checkpoint    before MB/s    after MB/s    after/before    result
+       0.284736          2.801         2.823         1.00796x    OK
+       0.288216          4.917         4.936         1.00395x    OK
+       0.296163         27.429        27.334         0.99653x    OK
+       0.297201         44.049        44.020         0.99933x    OK
+       0.310437         68.573        70.156         1.02309x    OK
+       0.310893         69.912        71.264         1.01933x    OK
+       0.315171         80.398        80.225         0.99785x    OK
+       0.324697         98.911       111.419         1.12645x    OK
+       0.328260        108.234       116.026         1.07199x    OK
+ POINTWISE FRONTIER: PASS; worst after/before speed factor 0.99653x at ratio 0.296163
+
+canterbury: native-after relationship to miniz_oxide target levels (native capability uses same-or-better ratio)
+ lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
+ L1        0.383598     305.987       165.062      0.5394x   external faster at this ratio
+ L2        0.326815     189.669       114.112      0.6016x   external faster at this ratio
+ L3        0.311996     119.391        73.377      0.6146x   external faster at this ratio
+ L4        0.304801     105.277        55.997      0.5319x   external faster at this ratio
+ L5        0.302280      82.844        51.361      0.6200x   external faster at this ratio
+ L6        0.299206      51.064        46.652      0.9136x   external faster at this ratio
+ L7        0.299024      43.654        46.401      1.0629x   native dominates/matches
+ L8        0.298345      37.674        45.485      1.2073x   native dominates/matches
+ L9        0.298018      34.771        45.056      1.2958x   native dominates/matches
+
+canterbury: native-after relationship to zlib-rs context (L9 highlighted by inclusion) (native capability uses same-or-better ratio)
+ lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
+ L1        0.440418     477.426       165.062      0.3457x   external faster at this ratio
+ L2        0.328356     253.571       116.155      0.4581x   external faster at this ratio
+ L3        0.311857     199.432        73.104      0.3666x   external faster at this ratio
+ L4        0.306643     162.051        59.951      0.3700x   external faster at this ratio
+ L5        0.301745     150.168        50.475      0.3361x   external faster at this ratio
+ L6        0.300885     123.842        49.113      0.3966x   external faster at this ratio
+ L7        0.298042      79.769        45.087      0.5652x   external faster at this ratio
+ L8        0.296726      51.811        34.419      0.6643x   external faster at this ratio
+ L9        0.297210      42.153        44.032      1.0446x   native dominates/matches
+
+canterbury: native-after relationship to zlib (native capability uses same-or-better ratio)
+ lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
+ L1        0.343279     204.732       140.518      0.6864x   external faster at this ratio
+ L2        0.332458     175.049       121.967      0.6968x   external faster at this ratio
+ L3        0.323996     131.174       108.318      0.8258x   external faster at this ratio
+ L4        0.311762     121.636        72.918      0.5995x   external faster at this ratio
+ L5        0.302420      82.142        51.598      0.6282x   external faster at this ratio
+ L6        0.299177      54.903        46.612      0.8490x   external faster at this ratio
+ L7        0.298682      46.964        45.934      0.9781x   external faster at this ratio
+ L8        0.297114      31.998        41.872      1.3086x   native dominates/matches
+ L9        0.296610      25.342        32.674      1.2893x   native dominates/matches
+
+canterbury: zlib-rs vs zlib same-level reference relationship
+ lvl   rs ratio   zlib ratio   rs MB/s   zlib MB/s    rs ratio Δ    rs speed Δ   verdict
+ L1    0.440418    0.343279    477.426     204.732      +28.30%     +133.20%   ratio/speed trade-off
+ L2    0.328356    0.332458    253.571     175.049       -1.23%      +44.86%   zlib-rs dominates
+ L3    0.311857    0.323996    199.432     131.174       -3.75%      +52.04%   zlib-rs dominates
+ L4    0.306643    0.311762    162.051     121.636       -1.64%      +33.23%   zlib-rs dominates
+ L5    0.301745    0.302420    150.168      82.142       -0.22%      +82.82%   zlib-rs dominates
+ L6    0.300885    0.299177    123.842      54.903       +0.57%     +125.56%   ratio/speed trade-off
+ L7    0.298042    0.298682     79.769      46.964       -0.21%      +69.85%   zlib-rs dominates
+ L8    0.296726    0.297114     51.811      31.998       -0.13%      +61.92%   zlib-rs dominates
+ L9    0.297210    0.296610     42.153      25.342       +0.20%      +66.34%   ratio/speed trade-off
+
+silesia: native measured levels
+ lvl    ratio-before   ratio-after      before       after    speed factor      Δratio
+ L1       0.361439      0.392833     157.421     259.859       1.6507x   +0.0313940
+ L2       0.348082      0.358106     114.570     167.767       1.4643x   +0.0100234
+ L3       0.342545      0.342545     100.793     103.862       1.0304x   +0.0000000
+ L4       0.332062      0.332062      77.955      78.943       1.0127x   +0.0000000
+ L5       0.327301      0.327301      67.756      67.846       1.0013x   +0.0000000
+ L6       0.322038      0.322038      46.237      46.381       1.0031x   +0.0000000
+ L7       0.318243      0.318243      43.660      43.512       0.9966x   +0.0000000
+ L8       0.317487      0.317487      31.274      31.323       1.0016x   +0.0000000
+ L9       0.313894      0.313894       4.586       4.545       0.9911x   +0.0000000
+ L10      0.308738      0.308738       2.742       2.734       0.9970x   +0.0000000
+
+silesia: exact per-row ratio delta: worst +0.047385156 at silesia/reymont L1; best +0.000000000 at silesia/dickens L3; max |Δ| 0.047385156 at silesia/reymont L1; changed out_size rows 24/120
+
+silesia: achievable native frontier
+ before: L10@(0.308738, 2.742) → L8@(0.317487, 31.274) → L7@(0.318243, 43.660) → L5@(0.327301, 67.756) → L4@(0.332062, 77.955) → L3@(0.342545, 100.793) → L2@(0.348082, 114.570) → L1@(0.361439, 157.421)
+ after : L10@(0.308738, 2.734) → L8@(0.317487, 31.323) → L7@(0.318243, 43.512) → L5@(0.327301, 67.846) → L4@(0.332062, 78.943) → L3@(0.342545, 103.862) → L2@(0.358106, 167.767) → L1@(0.392833, 259.859)
+ ratio checkpoint    before MB/s    after MB/s    after/before    result
+       0.308738          2.742         2.734         0.99701x    OK
+       0.317487         31.274        31.323         1.00158x    OK
+       0.318243         43.660        43.512         0.99662x    OK
+       0.327301         67.756        67.846         1.00134x    OK
+       0.332062         77.955        78.943         1.01267x    OK
+       0.342545        100.793       103.862         1.03044x    OK
+       0.348082        114.570       120.147         1.04868x    OK
+       0.358106        143.982       167.767         1.16519x    OK
+       0.361439        157.421       173.674         1.10325x    OK
+ POINTWISE FRONTIER: PASS; worst after/before speed factor 0.99662x at ratio 0.318243
+
+silesia: native-after relationship to miniz_oxide target levels (native capability uses same-or-better ratio)
+ lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
+ L1        0.430526     232.146       259.859      1.1194x   native dominates/matches
+ L2        0.361487     136.746       173.763      1.2707x   native dominates/matches
+ L3        0.335451      81.581        85.581      1.0490x   native dominates/matches
+ L4        0.332140      75.988        79.084      1.0407x   native dominates/matches
+ L5        0.327302      58.877        67.849      1.1524x   native dominates/matches
+ L6        0.321631      35.508        50.255      1.4153x   native dominates/matches
+ L7        0.320356      28.545        47.485      1.6635x   native dominates/matches
+ L8        0.319702      23.844        46.180      1.9368x   native dominates/matches
+ L9        0.319385      22.197        45.573      2.0531x   native dominates/matches
+
+silesia: native-after relationship to zlib-rs context (L9 highlighted by inclusion) (native capability uses same-or-better ratio)
+ lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
+ L1        0.460991     358.452       259.859      0.7249x   external faster at this ratio
+ L2        0.362947     184.597       176.487      0.9561x   external faster at this ratio
+ L3        0.344468     148.891       108.993      0.7320x   external faster at this ratio
+ L4        0.334680     120.965        83.975      0.6942x   external faster at this ratio
+ L5        0.327672     110.349        68.598      0.6216x   external faster at this ratio
+ L6        0.325038      89.041        59.529      0.6686x   external faster at this ratio
+ L7        0.321793      63.664        50.629      0.7953x   external faster at this ratio
+ L8        0.320169      46.924        47.105      1.0039x   native dominates/matches
+ L9        0.318236      42.595        43.353      1.0178x   native dominates/matches
+
+silesia: native-after relationship to zlib (native capability uses same-or-better ratio)
+ lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
+ L1        0.375080     129.657       202.917      1.5650x   native dominates/matches
+ L2        0.362412     116.486       175.480      1.5064x   native dominates/matches
+ L3        0.350265      86.746       128.064      1.4763x   native dominates/matches
+ L4        0.341333      83.851       100.206      1.1950x   native dominates/matches
+ L5        0.329719      56.425        73.062      1.2948x   native dominates/matches
+ L6        0.323085      37.524        53.835      1.4347x   native dominates/matches
+ L7        0.321009      30.843        48.864      1.5843x   native dominates/matches
+ L8        0.318898      21.203        44.670      2.1068x   native dominates/matches
+ L9        0.318484      18.699        43.931      2.3494x   native dominates/matches
+
+silesia: zlib-rs vs zlib same-level reference relationship
+ lvl   rs ratio   zlib ratio   rs MB/s   zlib MB/s    rs ratio Δ    rs speed Δ   verdict
+ L1    0.460991    0.375080    358.452     129.657      +22.90%     +176.46%   ratio/speed trade-off
+ L2    0.362947    0.362412    184.597     116.486       +0.15%      +58.47%   ratio/speed trade-off
+ L3    0.344468    0.350265    148.891      86.746       -1.66%      +71.64%   zlib-rs dominates
+ L4    0.334680    0.341333    120.965      83.851       -1.95%      +44.26%   zlib-rs dominates
+ L5    0.327672    0.329719    110.349      56.425       -0.62%      +95.57%   zlib-rs dominates
+ L6    0.325038    0.323085     89.041      37.524       +0.60%     +137.29%   ratio/speed trade-off
+ L7    0.321793    0.321009     63.664      30.843       +0.24%     +106.41%   ratio/speed trade-off
+ L8    0.320169    0.318898     46.924      21.203       +0.40%     +121.31%   ratio/speed trade-off
+ L9    0.318236    0.318484     42.595      18.699       -0.08%     +127.79%   zlib-rs dominates
+
+OVERALL NATIVE ACHIEVABLE FRONTIER: PASS — no pointwise regression detected
+SILESIA MINIZ_OXIDE L1-L9 CONTAINMENT: PASS
+PNG outputs:
+- perf_before_after_compress_mbps_canterbury.png
+- perf_before_after_compress_mbps_silesia.png
