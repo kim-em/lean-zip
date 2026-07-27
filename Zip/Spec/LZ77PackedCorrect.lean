@@ -66,11 +66,16 @@ private theorem mainLoopP_eq (data : ByteArray) (windowSize hashSize maxChain in
     simp only [chainWalkGuardedPackedU_eq]
     by_cases hlt : pos + 2 < data.size
     · simp only [hlt, ↓reduceDIte]
+      unfold lz77ChainIterPPostProbe
+      dsimp only
       split
       · split
-        · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
-        · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
-      · exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
+        · dsimp only
+          exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
+        · dsimp only
+          exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
+      · dsimp only
+        exact ih _ (by omega) _ _ _ _ _ (by rw [TokenArray.push_toArray, hta, Array.map_push]) rfl
     · simp only [hlt, ↓reduceDIte]
       rw [trailingPT_toArray, hta]
       exact trailingP_eq data pos acc

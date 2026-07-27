@@ -23,6 +23,12 @@ import Std.Tactic.BVDecide
   different consumer: it reads runs of many bytes and compares eight per
   iteration, so the wide load pays there.
 
+  `ByteArray.usetUInt32LE a off v` is the four-byte writer twin.  Its reference
+  body is four ordinary `ByteArray.set`s, while the native implementation uses
+  one owned-buffer store: it mutates when `a` is exclusive and copies first when
+  it is shared.  The level-one matcher uses this pair for its packed 65,536-slot
+  latest-position table (`0` = unseen, `position + 1` = seen).
+
   The offset is a `USize`, so a hot loop's index arithmetic stays unboxed (the
   point of mirroring lean#14053's `uget*` readers rather than lean#8165's
   `Nat`-indexed `getUIntN`). The in-bounds hypothesis `off.toNat + 4 ≤ a.size`
@@ -72,6 +78,20 @@ def ugetUInt64LE (a : @& ByteArray) (off : USize)
 protected theorem size_set (a : ByteArray) (i : Nat) (v : UInt8) (h : i < a.size) :
     (a.set i v h).size = a.size := by
   simp only [← ByteArray.size_data, ByteArray.data_set, Array.size_set]
+
+/-- Store the little-endian `UInt32` `v` at byte offset `off`.  This is the
+    four-byte writer twin of `ugetUInt32LE`; its four-`set` reference body is
+    the trusted specification of the `@[extern]`.  The native implementation
+    updates an exclusive owned array in place and copies a shared array first.
+    Production's packed level-one hash heads use this operation once per input
+    position. -/
+@[extern "lean_zip_uset_u32le"]
+def usetUInt32LE (a : ByteArray) (off : USize) (v : UInt32)
+    (h : off.toNat + 4 ≤ a.size := by get_elem_tactic) : ByteArray :=
+  ((((a.set off.toNat v.toUInt8 (by omega)).set
+    (off.toNat + 1) (v >>> 8).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 2) (v >>> 16).toUInt8 (by simp only [ByteArray.size_set]; omega)).set
+    (off.toNat + 3) (v >>> 24).toUInt8 (by simp only [ByteArray.size_set]; omega))
 
 /-- Store the little-endian `UInt64` `v` at byte offset `off`. The reference
     body — the chain of eight `a.set` writes assembling the store byte by

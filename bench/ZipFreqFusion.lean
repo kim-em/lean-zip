@@ -6,15 +6,18 @@ walk over the packed token array. The greedy matcher already touches every token
 as it pushes it, so counting frequencies *there* would eliminate the re-read.
 This exe measures whether that fusion is worth doing before any proof work:
 
-* **matcher alone**    — `lz77ChainIterPMerged data 4` (the L1 greedy path)
+* **matcher alone**    — `lz77ChainIterPMerged data 4` (the retained dense c4/i2
+                          reference path)
 * **matcher + freqs**  — a copy of the greedy merged loop that also threads the
                           two histogram arrays, bumping at each `acc.push` site
                           (same bump helpers `tokenFreqsP` uses)
-* **matcher + separate `tokenFreqsP`** — the status quo: match, then re-walk
+* **matcher + separate `tokenFreqsP`** — the then-current path: match, then
+                                          re-walk
 
 The fusion pays iff `matcher+freqs` is meaningfully cheaper than
-`matcher + tokenFreqsP`. The saving is judged against total L1 compress time
-(`deflateRaw data 1`): if it is < 2% of that, STOP (no proofs).
+`matcher + tokenFreqsP`. Historically, the saving was judged against total
+public-L1 compress time (`deflateRaw data 1`); that denominator now uses the
+direct-head route, while the three matcher rows remain the dense reference.
 
 Run pinned: `bench/pin_core.sh lake exe freq-fusion bench/corpora/silesia/mozilla`
 -/
@@ -141,7 +144,7 @@ call forces a genuine recomputation every iteration. -/
 
 def analyzeFile (name : String) (data : ByteArray) (iters reps : Nat) : IO Unit := do
   let size := data.size
-  -- L1 knobs: chain 4, cap 2, niceLen 258.
+  -- Retained dense/reference knobs: chain 4, cap 2, niceLen 258.
   let maxChain := 4
   let insertCap := 2
   let niceLen := 258
@@ -178,17 +181,19 @@ def analyzeFile (name : String) (data : ByteArray) (iters reps : Nat) : IO Unit 
   IO.println s!"    matcher alone        : {aloneNs} ns  ({round1 (mbps size aloneNs)} MB/s)"
   IO.println s!"    matcher + freqs      : {fusedNs} ns  ({round1 (mbps size fusedNs)} MB/s)"
   IO.println s!"    matcher + tokenFreqsP: {sepNs} ns  ({round1 (mbps size sepNs)} MB/s)"
-  IO.println s!"    total compress (L1)  : {totalNs} ns  ({round1 (mbps size totalNs)} MB/s)"
+  IO.println s!"    total compress (public L1): {totalNs} ns  ({round1 (mbps size totalNs)} MB/s)"
   IO.println s!"    tokenFreqsP-alone (sep-alone): {(sepNs : Int) - (aloneNs : Int)} ns"
   IO.println s!"    saving (sep - fused) : {savingNs} ns  =  {round1 savingPctTotal}% of total compress"
   IO.println s!"    reps alone={aloneT.reverse} fused={fusedT.reverse} sep={sepT.reverse}"
   IO.println ""
 
-/-! ## Stage-1 production A/B: unfused `deflateRawBase` vs fused `deflateRawBaseF`
+/-! ## Stage-1 base-path A/B: unfused `deflateRawBase` vs fused `deflateRawBaseF`
 
 Both full-compress paths exist in-code (`deflateRawBase` is the unfused reference;
-`deflateRawBaseF` is what `deflateRaw` dispatches to at levels 1–4), so this A/B isolates the fusion on the whole compress inside one
-binary, with a same-binary noise floor (unfused timed twice). -/
+`deflateRawBaseF` supplies production source points at levels 2–4), so this A/B
+isolates the fusion on the whole compress inside one binary, with a same-binary
+noise floor (unfused timed twice). At level 1 it compares the retained dense
+c4/i2 source, not the public direct-head route. -/
 
 @[noinline] def opBaseOld (data : ByteArray) (level : UInt8) (salt : Nat) : Nat :=
   (deflateRawBase data level).size + (salt &&& 1)
@@ -236,7 +241,7 @@ def main (args : List String) : IO Unit := do
     unless ← path.pathExists do IO.eprintln s!"not found: {path}"; return
     let data ← IO.FS.readBinFile path
     let iters := if data.size ≤ 262144 then 20 else if data.size ≤ 4194304 then 3 else 2
-    IO.println s!"# Stage-1 production A/B (reps={reps})"
+    IO.println s!"# Stage-1 base-path A/B (reps={reps})"
     IO.println ""
     analyzeProd (path.fileName.getD file) data level iters reps
   | _ =>

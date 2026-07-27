@@ -888,6 +888,99 @@ private theorem emitTokenWithCodesPTFlatFactored_wf (bw : BitWriter) (w : UInt32
     exact (emitRefWithCodesPTFlatStep_spec bw bw litCodes distCodes w hlit hdist
       rfl hwf hwf hlit_le hdist_le).2.1
 
+/-! ### Native-byte-cursor implementation
+
+The runtime loop indexes `TokenArray.bytes` directly, while the established
+scalar loop indexes logical tokens.  The bridge below is structural equality:
+alignment identifies `off / 4` with the logical index, and
+the local wide-load lemma identifies its word with `TokenArray.get`.
+No Huffman or writer reasoning is repeated here. -/
+
+/-- The wide byte load at a logical token's aligned offset is its packed word.
+    Kept local so emitter correctness does not depend on split-walker proofs. -/
+private theorem tokenArray_uget_eq_get_flat (tokens : TokenArray) (i : Nat)
+    (off : USize) (hi : i < tokens.size) (hoff : off.toNat = 4 * i)
+    (hb : off.toNat + 4 ≤ tokens.bytes.size) :
+    tokens.bytes.ugetUInt32LE off hb = tokens.get i hi := by
+  unfold ByteArray.ugetUInt32LE TokenArray.get
+  simp only [hoff]
+
+/-- Aligned token storage has exactly four bytes per logical token. -/
+private theorem tokenArray_bytes_size_eq_four_mul (tokens : TokenArray) :
+    tokens.bytes.size = 4 * tokens.size := by
+  have hm := Nat.mod_add_div tokens.bytes.size 4
+  rw [tokens.aligned] at hm
+  simp only [TokenArray.size]
+  omega
+
+/-- The native-byte-cursor loop is extensionally the scalar-index loop at the
+    corresponding logical token. -/
+theorem emitTokensWithCodesTAPTFlatFastLoopU_eq
+    (data : ByteArray) (acc : UInt64) (bc : UInt32)
+    (tokens : TokenArray) (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (endU off : USize) (hend : endU.toNat = tokens.bytes.size)
+    (hbytes : tokens.bytes.size < USize.size) (hoffAlign : off.toNat % 4 = 0)
+    (i : Nat) (hoff : off.toNat = 4 * i) :
+    emitTokensWithCodesTAPTFlatFastLoopU data acc bc tokens litT distT
+        hlit hdist endU off hend hbytes hoffAlign =
+      emitTokensWithCodesTAPTFlatFastLoop data acc bc tokens litT distT
+        hlit hdist i := by
+  induction hrem : tokens.size - i using Nat.strongRecOn
+      generalizing data acc bc off i with
+  | _ n ih =>
+    rw [emitTokensWithCodesTAPTFlatFastLoopU.eq_1,
+      emitTokensWithCodesTAPTFlatFastLoop.eq_1]
+    have hbytesMul := tokenArray_bytes_size_eq_four_mul tokens
+    have hiIff : off < endU ↔ i < tokens.size := by
+      rw [USize.lt_iff_toNat_lt, hend, hoff, hbytesMul]
+      omega
+    by_cases hi : i < tokens.size
+    · have hiU := hiIff.mpr hi
+      simp only [hiU, hi, dif_pos]
+      have hb : off.toNat + 4 ≤ tokens.bytes.size := by
+        rw [hoff, hbytesMul]
+        omega
+      have hw := tokenArray_uget_eq_get_flat tokens i off hi hoff hb
+      have h4 : (4 : USize).toNat = 4 :=
+        USize.toNat_ofNat_of_lt
+          (Nat.lt_of_lt_of_le (show 4 < 2 ^ 32 by omega) USize.le_size)
+      have hstep : (off + 4).toNat = 4 * (i + 1) := by
+        rw [USize.toNat_add, h4, hoff]
+        apply Nat.mod_eq_of_lt
+        have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+        rw [← hUS]
+        omega
+      have halign' : (off + 4).toNat % 4 = 0 := by
+        rw [hstep]
+        omega
+      have hcont (data' : ByteArray) (acc' : UInt64) (bc' : UInt32) :
+          emitTokensWithCodesTAPTFlatFastLoopU data' acc' bc' tokens litT distT
+              hlit hdist endU (off + 4) hend hbytes halign' =
+            emitTokensWithCodesTAPTFlatFastLoop data' acc' bc' tokens litT distT
+              hlit hdist (i + 1) := by
+        exact ih _ (by omega) data' acc' bc' (off + 4) halign' (i + 1)
+          hstep rfl
+      simp only [hw, hcont, Array.uget, UInt8.toNat_toUSize]
+    · have hiU : ¬off < endU := fun h => hi (hiIff.mp h)
+      rw [dif_neg hiU, dif_neg hi]
+
+/-- The guarded zero-entry cursor wrapper is exactly the previous scalar
+    zero-entry implementation, including its non-addressable fallback. -/
+theorem emitTokensWithCodesTAPTFlatFastZeroU_eq
+    (bw : BitWriter) (tokens : TokenArray) (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) :
+    emitTokensWithCodesTAPTFlatFastZeroU bw tokens litT distT hlit hdist =
+      emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf
+        bw.bitCount.toUInt32 tokens litT distT hlit hdist 0 := by
+  unfold emitTokensWithCodesTAPTFlatFastZeroU
+  split
+  · rename_i hg
+    apply emitTokensWithCodesTAPTFlatFastLoopU_eq
+      (i := 0)
+    simp
+  · rfl
+
 /-- Regrouping a scalar step as a writer moves its branch outside the recursive
     continuation.  These two normalization lemmas bridge that harmless shape
     difference in the optimized-loop induction. -/
@@ -1091,6 +1184,7 @@ theorem emitTokensWithCodesTAPTFlatZero_eq_routed (bw : BitWriter)
         (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT := by
   unfold emitTokensWithCodesTAPTFlatZero emitTokensWithCodesTAPTFlatRouted
     emitTokensWithCodesTAPTFlat
+  rw [emitTokensWithCodesTAPTFlatFastZeroU_eq]
   exact emitTokensWithCodesTAPTFlatFastLoop_eq bw tokens litCodes distCodes
     hlitT hdistT 0 hwf hlit_le hdist_le
 

@@ -47,6 +47,30 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
         · exact ih (prev[cand &&& 0x7FFF]!) _ _ hb
     · exact hb
 
+/-- A depth-one chain walk observes only its initial candidate. In particular,
+    it never observes the predecessor array: after testing the candidate, its
+    only possible recursive call has zero fuel.
+
+    This is the structural fact behind the direct-head matcher, which deletes
+    the predecessor ring at policy `maxChain = 1`. -/
+theorem chainWalk_one (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand : Nat) :
+    lz77Chain.chainWalk data prev windowSize pos maxLen niceLen hpm cand 1 0 0 =
+      if hc : cand < pos ∧ pos - cand ≤ windowSize then
+        let ml := lz77Greedy.countMatch data cand pos maxLen (by omega) hpm
+        if ml = 0 then (0, 0) else (ml, cand)
+      else (0, 0) := by
+  rw [lz77Chain.chainWalk, if_neg (by omega : ¬(1 = 0))]
+  by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+  · rw [dif_pos hc, dif_pos hc]
+    let ml := lz77Greedy.countMatch data cand pos maxLen (by omega) hpm
+    by_cases hz : ml = 0
+    · simp [ml, hz, lz77Chain.chainWalk]
+    · have hp : ml > 0 := Nat.pos_of_ne_zero hz
+      simp [ml, hp, hz, lz77Chain.chainWalk]
+  · rw [dif_neg hc, dif_neg hc]
+
 /-- The hash3-singleton probe's decoded seed is a real in-window match (or
     empty): exactly the initial-accumulator hypothesis `chainWalk_spec` takes at
     `bestLen := seed % 512`, `bestPos := seed / 512`. `probeWin ≤ windowSize`
@@ -965,6 +989,50 @@ theorem chainWalkGuardedPacked_div (data : ByteArray) (prev : Array Nat)
   have h := chainWalk_fst_le data prev windowSize pos maxLen niceLen hpm cand fuel
   omega
 
+/-- At depth one, decoding the guarded packed walk's length is just the
+    ordinary match count for a live candidate and zero for a stale/sentinel
+    candidate. The predecessor array is observationally irrelevant. -/
+theorem chainWalkGuardedPackedU_one_mod (data : ByteArray) (prev : Array Nat)
+    (windowSize pos maxLen niceLen : Nat) (hpm : pos + maxLen ≤ data.size)
+    (cand : Nat) (hml : maxLen ≤ 511) :
+    chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm cand 1 0 0 % 512 =
+      if hc : cand < pos ∧ pos - cand ≤ windowSize then
+        lz77Greedy.countMatch data cand pos maxLen (by omega) hpm
+      else 0 := by
+  rw [chainWalkGuardedPackedU_eq,
+    chainWalkGuardedPacked_mod data prev windowSize pos maxLen niceLen hpm cand 1 hml,
+    chainWalk_one]
+  by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+  · simp only [dif_pos hc]
+    by_cases hz : lz77Greedy.countMatch data cand pos maxLen (by omega) hpm = 0
+    · simp only [hz, if_pos]
+    · simp [hz]
+  · simp only [dif_neg hc]
+
+/-- If the depth-one walk found an encodable match, its decoded position is
+    exactly the candidate bucket head. -/
+theorem chainWalkGuardedPackedU_one_div_of_ge_three (data : ByteArray)
+    (prev : Array Nat) (windowSize pos maxLen niceLen : Nat)
+    (hpm : pos + maxLen ≤ data.size) (cand : Nat) (hml : maxLen ≤ 511)
+    (hge :
+      chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
+        cand 1 0 0 % 512 ≥ 3) :
+    chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hpm
+      cand 1 0 0 / 512 = cand := by
+  rw [chainWalkGuardedPackedU_eq,
+    chainWalkGuardedPacked_div data prev windowSize pos maxLen niceLen hpm cand 1 hml,
+    chainWalk_one]
+  rw [chainWalkGuardedPackedU_one_mod data prev windowSize pos maxLen niceLen
+    hpm cand hml] at hge
+  by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
+  · simp only [dif_pos hc] at hge ⊢
+    by_cases hz : lz77Greedy.countMatch data cand pos maxLen (by omega) hpm = 0
+    · simp only [hz] at hge
+      omega
+    · simp [hz]
+  · simp only [dif_neg hc] at hge ⊢
+    omega
+
 /-- Every matcher call site clamps `maxLen` to `min 258 _`; this discharges
     the `maxLen ≤ 511` side condition when `simp` applies the decode lemmas. -/
 theorem min258_le_511 (x : Nat) : min 258 x ≤ 511 := by omega
@@ -1118,6 +1186,19 @@ theorem updateHashesGuarded_eq (data : ByteArray) (hashSize : Nat)
     · exact (updateHashesFastU_eq ..).trans (updateHashesFast_eq ..)
     · exact updateHashesFast_eq ..
   · rfl
+
+/-- With the production direct-head policy's zero insertion cap, the
+    post-reference insertion walk starts at `j = 1` and is immediately a
+    no-op.  This is the second structural reason the depth-one matcher needs
+    only its head table: neither the current probe nor a skipped-match update
+    can observe or change the predecessor ring. -/
+theorem updateHashesGuarded_one_zero (data : ByteArray) (hashSize : Nat)
+    (hashTable : Array Nat) (prev : Array Nat) (pos matchLen : Nat) :
+    updateHashesGuarded data hashSize hashTable prev pos 1 matchLen 0 =
+      (hashTable, prev) := by
+  rw [updateHashesGuarded_eq]
+  unfold lz77Chain.updateHashes
+  simp
 
 /-! ## Iterative version: equivalence + transferred contracts -/
 

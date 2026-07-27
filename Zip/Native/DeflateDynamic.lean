@@ -387,6 +387,156 @@ def emitTokensWithCodesTAPTFlatFastLoop (data : ByteArray) (acc : UInt64) (bc : 
     ⟨data, acc, bc.toUInt8⟩
 termination_by tokens.size - i
 
+/-! ## Native-word cursor for the production packed emitter
+
+`TokenArray` stores one token in four adjacent bytes.  The generic fast loop
+above keeps a boxed `Nat` token index and lets `TokenArray.get` multiply it by
+four on every iteration.  The production zero-entry loop below instead keeps
+the byte offset itself in `USize`; its one addressability guard is outside the
+loop and each step is a native `off + 4` plus one wide load.
+The recursive invariant is byte alignment, which is preserved by each
+four-byte cursor step. -/
+
+def emitTokensWithCodesTAPTFlatFastLoopU
+    (data : ByteArray) (acc : UInt64) (bc : UInt32)
+    (tokens : TokenArray) (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30)
+    (endU off : USize) (hend : endU.toNat = tokens.bytes.size)
+    (hbytes : tokens.bytes.size < USize.size) (hoff : off.toNat % 4 = 0) :
+    BitWriter :=
+  if hi : off < endU then
+    have hiNat : off.toNat < tokens.bytes.size := by
+      rw [← hend]
+      exact USize.lt_iff_toNat_lt.mp hi
+    have hb : off.toNat + 4 ≤ tokens.bytes.size := by
+      have halign := tokens.aligned
+      omega
+    let w := tokens.bytes.ugetUInt32LE off hb
+    have hstep : (off + 4).toNat = off.toNat + 4 := by
+      rw [USize.toNat_add]
+      have h4 : (4 : USize).toNat = 4 := by
+        exact USize.toNat_ofNat_of_lt
+          (Nat.lt_of_lt_of_le (show 4 < 2 ^ 32 by omega) USize.le_size)
+      rw [h4]
+      apply Nat.mod_eq_of_lt
+      have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+      rw [← hUS]
+      omega
+    have hoff' : (off + 4).toNat % 4 = 0 := by
+      rw [hstep]
+      omega
+    if w &&& ((1 : UInt32) <<< 31) = 0 then
+      let litIdxU := w.toUInt8.toUSize
+      have he : litIdxU.toNat < litT.size := by
+        have := UInt8.toNat_lt w.toUInt8
+        simp only [litIdxU, UInt8.toNat_toUSize]
+        omega
+      let e := litT.uget litIdxU he
+      let n : UInt32 := (e >>> 16) &&& 0xFF
+      let acc' := acc ||| (e.toUInt16.toUInt64 <<< bc.toUInt64)
+      let total := bc + n
+      if total ≥ 32 then
+        let k := total >>> 3
+        emitTokensWithCodesTAPTFlatFastLoopU
+          (BitWriter.flushBytesWideU data acc' k)
+          (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
+          tokens litT distT hlit hdist endU (off + 4) hend hbytes hoff'
+      else
+        emitTokensWithCodesTAPTFlatFastLoopU data acc' total.toUInt8.toUInt32
+          tokens litT distT hlit hdist endU (off + 4) hend hbytes hoff'
+    else
+      let lw := lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)
+      let idx := codeIdx lw
+      if hlitlt : idx + 257 < litT.size then
+        let e := litT[idx + 257]
+        let lenN : UInt32 := (e >>> 16) &&& 0xFF
+        let lenExtraN : UInt32 := ((lw >>> 8) &&& 0xFF)
+        let lenMask : UInt64 := (1 <<< lenExtraN.toUInt64) - 1
+        let lenBits : UInt64 :=
+          e.toUInt16.toUInt64 |||
+            ((codeVal lw).toUInt64 &&& lenMask) <<< lenN.toUInt64
+        let lenTotal := lenN + lenExtraN
+        let dw := distCodeWord ((w &&& 0xFFFF).toNat)
+        let dIdx := codeIdx dw
+        if hdistlt : dIdx < distT.size then
+          let de := distT[dIdx]
+          let distN : UInt32 := (de >>> 16) &&& 0xFF
+          let distExtraN : UInt32 := ((dw >>> 8) &&& 0xFF)
+          let distMask : UInt64 := (1 <<< distExtraN.toUInt64) - 1
+          let distOff := lenTotal
+          let bits : UInt64 :=
+            lenBits ||| (de.toUInt16.toUInt64 <<< distOff.toUInt64) |||
+              (((codeVal dw).toUInt64 &&& distMask) <<<
+                (distOff.toUInt64 + distN.toUInt64))
+          let n := lenTotal + distN + distExtraN
+          if bc + n ≥ 64 then
+            let k0 := bc >>> 3
+            let data0 := BitWriter.flushBytesWideU data acc k0
+            let acc0 := acc >>> (k0.toUInt64 <<< 3)
+            let bc0 := bc &&& 7
+            let acc' := acc0 ||| (bits <<< bc0.toUInt64)
+            let total := bc0 + n
+            if total ≥ 32 then
+              let k := total >>> 3
+              emitTokensWithCodesTAPTFlatFastLoopU
+                (BitWriter.flushBytesWideU data0 acc' k)
+                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
+                tokens litT distT hlit hdist endU (off + 4) hend hbytes hoff'
+            else
+              emitTokensWithCodesTAPTFlatFastLoopU data0 acc'
+                total.toUInt8.toUInt32 tokens litT distT hlit hdist endU
+                (off + 4) hend hbytes hoff'
+          else
+            let acc' := acc ||| (bits <<< bc.toUInt64)
+            let total := bc + n
+            if total ≥ 32 then
+              let k := total >>> 3
+              emitTokensWithCodesTAPTFlatFastLoopU
+                (BitWriter.flushBytesWideU data acc' k)
+                (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
+                tokens litT distT hlit hdist endU (off + 4) hend hbytes hoff'
+            else
+              emitTokensWithCodesTAPTFlatFastLoopU data acc'
+                total.toUInt8.toUInt32 tokens litT distT hlit hdist endU
+                (off + 4) hend hbytes hoff'
+        else
+          let acc' := acc ||| (lenBits <<< bc.toUInt64)
+          let total := bc + lenTotal
+          if total ≥ 32 then
+            let k := total >>> 3
+            emitTokensWithCodesTAPTFlatFastLoopU
+              (BitWriter.flushBytesWideU data acc' k)
+              (acc' >>> (k.toUInt64 <<< 3)) (total &&& 7).toUInt8.toUInt32
+              tokens litT distT hlit hdist endU (off + 4) hend hbytes hoff'
+          else
+            emitTokensWithCodesTAPTFlatFastLoopU data acc'
+              total.toUInt8.toUInt32 tokens litT distT hlit hdist endU
+              (off + 4) hend hbytes hoff'
+      else
+        emitTokensWithCodesTAPTFlatFastLoopU data acc bc
+          tokens litT distT hlit hdist endU (off + 4) hend hbytes hoff'
+  else
+    ⟨data, acc, bc.toUInt8⟩
+termination_by endU.toNat - off.toNat
+decreasing_by all_goals rw [hstep]; omega
+
+
+/-- Zero-entry native-cursor emitter.  The fallback is the established scalar
+    loop, so non-addressable model inputs preserve their exact behavior. -/
+@[inline] def emitTokensWithCodesTAPTFlatFastZeroU
+    (bw : BitWriter) (tokens : TokenArray) (litT distT : Array UInt32)
+    (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
+  if hg : tokens.bytes.size.toUSize.toNat = tokens.bytes.size then
+    have hbytes : tokens.bytes.size < USize.size := by
+      rw [← hg]
+      exact USize.toNat_lt_two_pow_numBits _
+    emitTokensWithCodesTAPTFlatFastLoopU bw.data bw.bitBuf
+      bw.bitCount.toUInt32 tokens litT distT hlit hdist
+      tokens.bytes.size.toUSize 0 hg hbytes (by decide)
+  else
+    emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf
+      bw.bitCount.toUInt32 tokens litT distT hlit hdist 0
+
 /-- Flat-state packed-table emitter used by the proof-gated single-block
     production core. -/
 def emitTokensWithCodesTAPTFlat (bw : BitWriter) (tokens : TokenArray)
@@ -428,8 +578,7 @@ termination_by tokens.size - i
 def emitTokensWithCodesTAPTFlatZero (bw : BitWriter) (tokens : TokenArray)
     (litT distT : Array UInt32)
     (hlit : litT.size ≥ 286) (hdist : distT.size ≥ 30) : BitWriter :=
-  emitTokensWithCodesTAPTFlatFastLoop bw.data bw.bitBuf bw.bitCount.toUInt32
-    tokens litT distT hlit hdist 0
+  emitTokensWithCodesTAPTFlatFastZeroU bw tokens litT distT hlit hdist
 
 /-- Logical proof helper for the flat emitter. The proof-gated single-block
     production route calls `emitTokensWithCodesTAPTFlatZero` directly and uses
@@ -960,10 +1109,12 @@ theorem dynBlockBytesWith_dynHeaderCodes (litFreqs distFreqs : Array Nat) (litLe
 -- and the `SizeHelpers` conformance tests are unaffected.
 attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockBytesWith
 
-/-- Hash-chain search depth per compression level. Higher levels generally
-    search deeper for longer matches (better ratio on diverse input) at higher
-    cost; the `chainWalk` early-stop keeps repetitive input fast at any depth.
-    The ratio gain saturates around 256–512 (measured), so level 9 caps there.
+/-- Hash-chain search-depth table for the generic/reference matchers and the
+    routed source points. Higher entries generally search deeper for longer
+    matches (better ratio on diverse input) at higher cost; the `chainWalk`
+    early-stop keeps repetitive input fast at any depth. The ratio gain
+    saturates around 256–512 (measured), so level 9 caps there. Public level 1
+    bypasses this table and uses the direct-head `(1, 0, 258)` policy below.
 
     **L4 is chain 16 in the greedy tier**, paired with `insertCap = 128`.
     Pinned production median-of-5 measurements place its 0.340536 geometric-
@@ -1006,8 +1157,9 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     runs straddled zero. That marginal result motivated content routing for the
     large-input L3–L5 ladder while preserving these exact source points.
 
-    Level 1 is the `deflate_fast` corner (#2726): depth `4` is exactly zlib
-    `-1`'s `max_chain`. A tokens-held-constant attribution on Silesia (see
+    The level-1 table entry is the established dense/reference `deflate_fast`
+    corner (#2726): depth `4` is exactly zlib `-1`'s `max_chain`. A
+    tokens-held-constant attribution on Silesia (see
     `ZipL1Attrib`/`ZipL1Sweep`) showed L1 is emit-bound — the token walk +
     `BitWriter` dominate, and fixed-only emission is *not* materially faster than
     the dynamic-arbitrated base while giving up 6.5–25% ratio, so fixed-only was
@@ -1029,19 +1181,21 @@ def chainDepth (level : UInt8) : Nat :=
   else if level ≤ 8 then 512
   else 1024
 
-/-- Per-level interior-insertion cap (zlib's `deflate_fast`/`deflate_slow` split):
-    greedy levels (1–4) defer interior `updateHashes` insertions for speed at a
-    ratio cost; lazy levels ≥ 5 insert every position. Level 4 uses cap 128, the
-    measured knee that places it above the L3↔L5 frontier. Level 1 uses the
-    aggressive `deflate_fast` cap of `2` (#2726): a re-measured Silesia sweep
+/-- Interior-insertion cap table for the generic/reference matchers and routed
+    source points (zlib's `deflate_fast`/`deflate_slow` split): greedy levels
+    (1–4) defer interior `updateHashes` insertions for speed at a ratio cost;
+    lazy levels ≥ 5 insert every position. Level 4 uses cap 128, the measured
+    knee that places it above the L3↔L5 frontier. The dense/reference level-1
+    entry retains the aggressive `deflate_fast` cap of `2` (#2726): a
+    re-measured Silesia sweep
     (`ZipL1Sweep`) showed the older `cap = 16` claim ("below ~16 is
     counterproductive") no longer holds for the packed emit path — at chain depth
     4, `cap = 2` is +12% end-to-end vs `cap = 16` because the interior-insertion
     saving outweighs the slightly higher token count the worse ratio produces
-    (the emit walk is the bound, not the cap). L2/L3 dropped to 8/32 with the
-    greedy re-grid (`l1-sweep2`), paired with their new chain depths. The chain
-    is a heuristic, so any cap stays correct (`lz77ChainIter_resolves` holds
-    ∀ cap). -/
+    (the emit walk is the bound, not the cap). Public L1 bypasses this table and
+    uses insert cap `0`; L2/L3 dropped to 8/32 with the greedy re-grid
+    (`l1-sweep2`), paired with their new chain depths. The chain is a heuristic,
+    so any cap stays correct (`lz77ChainIter_resolves` holds ∀ cap). -/
 def insertCap (level : UInt8) : Nat :=
   if level ≤ 1 then 2
   else if level ≤ 2 then 8
@@ -1077,8 +1231,9 @@ def goodMatch (level : UInt8) : Nat :=
     packed-emit landings): the libdeflate values (10/14, #2744) were costing
     ~0.5pp weighted-Silesia ratio for speed better bought by shallowing the
     chain instead — both old mid rows sat ~10% below the greedy-band mixing
-    frontier. Level 1 keeps `258` (no early-out) as before — at chain depth 4
-    the walk is already short, so a cutoff buys little there.
+    frontier. Both the dense/reference level-1 source and public direct-head L1
+    keep `258` (no early-out); on the former, the chain-depth-4 walk is already
+    short, so a cutoff buys little there.
 
     L4 also disables the cutoff at its greedy chain-16 point; lower cutoffs
     spend ratio that is better bought with the insertion cap. The earlier
@@ -1615,21 +1770,23 @@ def lazy2StepsLevel (level : UInt8) : Nat :=
   if level == 7 then 4
   else 1
 
-/-- The per-level LZ77 matcher: levels 1–4 use the greedy hash-chain matcher;
-    levels ≥ 5 use the one-byte-lookahead
+/-- Generic/reference per-level LZ77 matcher: levels 1–4 use the greedy
+    hash-chain matcher; levels ≥ 5 use the one-byte-lookahead
     lazy variant, which improves ratio at equal window/chain depth. Both share the
     same `(chainDepth, insertCap, niceLen)` ladder and satisfy the same encoder
     contracts (`lzMatch_{encodable,empty,resolves}` in `DeflateBlockSplit`), so the
     choice is transparent to the roundtrip proof. The lazy tier probes its `pos+1`
     lookahead at `lazyDepth` (half-depth), a heuristic knob invisible to the proof.
     Levels 6–8 additionally enable the hash3 length-3 singleton, content-gated by
-    `useH3For` (on only when the input classifies as low-compressibility). -/
+    `useH3For` (on only when the input classifies as low-compressibility). Its
+    level-1 branch is the retained dense/reference c4/i2 source; public L1 uses
+    `deflateRawL1DirectHead16` instead. -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
   if level == 7 then l7MatchFor data (l7ProfileFor data)
   else if 5 ≤ level then lz77ChainLazyIter data (lazyChainDepthFor data level) 32768 (insertCap level) (goodMatch level) (niceLen level) (lazyDepthFor data level) (useH3For data level) (lazy2StepsLevel level)
   else lz77ChainIter data (chainDepth level) 32768 (insertCap level) (niceLen level)
 
-/-- Packed-token form of `lzMatch` (Wave 3b stage A): the same per-level
+/-- Packed-token form of the generic/reference `lzMatch`: the same per-level
     dispatch over the packed matcher twins, producing one unboxed `UInt32`
     per token instead of a boxed `LZ77Token`. The boxed view recovers
     `lzMatch` exactly (`lzMatchP_map` in `Zip/Spec/LZ77PackedCorrect.lean`);
@@ -3033,8 +3190,9 @@ def deflateObsSplitSizedFreqsP (data : ByteArray) (toks : TokenArray)
         (BitWriter.emptyWithCapacity ((sp.1.1 + 7) / 8))).flush),
      sp.2)
 
-/-- The compressed-block dispatch (no stored fallback). Every level ≥ 1 uses the
-    hash-chain matcher with the level's search depth (`chainDepth`) and interior
+/-- The boxed/reference compressed-block dispatch (no stored fallback). Every
+    level ≥ 1 here uses the hash-chain matcher with the table's search depth
+    (`chainDepth`) and interior
     insertion cap (`insertCap`): low levels defer insertion + search shallowly
     (fast, lower ratio), high levels insert everything + search deeply (slower,
     best ratio). One shared token pass sizes the fixed and dynamic blocks and
@@ -3233,8 +3391,9 @@ def deflateRawBase (data : ByteArray) (level : UInt8) : ByteArray :=
 theorem deflateRawBaseP_def (data : ByteArray) (level : UInt8) :
     deflateRawBaseP data (lzMatchP data level) = deflateRawBase data level := rfl
 
-/-- Boxed-histogram fused base path. Level one uses the specialized native-word
-    outer loop; levels two through four retain the generic fused matcher. -/
+/-- Boxed-histogram fused reference path. Its level-one branch uses the
+    specialized native-word outer loop; levels two through four retain the
+    generic fused matcher. -/
 def deflateRawBaseFLevel1Impl (data : ByteArray) (level : UInt8) : ByteArray :=
   let fused :=
     if level == 1 then lz77ChainIterPMergedF1U data
@@ -3242,15 +3401,16 @@ def deflateRawBaseFLevel1Impl (data : ByteArray) (level : UInt8) : ByteArray :=
   let (ptokens, litF, distF) := fused
   deflateRawBasePF data ptokens (litF.val, distF.val)
 
-/-- Proven L1 path combining the native-word specialized outer loop with one
-    unboxed `ByteArray` histogram. The matcher entry owns the packing guard and
-    retains the boxed specialized implementation as its exact fallback. -/
+/-- Proven dense/reference level-one path combining the native-word specialized
+    outer loop with one unboxed `ByteArray` histogram. The matcher entry owns
+    the packing guard and retains the boxed specialized implementation as its
+    exact fallback. -/
 def deflateRawBaseFU64Level1 (data : ByteArray) : ByteArray :=
   let (ptokens, litF, distF) := lz77ChainIterPMergedF1U64 data
   deflateRawBasePF data ptokens (litF, distF)
 
-/-- The guarded wide-counter L1 implementation is byte-identical to the
-    established boxed-histogram fused implementation. -/
+/-- The guarded wide-counter dense/reference level-one implementation is
+    byte-identical to the established boxed-histogram fused implementation. -/
 theorem deflateRawBaseFU64Level1_eq (data : ByteArray) :
     deflateRawBaseFU64Level1 data = deflateRawBaseFLevel1Impl data 1 := by
   unfold deflateRawBaseFU64Level1 deflateRawBaseFLevel1Impl
@@ -3264,6 +3424,13 @@ def deflateRawBaseFNU64 (data : ByteArray)
     (maxChain insertCap niceLen : Nat) : ByteArray :=
   let (ptokens, litF, distF) :=
     lz77ChainIterPMergedFNU64 data maxChain insertCap niceLen
+  deflateRawBasePF data ptokens (litF, distF)
+
+/-- Public level-1 base path: a full 16-bit direct-head table fixed to
+    `(maxChain, insertCap, niceLen) = (1, 0, 258)`. -/
+def deflateRawL1DirectHead16 (data : ByteArray) : ByteArray :=
+  let (ptokens, litF, distF) :=
+    lz77ChainIterPMergedDirectHeadFNU64 data
   deflateRawBasePF data ptokens (litF, distF)
 
 /-- The parameterized wide base path is the established packed base at the same
@@ -3284,8 +3451,9 @@ theorem deflateRawBaseFNU64_eq (data : ByteArray)
       (lz77ChainIterP data maxChain 32768 insertCap niceLen))
 
 /-- Parameterized greedy matcher with a native-word outer loop and one unboxed
-    wide histogram.  Used by levels two through four; the matcher owns its
-    addressability guards and exact generic fallback. -/
+    wide histogram. It provides fixed greedy source points for fixed L2 and the
+    content-routed L3–L4 policies; the matcher owns its addressability guards
+    and exact generic fallback. -/
 def deflateRawBaseFU64Greedy (data : ByteArray) (level : UInt8) : ByteArray :=
   deflateRawBaseFNU64 data (chainDepth level) (insertCap level) (niceLen level)
 
@@ -3298,9 +3466,11 @@ theorem deflateRawBaseFU64Greedy_eq (data : ByteArray) (level : UInt8)
   rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
   rw [lz77ChainIterPMergedFNU64_eq, lz77ChainIterPMergedFNU_eq]
 
-/-- The greedy-tier (levels 1–4) base candidate computed from **one fused pass**.
-    Level 1 uses its fixed-policy guarded matcher; levels 2–4 use the guarded
-    parameterized native-word matcher.  All four keep their histograms in one
+/-- The reference greedy-tier (levels 1–4) base candidate computed from **one
+    fused pass**. Its level-one arm retains the dense c4/i2 guarded matcher;
+    public L1 bypasses this wrapper for `deflateRawL1DirectHead16`. Levels 2–4
+    use the guarded parameterized native-word matcher. All four reference arms
+    keep their histograms in one
     unboxed wide buffer and materialize the two arrays only once after matching,
     so base sizing/emission avoids a second token walk.
     Byte-identical to `deflateRawBase` on the greedy tier (`deflateRawBaseF_eq`). -/
@@ -3684,8 +3854,10 @@ def deflateRawL9AdaptiveP (data : ByteArray) : ByteArray :=
     So callers pinning `level = 9` for absolute best ratio should now pass 10.
     (The zlib/FFI bindings are a separate 0–9 path and are unchanged.)
 
-    Level 0 = stored and level 1 is the fused greedy single-block point. Levels
-    2, 6, and 9 are fixed policies. In the large-profile regime, levels 3–5
+    Level 0 is stored. Level 1 uses a full 16-bit direct-head table with one
+    candidate probe and no skipped-position insertion; level 2 retains the
+    denser fixed greedy policy. Levels 2, 6, and 9 are fixed policies. In the
+    large-profile regime, levels 3–5
     reuse level 7's content profile to select among fixed greedy L2/L4, the
     shared c8/i12 greedy point, split L5, and retained-profile L7. The regime
     begins exactly where the classifier changes to its four-region signal and
@@ -3887,8 +4059,7 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
     else if level == 4 then
       deflateRawL4Adaptive data
     else
-      -- Greedy base (level 1): fuse the whole-stream `tokenFreqsP` walk into
-      -- matching. Adaptive L3/L4 select among the same proven helpers above.
-      deflateRawBaseF data level
+      -- The remaining branch is level 1: the fixed 16-bit direct-head point.
+      deflateRawL1DirectHead16 data
 
 end Zip.Native.Deflate

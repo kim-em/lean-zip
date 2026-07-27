@@ -144,6 +144,70 @@ theorem ByteArray.ugetUInt64LE_eq_bytes (data : ByteArray) (o1 o2 : USize)
   · exact e6
   · exact e7
 
+/-! ### Three-byte wide-load prefix gate
+
+The direct-head level-one matcher rejects a candidate before entering the
+word-at-a-time extension loop unless the low three bytes of two four-byte
+loads agree.  These lemmas make that optimization proof-transparent: the
+masked-XOR test is exactly equality of the first three bytes, and starting
+`goUW` at offset three therefore agrees with ordinary `countMatch` whenever a
+DEFLATE reference (length at least three) is possible. -/
+
+/-- Masking the XOR of two little-endian four-byte words to 24 bits tests
+    exactly the first three component bytes; the fourth byte is irrelevant. -/
+theorem UInt32.recomb4LE_xor_low24_eq_zero_iff
+    (a0 a1 a2 a3 b0 b1 b2 b3 : UInt8) :
+    ((((a0.toUInt32 ||| (a1.toUInt32 <<< 8) ||| (a2.toUInt32 <<< 16) |||
+          (a3.toUInt32 <<< 24)) ^^^
+        (b0.toUInt32 ||| (b1.toUInt32 <<< 8) ||| (b2.toUInt32 <<< 16) |||
+          (b3.toUInt32 <<< 24))) &&& 0x00FFFFFF) = 0) ↔
+      a0 = b0 ∧ a1 = b1 ∧ a2 = b2 := by
+  bv_decide
+
+/-- Wide-load spelling of `UInt32.recomb4LE_xor_low24_eq_zero_iff`. -/
+theorem ByteArray.ugetUInt32LE_xor_low24_eq_zero_iff
+    (data : ByteArray) (o1 o2 : USize)
+    (h1 : o1.toNat + 4 ≤ data.size) (h2 : o2.toNat + 4 ≤ data.size) :
+    (((data.ugetUInt32LE o1 h1 ^^^ data.ugetUInt32LE o2 h2) &&&
+        0x00FFFFFF) = 0) ↔
+      data[o1.toNat]'(by omega) = data[o2.toNat]'(by omega) ∧
+      data[o1.toNat + 1]'(by omega) = data[o2.toNat + 1]'(by omega) ∧
+      data[o1.toNat + 2]'(by omega) = data[o2.toNat + 2]'(by omega) := by
+  simpa only [ByteArray.ugetUInt32LE] using
+    UInt32.recomb4LE_xor_low24_eq_zero_iff
+      (data[o1.toNat]'(by omega)) (data[o1.toNat + 1]'(by omega))
+      (data[o1.toNat + 2]'(by omega)) (data[o1.toNat + 3]'(by omega))
+      (data[o2.toNat]'(by omega)) (data[o2.toNat + 1]'(by omega))
+      (data[o2.toNat + 2]'(by omega)) (data[o2.toNat + 3]'(by omega))
+
+/-- A zero XOR of two little-endian four-byte words is exactly equality of all
+    four component bytes.  This is the full-word companion to the low-24-bit
+    prefix test above. -/
+theorem UInt32.recomb4LE_xor_eq_zero_iff
+    (a0 a1 a2 a3 b0 b1 b2 b3 : UInt8) :
+    (((a0.toUInt32 ||| (a1.toUInt32 <<< 8) ||| (a2.toUInt32 <<< 16) |||
+          (a3.toUInt32 <<< 24)) ^^^
+        (b0.toUInt32 ||| (b1.toUInt32 <<< 8) ||| (b2.toUInt32 <<< 16) |||
+          (b3.toUInt32 <<< 24))) = 0) ↔
+      a0 = b0 ∧ a1 = b1 ∧ a2 = b2 ∧ a3 = b3 := by
+  bv_decide
+
+/-- Wide-load spelling of `UInt32.recomb4LE_xor_eq_zero_iff`. -/
+theorem ByteArray.ugetUInt32LE_xor_eq_zero_iff
+    (data : ByteArray) (o1 o2 : USize)
+    (h1 : o1.toNat + 4 ≤ data.size) (h2 : o2.toNat + 4 ≤ data.size) :
+    (data.ugetUInt32LE o1 h1 ^^^ data.ugetUInt32LE o2 h2 = 0) ↔
+      data[o1.toNat]'(by omega) = data[o2.toNat]'(by omega) ∧
+      data[o1.toNat + 1]'(by omega) = data[o2.toNat + 1]'(by omega) ∧
+      data[o1.toNat + 2]'(by omega) = data[o2.toNat + 2]'(by omega) ∧
+      data[o1.toNat + 3]'(by omega) = data[o2.toNat + 3]'(by omega) := by
+  simpa only [ByteArray.ugetUInt32LE] using
+    UInt32.recomb4LE_xor_eq_zero_iff
+      (data[o1.toNat]'(by omega)) (data[o1.toNat + 1]'(by omega))
+      (data[o1.toNat + 2]'(by omega)) (data[o1.toNat + 3]'(by omega))
+      (data[o2.toNat]'(by omega)) (data[o2.toNat + 1]'(by omega))
+      (data[o2.toNat + 2]'(by omega)) (data[o2.toNat + 3]'(by omega))
+
 /-! ### Locating the first mismatching byte with count-trailing-zeros (#2736)
 
 On a word mismatch `goUW` returns `i + (ctz (w1 ^^^ w2) >>> 3)` — the first
@@ -469,6 +533,257 @@ theorem lz77Greedy.countMatch_matches (data : ByteArray) (p1 p2 maxLen : Nat)
   simp only [hgo]
   have h := lz77Greedy.go_matches data p1 p2 0 maxLen h1 h2 (by omega)
   exact ⟨fun j hj => h.1 j (by omega) hj, h.2.2⟩
+
+/-- The direct-head matcher's three-byte prefix gate is semantically just a
+    normalization of `countMatch`: matches of length at least three retain
+    their exact length, while shorter (non-encodable) matches become zero.
+
+    This is the bridge needed to compare the gated direct-head loop with the
+    established generic greedy loop, whose only observation of a candidate
+    length before emission is the `≥ 3` test. -/
+theorem lz77Greedy.goUW_prefix3_eq_countMatch_normalized
+    (data : ByteArray) (p1 p2 maxLen : USize)
+    (hsz : data.size < USize.size)
+    (h1 : p1.toNat + maxLen.toNat ≤ data.size)
+    (h2 : p2.toNat + maxLen.toNat ≤ data.size)
+    (hw1 : p1.toNat + 4 ≤ data.size)
+    (hw2 : p2.toNat + 4 ≤ data.size)
+    (h3 : (3 : USize).toNat ≤ maxLen.toNat) :
+    (let w1 := data.ugetUInt32LE p1 hw1
+     let w2 := data.ugetUInt32LE p2 hw2
+     (if ((w1 ^^^ w2) &&& 0x00FFFFFF) == 0 then
+        lz77Greedy.goUW data p1 p2 3 maxLen hsz h1 h2 h3
+      else 0).toNat) =
+      let ml := lz77Greedy.countMatch data p1.toNat p2.toNat maxLen.toNat h1 h2
+      if ml ≥ 3 then ml else 0 := by
+  dsimp only
+  have hthree : (3 : USize).toNat = 3 :=
+    USize.toNat_ofNat_of_lt
+      (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have hp1 : p1.toNat.toUSize = p1 := USize.ofNat_toNat
+  have hp2 : p2.toNat.toUSize = p2 := USize.ofNat_toNat
+  have hmax : maxLen.toNat.toUSize = maxLen := USize.ofNat_toNat
+  have h3u : (3 : Nat).toUSize = (3 : USize) := by
+    apply USize.toNat_inj.mp
+    rw [toUSize_toNat_of_lt (show 3 < USize.size by omega), hthree]
+  have hgoUW :
+      (lz77Greedy.goUW data p1 p2 3 maxLen hsz h1 h2 h3).toNat =
+        lz77Greedy.go data p1.toNat p2.toNat 3 maxLen.toNat h1 h2 := by
+    simpa only [hp1, hp2, hmax, h3u] using
+      (lz77Greedy.goUW_eq data p1.toNat p2.toNat 3 maxLen.toNat
+        hsz h1 h2 (by rw [hthree] at h3; exact h3) (by simpa only [hp1, hmax] using h1)
+        (by simpa only [hp2, hmax] using h2) (by
+          rw [toUSize_toNat_of_lt (show 3 < USize.size by omega), hmax]
+          simpa only [hthree] using h3))
+  have hcount :
+      lz77Greedy.countMatch data p1.toNat p2.toNat maxLen.toNat h1 h2 =
+        lz77Greedy.go data p1.toNat p2.toNat 0 maxLen.toNat h1 h2 := by
+    rw [lz77Greedy.countMatch]
+    split
+    · exact lz77Greedy.goUW_eq data p1.toNat p2.toNat 0 maxLen.toNat _
+        h1 h2 (by omega) _ _ (by simp)
+    · rfl
+  by_cases hg :
+      (((data.ugetUInt32LE p1 hw1 ^^^ data.ugetUInt32LE p2 hw2) &&&
+        0x00FFFFFF) == 0) = true
+  · have hpref :=
+      (ByteArray.ugetUInt32LE_xor_low24_eq_zero_iff data p1 p2 hw1 hw2).mp
+        (beq_iff_eq.mp hg)
+    have hbytes : ∀ k, k < 3 →
+        data[p1.toNat + k]! = data[p2.toNat + k]! := by
+      intro k hk
+      rcases (show k = 0 ∨ k = 1 ∨ k = 2 by omega) with rfl | rfl | rfl
+      · simp only [Nat.add_zero]
+        rw [getElem!_pos data p1.toNat (by omega),
+            getElem!_pos data p2.toNat (by omega)]
+        exact hpref.1
+      · rw [getElem!_pos data (p1.toNat + 1) (by omega),
+            getElem!_pos data (p2.toNat + 1) (by omega)]
+        exact hpref.2.1
+      · rw [getElem!_pos data (p1.toNat + 2) (by omega),
+            getElem!_pos data (p2.toNat + 2) (by omega)]
+        exact hpref.2.2
+    have hadv :
+        lz77Greedy.go data p1.toNat p2.toNat 0 maxLen.toNat h1 h2 =
+          lz77Greedy.go data p1.toNat p2.toNat 3 maxLen.toNat h1 h2 :=
+      lz77Greedy.go_advance data p1.toNat p2.toNat maxLen.toNat 3 h1 h2 0
+        (by rw [hthree] at h3; omega)
+        (by simpa only [Nat.zero_add, Nat.add_zero] using hbytes)
+    have hgeGo : 3 ≤
+        lz77Greedy.go data p1.toNat p2.toNat 3 maxLen.toNat h1 h2 :=
+      (lz77Greedy.go_matches data p1.toNat p2.toNat 3 maxLen.toNat h1 h2
+        (by rw [hthree] at h3; exact h3)).2.1
+    have heq :
+        (lz77Greedy.goUW data p1 p2 3 maxLen hsz h1 h2 h3).toNat =
+          lz77Greedy.countMatch data p1.toNat p2.toNat maxLen.toNat h1 h2 := by
+      rw [hgoUW, hcount, hadv]
+    have hge : lz77Greedy.countMatch data p1.toNat p2.toNat maxLen.toNat h1 h2 ≥ 3 := by
+      rw [← heq, hgoUW]
+      exact hgeGo
+    simp only [hg, ↓reduceIte, heq, hge]
+  · have hpref : ¬(
+        data[p1.toNat]'(by omega) = data[p2.toNat]'(by omega) ∧
+        data[p1.toNat + 1]'(by omega) = data[p2.toNat + 1]'(by omega) ∧
+        data[p1.toNat + 2]'(by omega) = data[p2.toNat + 2]'(by omega)) := by
+      intro hp
+      apply hg
+      apply beq_iff_eq.mpr
+      exact (ByteArray.ugetUInt32LE_xor_low24_eq_zero_iff
+        data p1 p2 hw1 hw2).mpr hp
+    have hlt :
+        lz77Greedy.countMatch data p1.toNat p2.toNat maxLen.toNat h1 h2 < 3 := by
+      apply Nat.lt_of_not_le
+      intro hge
+      have hm := lz77Greedy.countMatch_matches data p1.toNat p2.toNat
+        maxLen.toNat h1 h2
+      apply hpref
+      refine ⟨?_, ?_, ?_⟩
+      · rw [← getElem!_pos data p1.toNat (by omega),
+            ← getElem!_pos data p2.toNat (by omega)]
+        exact hm.1 0 (by omega)
+      · rw [← getElem!_pos data (p1.toNat + 1) (by omega),
+            ← getElem!_pos data (p2.toNat + 1) (by omega)]
+        exact hm.1 1 (by omega)
+      · rw [← getElem!_pos data (p1.toNat + 2) (by omega),
+            ← getElem!_pos data (p2.toNat + 2) (by omega)]
+        exact hm.1 2 (by omega)
+    simp only [if_neg hg, USize.toNat_zero,
+      if_neg (show ¬
+        lz77Greedy.countMatch data p1.toNat p2.toNat maxLen.toNat h1 h2 ≥ 3 by
+          omega)]
+
+/-- Four-byte refinement of the direct-head prefix gate.  After the low three
+    bytes agree, a differing fourth byte makes the exact match length three;
+    if all four bytes agree, starting the word walker at four skips precisely
+    the bytes already compared.  Thus the refined gate has the same normalized
+    `countMatch` result as the three-byte form above. -/
+theorem lz77Greedy.goUW_prefix4_eq_countMatch_normalized
+    (data : ByteArray) (p1 p2 maxLen : USize)
+    (hsz : data.size < USize.size)
+    (h1 : p1.toNat + maxLen.toNat ≤ data.size)
+    (h2 : p2.toNat + maxLen.toNat ≤ data.size)
+    (hw1 : p1.toNat + 4 ≤ data.size)
+    (hw2 : p2.toNat + 4 ≤ data.size)
+    (h4 : (4 : USize).toNat ≤ maxLen.toNat) :
+    (let w1 := data.ugetUInt32LE p1 hw1
+     let w2 := data.ugetUInt32LE p2 hw2
+     let diff := w1 ^^^ w2
+     (if (diff &&& 0x00FFFFFF) == 0 then
+        if diff == 0 then
+          lz77Greedy.goUW data p1 p2 4 maxLen hsz h1 h2 h4
+        else 3
+      else 0).toNat) =
+      let ml := lz77Greedy.countMatch data p1.toNat p2.toNat maxLen.toNat h1 h2
+      if ml ≥ 3 then ml else 0 := by
+  dsimp only
+  have hthree : (3 : USize).toNat = 3 :=
+    USize.toNat_ofNat_of_lt
+      (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have hfour : (4 : USize).toNat = 4 :=
+    USize.toNat_ofNat_of_lt
+      (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  have h4N : 4 ≤ maxLen.toNat := by
+    simpa only [hfour] using h4
+  have h3 : (3 : USize).toNat ≤ maxLen.toNat := by
+    rw [hthree]
+    omega
+  have hp1 : p1.toNat.toUSize = p1 := USize.ofNat_toNat
+  have hp2 : p2.toNat.toUSize = p2 := USize.ofNat_toNat
+  have hmax : maxLen.toNat.toUSize = maxLen := USize.ofNat_toNat
+  have h3u : (3 : Nat).toUSize = (3 : USize) := by
+    apply USize.toNat_inj.mp
+    rw [toUSize_toNat_of_lt (show 3 < USize.size by omega), hthree]
+  have h4u : (4 : Nat).toUSize = (4 : USize) := by
+    apply USize.toNat_inj.mp
+    rw [toUSize_toNat_of_lt (show 4 < USize.size by omega), hfour]
+  have hgo3 :
+      (lz77Greedy.goUW data p1 p2 3 maxLen hsz h1 h2 h3).toNat =
+        lz77Greedy.go data p1.toNat p2.toNat 3 maxLen.toNat h1 h2 := by
+    simpa only [hp1, hp2, hmax, h3u] using
+      (lz77Greedy.goUW_eq data p1.toNat p2.toNat 3 maxLen.toNat
+        hsz h1 h2 (by rw [hthree] at h3; exact h3)
+        (by simpa only [hp1, hmax] using h1)
+        (by simpa only [hp2, hmax] using h2) (by
+          rw [toUSize_toNat_of_lt (show 3 < USize.size by omega), hmax]
+          simpa only [hthree] using h3))
+  have hgo4 :
+      (lz77Greedy.goUW data p1 p2 4 maxLen hsz h1 h2 h4).toNat =
+        lz77Greedy.go data p1.toNat p2.toNat 4 maxLen.toNat h1 h2 := by
+    simpa only [hp1, hp2, hmax, h4u] using
+      (lz77Greedy.goUW_eq data p1.toNat p2.toNat 4 maxLen.toNat
+        hsz h1 h2 (by rw [hfour] at h4; exact h4)
+        (by simpa only [hp1, hmax] using h1)
+        (by simpa only [hp2, hmax] using h2) (by
+          rw [toUSize_toNat_of_lt (show 4 < USize.size by omega), hmax]
+          simpa only [hfour] using h4))
+  have hgate :
+      (if (((data.ugetUInt32LE p1 hw1 ^^^ data.ugetUInt32LE p2 hw2) &&&
+              0x00FFFFFF) == 0) then
+          if (data.ugetUInt32LE p1 hw1 ^^^ data.ugetUInt32LE p2 hw2) == 0 then
+            lz77Greedy.goUW data p1 p2 4 maxLen hsz h1 h2 h4
+          else 3
+        else 0).toNat =
+        (if (((data.ugetUInt32LE p1 hw1 ^^^ data.ugetUInt32LE p2 hw2) &&&
+              0x00FFFFFF) == 0) then
+          lz77Greedy.goUW data p1 p2 3 maxLen hsz h1 h2 h3
+        else 0).toNat := by
+    by_cases hp :
+        ((((data.ugetUInt32LE p1 hw1 ^^^ data.ugetUInt32LE p2 hw2) &&&
+          0x00FFFFFF) == 0) = true)
+    · have hpref :=
+        (ByteArray.ugetUInt32LE_xor_low24_eq_zero_iff
+          data p1 p2 hw1 hw2).mp (beq_iff_eq.mp hp)
+      by_cases hd :
+          ((data.ugetUInt32LE p1 hw1 ^^^
+            data.ugetUInt32LE p2 hw2) == 0) = true
+      · have hall :=
+          (ByteArray.ugetUInt32LE_xor_eq_zero_iff
+            data p1 p2 hw1 hw2).mp (beq_iff_eq.mp hd)
+        have hadv :
+            lz77Greedy.go data p1.toNat p2.toNat 3 maxLen.toNat h1 h2 =
+              lz77Greedy.go data p1.toNat p2.toNat 4 maxLen.toNat h1 h2 := by
+          simpa only [Nat.reduceAdd] using
+            (lz77Greedy.go_advance data p1.toNat p2.toNat maxLen.toNat 1 h1 h2 3
+              (by rw [hfour] at h4; omega) (by
+                intro k hk
+                have hk0 : k = 0 := by omega
+                subst k
+                simp only [Nat.add_zero]
+                rw [getElem!_pos data (p1.toNat + 3) (by omega),
+                  getElem!_pos data (p2.toNat + 3) (by omega)]
+                exact hall.2.2.2))
+        have heq :
+            (lz77Greedy.goUW data p1 p2 4 maxLen hsz h1 h2 h4).toNat =
+              (lz77Greedy.goUW data p1 p2 3 maxLen hsz h1 h2 h3).toNat := by
+          rw [hgo4, hgo3]
+          exact hadv.symm
+        simp only [hp, hd, ↓reduceIte]
+        exact heq
+      · have hfourNe :
+            data[p1.toNat + 3]'(by omega) ≠ data[p2.toNat + 3]'(by omega) := by
+          intro heq4
+          apply hd
+          apply beq_iff_eq.mpr
+          exact (ByteArray.ugetUInt32LE_xor_eq_zero_iff
+            data p1 p2 hw1 hw2).mpr
+              ⟨hpref.1, hpref.2.1, hpref.2.2, heq4⟩
+        have hbne :
+            ¬ data[p1.toNat + 3]'(by omega) == data[p2.toNat + 3]'(by omega) := by
+          intro hb
+          exact hfourNe (beq_iff_eq.mp hb)
+        have hstop :
+            lz77Greedy.go data p1.toNat p2.toNat 3 maxLen.toNat h1 h2 = 3 := by
+          rw [lz77Greedy.go, dif_pos (by rw [hfour] at h4; omega), if_neg hbne]
+        have heq :
+            (3 : USize).toNat =
+              (lz77Greedy.goUW data p1 p2 3 maxLen hsz h1 h2 h3).toNat := by
+          rw [hthree, hgo3, hstop]
+        simp only [hp, hd, ↓reduceIte]
+        exact heq
+    · simp only [if_neg hp, USize.toNat_zero]
+  exact hgate.trans
+    (lz77Greedy.goUW_prefix3_eq_countMatch_normalized
+      data p1 p2 maxLen hsz h1 h2 hw1 hw2 h3)
 
 /-! ## ValidDecomp predicate -/
 
