@@ -1,8 +1,8 @@
 {
  "meta": {
-  "date": "2026-07-27T11:10:06Z",
+  "date": "2026-07-27T22:07:19Z",
   "machine": "Linux chungus2 x86_64",
-  "git_commit": "88ed5fa0",
+  "git_commit": "137e00f7",
   "tar_bytes": 211957760,
   "reps": 9,
   "note": "Whole-tar L6 comparison: codec-CPU (native vs miniz through the bench harness) plus end-to-end wall of the real lean/rust CLIs. Peak RSS (end_to_end.{lean,rust}.maxrss_kb + rss_ratio) is now tracked too — the whole-tar memory footprint, so a compress PR can be reviewed on memory as well as speed/ratio."
@@ -11,36 +11,36 @@
   "note": "CODEC comparison, measured THROUGH the lean bench harness so both sides pay the same readBinFile + 202 MB ByteArray-alloc I/O and it CANCELS: native (bench csize) vs miniz_oxide (bench compress-miniz) on the whole silesia.tar (211957760 B), cold best-of-9. ms are wall-clock of fresh bench subprocesses; time_ratio_median is median per-rep native_ms/miniz_ms (<1.0 = native codec-CPU faster). This guards a ratio-tuning codec regression; it is NOT the end-to-end zip wall (see end_to_end).",
   "native": {
    "size": 68054183,
-   "ms_best": 4847.417,
-   "ms_median": 4881.001
+   "ms_best": 4571.057,
+   "ms_median": 4592.941
   },
   "miniz": {
    "size": 68112144,
-   "ms_best": 5826.195,
-   "ms_median": 5850.281
+   "ms_best": 5759.901,
+   "ms_median": 5765.263
   },
   "size_margin_pct": 0.0851,
-  "time_ratio_median": 0.8322
+  "time_ratio_median": 0.7965
  },
  "end_to_end": {
   "note": "END-TO-END comparison of two REAL CLI tools as fresh processes: lean compress-file (readBinFile -> deflateRaw -> print size) vs rust miniz-compress-file (std::fs::read -> compress_to_vec -> print len), cold best-of-9, alternating order. This IS the zip silesia.tar wall Kim benchmarks with hyperfine; each side pays its OWN file-read/alloc path (which the codec section cancels). wall_ratio_median is median per-rep lean_wall/rust_wall (>1.0 = rust wall-ahead, <1.0 = lean wall-ahead); read it rather than any prose here. wall/user/sys captured via the bash time builtin. PEAK RSS (maxrss_kb) is the whole-tar memory footprint of each CLI, captured with GNU time -v (Maximum resident set size); it is deterministic so one measured run per side suffices. rss_ratio is lean_maxrss_kb/rust_maxrss_kb: lean holds its whole DEFLATE token stream in memory while rust's miniz keeps only a bounded window, so this ratio is the memory cost of the token pipeline (the target of the token-unboxing work).",
   "lean": {
    "size": 68054183,
-   "wall_ms_best": 4841.000,
-   "wall_ms_median": 4865.000,
-   "user_ms": 4674.000,
-   "sys_ms": 167.000,
-   "maxrss_kb": 486088
+   "wall_ms_best": 4556.000,
+   "wall_ms_median": 4571.000,
+   "user_ms": 4468.000,
+   "sys_ms": 85.000,
+   "maxrss_kb": 492112
   },
   "rust": {
    "size": 68112144,
-   "wall_ms_best": 5779.000,
-   "wall_ms_median": 5790.000,
-   "user_ms": 5687.000,
-   "sys_ms": 79.000,
-   "maxrss_kb": 276140
+   "wall_ms_best": 5770.000,
+   "wall_ms_median": 5774.000,
+   "user_ms": 5676.000,
+   "sys_ms": 78.000,
+   "maxrss_kb": 276116
   },
-  "wall_ratio_median": 0.8403,
-  "rss_ratio": 1.7603
+  "wall_ratio_median": 0.7918,
+  "rss_ratio": 1.7823
  }
 }

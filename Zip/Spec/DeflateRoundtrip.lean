@@ -2,6 +2,8 @@ import Zip.Spec.DeflateFixedCorrect
 import Zip.Spec.DeflateDynamicCorrect
 import Zip.Spec.LZ77ChainCorrect
 import Zip.Spec.LZ77PackedCorrect
+import Zip.Spec.DeflateFreqsFusedCorrect
+import Zip.Spec.DeflatePackedHeadCorrect
 import Zip.Spec.DeflateBaseFreqsReuse
 import Zip.Spec.DeflateBlockSplit
 import Zip.Spec.SplitWalkerPackedCorrect
@@ -12,8 +14,8 @@ import Zip.Spec.SplitWalkerPackedCorrect
 Proves the unified roundtrip theorem for `deflateRaw`:
 `inflate (deflateRaw data level) = .ok data`.
 
-`deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is stored
-and level 1 is the single-block cost-model point. Levels 2, 6, and 9 are fixed
+`deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is stored,
+level 1 uses the direct-head packed matcher, and levels 2, 6, and 9 are fixed
 policies. In the classifier's large-input regime, levels 3–5 use a content
 profile to select among proven greedy, split, and retained-profile L7
 constituents, with no upper size cutoff. Level 7 uses its retained profile
@@ -120,6 +122,18 @@ theorem inflate_deflateCompressed (data : ByteArray) (level : UInt8)
       (cEnc data level) (fun hz => cEmpty data level hz)
       (cRes data level) _ (by omega)
 
+/-- The direct-head L1 source is the established packed depth-one matcher
+    presented through its fused token/frequency entry point. -/
+private theorem deflateRawL1DirectHead16_eq_baseP (data : ByteArray) :
+    deflateRawL1DirectHead16 data =
+      deflateRawBaseP data (lz77ChainIterP data 1 32768 0 258) := by
+  unfold deflateRawL1DirectHead16
+  rw [lz77ChainIterPMergedDirectHeadFNU64_eq data]
+  dsimp only
+  simpa only [tokenFreqsPTA_toArray] using
+    (deflateRawBasePF_tokenFreqsP data
+      (lz77ChainIterP data 1 32768 0 258))
+
 set_option maxRecDepth 8000 in
 /-- Roundtrip for the single-block cost-model dispatch (`deflateRawBase`): the
     `deflateRaw` level-≥1 base without the block-split candidates.
@@ -169,6 +183,14 @@ theorem inflate_deflateRawBaseFNU64 (data : ByteArray)
       (cGreedyEnc data maxChain insertCap niceLen)
       (fun hz => cGreedyEmpty data maxChain insertCap niceLen hz)
       (cGreedyRes data maxChain insertCap niceLen) _ hsize
+
+private theorem inflate_deflateRawL1DirectHead16 (data : ByteArray)
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
+    Zip.Native.Inflate.inflateReference
+        (deflateRawL1DirectHead16 data) maxOutputSize = .ok data := by
+  rw [deflateRawL1DirectHead16_eq_baseP,
+    ← deflateRawBaseFNU64_eq data 1 0 258]
+  exact inflate_deflateRawBaseFNU64 data 1 0 258 maxOutputSize hsize
 
 set_option maxHeartbeats 1000000 in
 set_option maxRecDepth 8000 in
@@ -280,10 +302,13 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
       (deflateRawAdaptiveFast data) maxOutputSize = .ok data := by
     unfold deflateRawAdaptiveFast
     exact inflate_deflateRawBaseFNU64 data 8 12 258 maxOutputSize hsize
+  have hl1 : Zip.Native.Inflate.inflateReference
+      (deflateRawL1DirectHead16 data) maxOutputSize = .ok data :=
+    inflate_deflateRawL1DirectHead16 data maxOutputSize hsize
   have hl2 : Zip.Native.Inflate.inflateReference
       (deflateRawL2Adaptive data) maxOutputSize = .ok data := by
     unfold deflateRawL2Adaptive
-    exact hgreedyLevel 2 (by decide)
+    exact hgreedyLevel 1 (by decide)
   have hl3 : Zip.Native.Inflate.inflateReference
       (deflateRawL3Adaptive data) maxOutputSize = .ok data := by
     unfold deflateRawL3Adaptive
@@ -383,7 +408,7 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
           · exact hl3
           · split
             · exact hl4
-            · exact hgreedyLevel level (by assumption)
+            · exact hl1
 
 /-- Padding decomposition for the compressed-block dispatch. -/
 theorem deflateCompressed_pad (data : ByteArray) (level : UInt8) :
@@ -495,6 +520,14 @@ theorem deflateRawBaseFNU64_pad (data : ByteArray)
   · exact hstored
   · exact hdyn
 
+private theorem deflateRawL1DirectHead16_pad (data : ByteArray) :
+    ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (deflateRawL1DirectHead16 data) =
+        contentBits ++ padding ∧ padding.length < 8 := by
+  rw [deflateRawL1DirectHead16_eq_baseP,
+    ← deflateRawBaseFNU64_eq data 1 0 258]
+  exact deflateRawBaseFNU64_pad data 1 0 258
+
 set_option maxHeartbeats 1000000 in
 /-- The output of `deflateRaw` decomposes into content bits plus short padding.
     This is needed by `inflateRaw_endPos_ge` to establish that the native decoder
@@ -604,11 +637,15 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
         contentBits ++ padding ∧ padding.length < 8 := by
     unfold deflateRawAdaptiveFast
     exact deflateRawBaseFNU64_pad data 8 12 258
+  have hl1 : ∃ (contentBits padding : List Bool),
+      Deflate.Spec.bytesToBits (deflateRawL1DirectHead16 data) =
+        contentBits ++ padding ∧ padding.length < 8 :=
+    deflateRawL1DirectHead16_pad data
   have hl2 : ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (deflateRawL2Adaptive data) =
         contentBits ++ padding ∧ padding.length < 8 := by
     unfold deflateRawL2Adaptive
-    exact hgreedyLevel 2 (by decide)
+    exact hgreedyLevel 1 (by decide)
   have hl3 : ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (deflateRawL3Adaptive data) =
         contentBits ++ padding ∧ padding.length < 8 := by
@@ -737,7 +774,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
           · exact hl3
           · split
             · exact hl4
-            · exact hgreedyLevel level (by assumption)
+            · exact hl1
 
 /-- `goR` short-remaining for a fixed-Huffman block over the lazy token stream —
     the level 2-4 path and the level ≥ 5 fixed candidate (both `= deflateLazy`). -/
@@ -906,6 +943,15 @@ theorem deflateRawBaseFNU64_goR_pad (data : ByteArray)
       (fun hz => cGreedyEmpty data maxChain insertCap niceLen hz)
       (cGreedyRes data maxChain insertCap niceLen)
 
+private theorem deflateRawL1DirectHead16_goR_pad (data : ByteArray) :
+    ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (deflateRawL1DirectHead16 data)) [] =
+        some (data.data.toList, remaining) ∧ remaining.length < 8 := by
+  rw [deflateRawL1DirectHead16_eq_baseP,
+    ← deflateRawBaseFNU64_eq data 1 0 258]
+  exact deflateRawBaseFNU64_goR_pad data 1 0 258
+
 set_option maxHeartbeats 1000000 in
 /-- For the encoder's output, `decode.goR` returns a short remaining (< 8 bits).
     This is the key fact connecting encoder structure to decoder bit consumption,
@@ -1025,12 +1071,17 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
         some (data.data.toList, remaining) ∧ remaining.length < 8 := by
     unfold deflateRawAdaptiveFast
     exact deflateRawBaseFNU64_goR_pad data 8 12 258
+  have hl1 : ∃ remaining,
+      Deflate.Spec.decode.goR
+          (Deflate.Spec.bytesToBits (deflateRawL1DirectHead16 data)) [] =
+        some (data.data.toList, remaining) ∧ remaining.length < 8 :=
+    deflateRawL1DirectHead16_goR_pad data
   have hl2 : ∃ remaining,
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits (deflateRawL2Adaptive data)) [] =
         some (data.data.toList, remaining) ∧ remaining.length < 8 := by
     unfold deflateRawL2Adaptive
-    exact hgreedyLevel 2 (by decide)
+    exact hgreedyLevel 1 (by decide)
   have hl3 : ∃ remaining,
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits (deflateRawL3Adaptive data)) [] =
@@ -1175,7 +1226,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
           · exact hl3
           · split
             · exact hl4
-            · exact hgreedyLevel level (by assumption)
+            · exact hl1
 
 /-- The encoder always produces exactly one valid raw-DEFLATE stream for its
     input, as judged by the independent formal bitstream specification. -/

@@ -26,6 +26,7 @@ import ZipTest.BoundedReadTest
 import ZipTest.InflateTable
 import ZipTest.OptimalParse
 import ZipTest.PackedTokens
+import ZipTest.PackedHeads
 import ZipTest.SizeHelpers
 import ZipTest.L7Adaptive
 
@@ -58,6 +59,7 @@ def main : IO Unit := do
   ZipTest.NativeDeflate.tests
   ZipTest.OptimalParse.tests
   ZipTest.PackedTokens.tests
+  ZipTest.PackedHeads.tests
   ZipTest.SizeHelpers.tests
   ZipTest.L7Adaptive.tests
   ZipTest.NativeCompressBench.tests

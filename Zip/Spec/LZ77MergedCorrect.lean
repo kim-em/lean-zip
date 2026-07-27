@@ -756,6 +756,8 @@ private theorem greedyMergedLoop_eq (data : ByteArray)
           (prev.set! (pos &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!))
           windowSize pos (min 258 (data.size - pos)) niceLen (by omega)
           (hashTable[lz77Greedy.hash3 data pos hashSize hlt]!) maxChain 0 0 = rmain
+        unfold lz77ChainIterPPostProbe
+        dsimp only
         split
         · split
           · rw [updateHashesMergedGuarded_eq,

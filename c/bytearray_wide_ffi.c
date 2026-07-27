@@ -1,5 +1,5 @@
 /*
- * Word-sized little-endian ByteArray loads for the DEFLATE hot loops.
+ * Word-sized little-endian ByteArray loads and stores for the DEFLATE hot loops.
  *
  * `lean_zip_uget_u32le(a, off)` reads a 4-byte little-endian word starting at
  * byte `off` of `a`, returning an unboxed scalar. Its Lean reference body is the
@@ -20,6 +20,12 @@
  * the bytes at `off` are within the array. `a` is borrowed (`b_lean_obj_arg`);
  * the offset is a `size_t` (Lean `USize`), kept unboxed so a hot loop's index
  * arithmetic never boxes.
+ *
+ * `lean_zip_uset_u32le(a, off, v)` is the four-byte writer twin used by the
+ * packed level-one hash-head table (`0` is unseen; a position is stored as
+ * `position + 1`). Its Lean model is four ordinary `ByteArray.set`s. The
+ * argument is owned, so the hot recursive path stores directly when exclusive;
+ * a shared array is copied first to preserve ByteArray value semantics.
  *
  * This is a project-local stopgap mirroring the reader of lean#14053 (`wide
  * fixed-width load/store`); the symbols are namespaced `lean_zip_*` so they do
@@ -44,6 +50,22 @@ LEAN_EXPORT uint32_t lean_zip_uget_u32le(b_lean_obj_arg a, size_t off) {
     const uint8_t *p = lean_sarray_cptr(a) + off;
     return (uint32_t)p[0]         | ((uint32_t)p[1] << 8) |
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/*
+ * lean_zip_uset_u32le : ByteArray → USize → UInt32 → ByteArray
+ *   (a owned, off an unboxed size_t, v an unboxed uint32_t)
+ */
+LEAN_EXPORT lean_obj_res lean_zip_uset_u32le(lean_obj_arg a, size_t off, uint32_t v) {
+    lean_obj_res r;
+    if (lean_is_exclusive(a)) r = a;
+    else r = lean_copy_byte_array(a);
+    uint8_t *p = lean_sarray_cptr(r) + off;
+    p[0] = (uint8_t)(v);
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+    return r;
 }
 
 /*

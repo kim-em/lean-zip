@@ -74,17 +74,15 @@ private def checkCoresP (label : String) (data : ByteArray) : IO Unit := do
         s!"{label} level {level}: deflateDynamicBlockCoreP ({dynP.size} bytes) ≠ \
            deflateDynamicBlockCore ({dynB.size} bytes)")
 
-/-- Compiled-path gate for the specialized level-one matcher.  Compare the
-    production native-word/wide-histogram entry first with its boxed specialized
-    twin, then with the pre-specialization generic fused entry.  The final
-    `deflateRawBase*` comparison also exercises the actual production shell and
-    its established packed reference; no proof equality is used to discharge
-    any of these runtime checks. -/
-private def checkL1WideFused (label : String) (data : ByteArray) : IO Unit := do
+/-- Compiled-path gate for the former dense level-one source point, retained as
+    a reference implementation. Compare its native-word/wide-histogram entry
+    first with its boxed specialized twin, then with the generic fused entry.
+    No proof equality is used to discharge these runtime checks. -/
+private def checkDenseL1WideFused (label : String) (data : ByteArray) : IO Unit := do
   let (wideTokens, wideLit, wideDist) := lz77ChainIterPMergedF1U64 data
   let (boxedTokens, boxedLit, boxedDist) := lz77ChainIterPMergedF1U data
   let (genericTokens, genericLit, genericDist) :=
-    lz77ChainIterPMergedF data 4 32768 2 258
+    lz77ChainIterPMergedF data 4 32768 3 258
   unless wideTokens.toArray == boxedTokens.toArray do
     throw (IO.userError
       s!"{label}: lz77ChainIterPMergedF1U64 token stream \
@@ -115,11 +113,49 @@ private def checkL1WideFused (label : String) (data : ByteArray) : IO Unit := do
     throw (IO.userError
       s!"{label}: deflateRawBaseFU64Level1 ({production.size} bytes) ≠ \
          established deflateRawBase L1 ({established.size} bytes)")
+  unless incompressiblePrescan data do
+    let publicL2 := deflateRaw data 2
+    unless publicL2 == production do
+      throw (IO.userError
+        s!"{label}: public L2 ({publicL2.size} bytes) ≠ \
+           promoted dense c4/i3 source ({production.size} bytes)")
 
-/-- Compiled-path gate for the parameterized level-two through level-four
-    specialization.  Compare native-wide, native-boxed, and generic fused token
-    streams and histograms, then compare both the specialized and production
-    byte output with the established packed base path. -/
+/-- Compiled-path gate for the selected 16-bit direct-head L1 matcher.  Its
+    tokens and fused histograms must equal the generic one-probe/zero-insert
+    reference at the same 65536-entry hash width. On inputs that bypass the
+    shared incompressibility pre-scan, public level 1 selects this exact helper. -/
+private def checkL1DirectHead16 (label : String) (data : ByteArray) : IO Unit := do
+  let (directTokens, directLit, directDist) :=
+    lz77ChainIterPMergedDirectHeadFNU64 data
+  let prevSize := min chainWinSize data.size
+  let (referenceTokens, referenceLit, referenceDist) :=
+    lz77GreedyMergedLoopF data 32768 65536 prevSize 1 0 258
+      (.replicate (prevSize + 65536) data.size) 0
+      (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
+  unless directTokens.toArray == referenceTokens.toArray do
+    throw (IO.userError
+      s!"{label}: direct-head-16 token stream ≠ generic c1/i0/65536 reference \
+         ({directTokens.size} vs {referenceTokens.size} tokens)")
+  unless directLit == referenceLit.val && directDist == referenceDist.val do
+    throw (IO.userError
+      s!"{label}: direct-head-16 fused histograms ≠ generic c1/i0/65536 reference")
+  let counted := tokenFreqsPTA directTokens
+  unless directLit == counted.1 && directDist == counted.2 do
+    throw (IO.userError
+      s!"{label}: direct-head-16 fused histograms ≠ compiled tokenFreqsPTA recount")
+  unless incompressiblePrescan data do
+    let production := deflateRaw data 1
+    let selected := deflateRawL1DirectHead16 data
+    unless production == selected do
+      throw (IO.userError
+        s!"{label}: public L1 ({production.size} bytes) ≠ \
+           selected direct-head-16 helper ({selected.size} bytes)")
+
+/-- Compiled-path gate for the retained level-indexed c8/i8 through c16/i128
+    sources. Compare native-wide, native-boxed, and generic fused token streams
+    and histograms, then compare both the specialized and level-indexed wrapper
+    byte output with the established packed base path. Public L2's promoted
+    dense c4/i3 path is checked independently above. -/
 private def checkL2To4WideFused (label : String) (data : ByteArray) : IO Unit := do
   for level in [(2 : UInt8), 3, 4] do
     let maxChain := chainDepth level
@@ -155,16 +191,13 @@ private def checkL2To4WideFused (label : String) (data : ByteArray) : IO Unit :=
       throw (IO.userError
         s!"{label} L{level}: parameterized production output mismatch \
            ({specialized.size}/{production.size}/{boxedOut.size}/{established.size} bytes)")
-
-/-- Compiled-path gate for the shared c8/i12 adaptive source point.  Unlike the
-    fixed L2–L4 policies above, this policy is not named by a public level, so
-    compare its native-wide matcher directly with both the native-boxed and
-    generic fused entries, independently recount the histograms, and compare
-    the emitted bytes with the established packed base pipeline. -/
-private def checkAdaptiveFastWideFused (label : String) (data : ByteArray) : IO Unit := do
-  let maxChain := 8
-  let cap := 12
-  let nice := 258
+/-- Compiled-path gate for a fixed parameterized greedy source point. Compare
+    its native-wide matcher directly with both the native-boxed and generic
+    fused entries, independently recount the histograms, and compare the
+    emitted bytes with the established packed base pipeline. This covers the
+    c8/i12 adaptive source independently of any public-level dispatch. -/
+private def checkConfiguredWideFused (label config : String) (data : ByteArray)
+    (maxChain cap nice : Nat) : IO Unit := do
   let (wideTokens, wideLit, wideDist) :=
     lz77ChainIterPMergedFNU64 data maxChain cap nice
   let (boxedTokens, boxedLit, boxedDist) :=
@@ -173,26 +206,26 @@ private def checkAdaptiveFastWideFused (label : String) (data : ByteArray) : IO 
     lz77ChainIterPMergedF data maxChain 32768 cap nice
   unless wideTokens.toArray == boxedTokens.toArray do
     throw (IO.userError
-      s!"{label} adaptive-fast: wide/native-boxed token mismatch \
+      s!"{label} {config}: wide/native-boxed token mismatch \
          ({wideTokens.size} vs {boxedTokens.size} tokens)")
   unless wideLit == boxedLit.val && wideDist == boxedDist.val do
     throw (IO.userError
-      s!"{label} adaptive-fast: wide/native-boxed histogram mismatch")
+      s!"{label} {config}: wide/native-boxed histogram mismatch")
   unless wideTokens.toArray == genericTokens.toArray do
     throw (IO.userError
-      s!"{label} adaptive-fast: wide/generic token mismatch \
+      s!"{label} {config}: wide/generic token mismatch \
          ({wideTokens.size} vs {genericTokens.size} tokens)")
   unless wideLit == genericLit.val && wideDist == genericDist.val do
-    throw (IO.userError s!"{label} adaptive-fast: wide/generic histogram mismatch")
+    throw (IO.userError s!"{label} {config}: wide/generic histogram mismatch")
   let counted := tokenFreqsPTA wideTokens
   unless wideLit == counted.1 && wideDist == counted.2 do
-    throw (IO.userError s!"{label} adaptive-fast: wide histogram ≠ token recount")
+    throw (IO.userError s!"{label} {config}: wide histogram ≠ token recount")
   let specialized := deflateRawBaseFNU64 data maxChain cap nice
   let established :=
     deflateRawBaseP data (lz77ChainIterP data maxChain 32768 cap nice)
   unless specialized == established do
     throw (IO.userError
-      s!"{label} adaptive-fast: specialized/established output mismatch \
+      s!"{label} {config}: specialized/established output mismatch \
          ({specialized.size}/{established.size} bytes)")
 
 /-- Direct compiled conformance for the narrowly routed flat token emitter and
@@ -202,7 +235,7 @@ private def checkAdaptiveFastWideFused (label : String) (data : ByteArray) : IO 
     comparison can miss; comparing `flush` observes the complete bit sequence
     while intentionally ignoring when each implementation drains full bytes. -/
 private def checkFlatDynamicP (label : String) (data : ByteArray) : IO Unit := do
-  let ptoks := lzMatchP data 1
+  let ptoks := (lz77ChainIterPMergedDirectHeadFNU64 data).1
   let f := tokenFreqsPTA ptoks
   let lens := dynamicCodeLengths f.1 f.2
   let plan := dynHeaderCodes lens.1 lens.2
@@ -415,11 +448,10 @@ def tests : IO Unit := do
   checkCoresP "size1" (ByteArray.mk #[42])
   checkCoresP "size2" (ByteArray.mk #[42, 42])
   checkCoresP "size3" (ByteArray.mk #[7, 7, 7])
-  -- The production L1 implementation has two nested refinements that broad
-  -- roundtrip coverage does not isolate: native-word outer matcher state and
-  -- wide byte-backed frequency counters.  Exercise the <3 fallback, the
-  -- three-byte hash tail, the four-byte wide-hash boundary, long max-length
-  -- matches, literal-heavy input, a 32 KiB window-edge repeat, and real text.
+  -- Isolate both the retained dense source point and the production direct-head
+  -- L1 path. Exercise the <3 fallback, the three-byte hash tail, the four-byte
+  -- wide-hash boundary, long max-length matches, literal-heavy input, a 32 KiB
+  -- window-edge repeat, and real text.
   let l1Text64k := mkTextData 65536
   let l1Constant64k := mkConstantData 65536
   let l1Prng64k := mkPrngData 65536
@@ -432,9 +464,10 @@ def tests : IO Unit := do
        ("constant64k", l1Constant64k), ("prng64k", l1Prng64k),
        ("window-edge64k", l1WindowEdge), ("text64k", l1Text64k),
        ("alice29", alice)] do
-    checkL1WideFused label data
+    checkDenseL1WideFused label data
+    checkL1DirectHead16 label data
     checkL2To4WideFused label data
-    checkAdaptiveFastWideFused label data
+    checkConfiguredWideFused label "adaptive-fast-c8/i12" data 8 12 258
 
   -- Force the flat emitter independently of stored/fixed/dynamic arbitration.
   -- The three nonempty shapes cover reference-heavy, literal-heavy, and mixed

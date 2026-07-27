@@ -2042,6 +2042,36 @@ def trailingPT (data : ByteArray) (pos : Nat) (acc : TokenArray) : TokenArray :=
   else acc
 termination_by data.size - pos
 
+/-- One active iteration of the packed greedy matcher. Keeping the
+    non-recursive state transition separate gives correctness proofs a compact
+    equation. The inlined post-probe helper below keeps the reference loop's
+    shape after compilation; production levels use the fused matchers. -/
+structure LZ77ChainIterPNext (data : ByteArray) (startPos : Nat) where
+  hashTable : Array Nat
+  prev : Array Nat
+  nextPos : Nat
+  acc : TokenArray
+  decreases : data.size - nextPos < data.size - startPos
+
+@[inline] def lz77ChainIterPPostProbe (data : ByteArray)
+    (hashSize insertCap : Nat)
+    (hashTable : Array Nat) (prev : Array Nat) (pos : Nat) (acc : TokenArray)
+    (hlt : pos + 2 < data.size) (walk : Nat) : LZ77ChainIterPNext data pos :=
+  let matchLen := walk % 512
+  let matchPos := walk / 512
+  if hge : matchLen ≥ 3 then
+    if hle : pos + matchLen ≤ data.size then
+      let (hashTable, prev) :=
+        updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
+      ⟨hashTable, prev, pos + matchLen,
+        acc.push (packTok (.reference matchLen (pos - matchPos))), by omega⟩
+    else
+      ⟨hashTable, prev, pos + 1,
+        acc.push (packTok (.literal (data[pos]'(by omega)))), by omega⟩
+  else
+    ⟨hashTable, prev, pos + 1,
+      acc.push (packTok (.literal (data[pos]'(by omega)))), by omega⟩
+
 /-- Packed-token twin of `lz77ChainIter` (greedy hash-chain matcher):
     identical control flow and chain state, `Array UInt32` accumulator.
     Equal to `(lz77ChainIter ..).map packTok` (`lz77ChainIterP_eq`). -/
@@ -2066,26 +2096,16 @@ where
       let prev := guardedSet prev (pos &&& 0x7FFF) head
       let maxLen := min 258 (data.size - pos)
       have hmaxLenP : pos + maxLen ≤ data.size := by omega
-      let r := chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen hmaxLenP head maxChain 0 0
-      let matchLen := r % 512
-      let matchPos := r / 512
-      if hge : matchLen ≥ 3 then
-        if hle : pos + matchLen ≤ data.size then
-          have : data.size - (pos + matchLen) < data.size - pos := by omega
-          let (hashTable, prev) :=
-            updateHashesGuarded data hashSize hashTable prev pos 1 matchLen insertCap
-          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + matchLen)
-            (acc.push (packTok (.reference matchLen (pos - matchPos))))
-        else
-          mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + 1)
-            (acc.push (packTok (.literal (data[pos]'(by omega)))))
-      else
-        mainLoop data windowSize hashSize maxChain insertCap niceLen hashTable prev (pos + 1)
-          (acc.push (packTok (.literal (data[pos]'(by omega)))))
+      let walk := chainWalkGuardedPackedU data prev windowSize pos maxLen niceLen
+        hmaxLenP head maxChain 0 0
+      let next := lz77ChainIterPPostProbe data hashSize insertCap hashTable prev
+        pos acc hlt walk
+      mainLoop data windowSize hashSize maxChain insertCap niceLen
+        next.hashTable next.prev next.nextPos next.acc
     else
       trailingPT data pos acc
   termination_by data.size - pos
-  decreasing_by all_goals omega
+  decreasing_by exact next.decreases
 
 mutual
 

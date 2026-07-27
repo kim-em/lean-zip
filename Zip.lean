@@ -48,6 +48,7 @@ import Zip.Spec.SplitWalkerPackedCorrect
 import Zip.Native.DeflateFreqs
 import Zip.Native.DeflateFreqsFused
 import Zip.Spec.DeflateFreqsFusedCorrect
+import Zip.Spec.DeflatePackedHeadCorrect
 import Zip.Native.DeflateParse
 import Zip.Spec.LZ77NativeCorrect
 import Zip.Spec.LZ77OptimalCorrect
