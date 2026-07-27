@@ -23,12 +23,15 @@ the static SVGs) and local animation previews. Ratios are deterministic;
 throughput is a **median-of-5 snapshot of the machine recorded in the JSON
 `meta`, for every corpus**. The producer records `meta.timing_aggregation =
 "median"` and `meta.timing_reps = 5`; merge and plot tools reject routine
-snapshots that do not declare that protocol. Commit the JSON and static SVGs,
-then run `bench/run.sh --history-only` and commit the two tracked history SVGs
-in a separate commit. Do not amend the data commit afterward: its SHA, date,
-and subject are embedded in the animation frame. For the same reason, merge a
-dashboard-refresh PR with a **merge commit**, never squash or rebase it; either
-history-rewriting method changes the embedded commit identity after CI runs.
+snapshots that do not declare that protocol. Routine before/after claims must
+compare two median-of-5 snapshots produced with this same protocol; exploratory
+single-shot timings are useful for tuning, but are not dashboard evidence.
+Commit the JSON and static SVGs, then run `bench/run.sh --history-only` and
+commit the two tracked history SVGs in a separate commit. Do not amend the data
+commit afterward: its SHA, date, and subject are embedded in the animation
+frame. For the same reason, merge a dashboard-refresh PR with a **merge
+commit**, never squash or rebase it; either history-rewriting method changes
+the embedded commit identity after CI runs.
 
 > **Benchmark machine: chungus2 (since 2026-07-05).** The canonical machine moved
 > from `chungus` to `chungus2`. The two are indistinguishable on throughput —
@@ -52,7 +55,7 @@ implementations (no SIMD/asm, or GC'd, or JIT'd) — not just the C + SIMD ceili
 
 | Key | Implementation | Role |
 |-----|----------------|------|
-| `native` | lean-zip pure-Lean DEFLATE | the thing we are improving; swept **levels 1–10** — level 9 is adaptive within 5–64 MiB (exact L8/L10 source points, retaining L9-fast outside that band) and level 10 is the exact-DP crown (always sweep through 10 so the crown stays on the Pareto) |
+| `native` | lean-zip pure-Lean DEFLATE | the thing we are improving; swept **levels 1–10** — levels 2–6 and 9 use bounded content-adaptive routes only within the inclusive 5–64 MiB band, retaining their established pipelines outside it; level 9 selects exact L8/L10 source points in-band, and level 10 is the exact-DP crown (always sweep through 10 so the crown stays on the Pareto) |
 | `zlib` | system zlib (FFI) | the ubiquitous baseline |
 | `miniz_oxide` | Rust miniz_oxide (FFI) | widely-used Rust reimplementation |
 | `zlib_rs` | [zlib-rs](https://github.com/trifectatechfoundation/zlib-rs) via Rust `flate2` | optimized pure-Rust zlib implementation; the comparator enables only flate2's zlib-rs backend and emits raw DEFLATE |
@@ -120,6 +123,15 @@ files land).
   and use the same median-of-5 timing policy as Canterbury. This makes a full
   refresh slower, but prevents one-shot Silesia noise from masquerading as a
   high-level regression.
+
+The content-adaptive routes at native levels 2–6 and 9 were selected on
+Silesia and are deliberately limited to the inclusive 5–64 MiB input-size
+band. Canterbury files fall below the lower gate; whole-corpus tarballs and
+enwik-style 100 MB inputs exceed the upper gate. Those workloads therefore
+retain the established pipelines and serve as bypass regression controls.
+Silesia's largest individual file is 51,220,480 bytes (~51.2 MB, 48.8 MiB), so
+the rest of the band through 64 MiB is a conservative boundary range, not an
+independently tuned or corpus-validated workload region.
 
 The synthetic `prng` pattern used to be the only incompressible workload; its
 replacement is **real** poorly-compressible files in the corpora (Silesia `sao`,
