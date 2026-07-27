@@ -1151,8 +1151,8 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     packed-emit landings shifted the tier's cost balance): with the `niceLen`
     cutoff disabled (see there), (chain 8, cap 8) matched the then-public L2's
     weighted-Silesia ratio exactly at +12% speed and remains the compatibility
-    source named `.level2` by adaptive L3; public L2 now promotes the former
-    dense c4/i2 L1 source
+    source named `.level2` by adaptive L3; public L2 now promotes the retained
+    dense c4/i3 level-one source
     below. The (chain 16, cap 32) point beats the old L3 on both axes — the old
     rows sat ~10% below the greedy-band mixing frontier. Before the adaptive
     re-grid below,
@@ -1161,13 +1161,14 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     runs straddled zero. That marginal result motivated content routing for the
     large-input L3–L5 ladder while preserving these exact source points.
 
-    The level-1 table entry is the established dense/reference `deflate_fast`
-    corner (#2726): depth `4` is exactly zlib `-1`'s `max_chain`. A
+    The level-1 table entry is the retained dense/reference `deflate_fast`
+    corner, retuned from #2726's c4/i2 point to the selected c4/i3 point: the
+    chain stays at depth `4` while the insertion cap rises to `3`. A
     tokens-held-constant attribution on Silesia (see
     `ZipL1Attrib`/`ZipL1Sweep`) showed L1 is emit-bound — the token walk +
     `BitWriter` dominate, and fixed-only emission is *not* materially faster than
     the dynamic-arbitrated base while giving up 6.5–25% ratio, so fixed-only was
-    rejected. Shallowing the chain (8→4) alongside an aggressive insert cap
+    rejected. The original chain shallowing (8→4) alongside an aggressive insert cap
     (`insertCap`, 16→2) is the precedented fast policy that keeps the normal
     stored/static/dynamic arbitration: +19% end-to-end MB/s on Silesia (56.0→66.4,
     in-binary A/B on a quiet pinned core) at a +4.2% geomean-ratio cost
@@ -1190,19 +1191,20 @@ def chainDepth (level : UInt8) : Nat :=
     (1–4) defer interior `updateHashes` insertions for speed at a ratio cost;
     lazy levels ≥ 5 insert every position. Level 4 uses cap 128, the measured
     knee that places it above the L3↔L5 frontier. The dense/reference level-1
-    entry retains the aggressive `deflate_fast` cap of `2` (#2726): a
-    re-measured Silesia sweep
+    entry uses the selected `deflate_fast` cap of `3`, one step denser than
+    #2726's aggressive cap of `2`. A re-measured Silesia sweep
     (`ZipL1Sweep`) showed the older `cap = 16` claim ("below ~16 is
     counterproductive") no longer holds for the packed emit path — at chain depth
-    4, `cap = 2` is +12% end-to-end vs `cap = 16` because the interior-insertion
+    4, `cap = 2` was +12% end-to-end vs `cap = 16` because the interior-insertion
     saving outweighs the slightly higher token count the worse ratio produces
     (the emit walk is the bound, not the cap). Public L1 bypasses this table and
-    uses insert cap `0`; public L2 also bypasses it for its fixed c4/i2 source.
+    uses insert cap `0`; public L2 bypasses the table at runtime through its
+    literal-specialized c4/i3 source, which is proved equal to this table entry.
     The retained `.level2` and L3 sources dropped to caps 8/32 with the greedy
     re-grid (`l1-sweep2`), paired with their new chain depths. The chain is a
     heuristic, so any cap stays correct (`lz77ChainIter_resolves` holds ∀ cap). -/
 def insertCap (level : UInt8) : Nat :=
-  if level ≤ 1 then 2
+  if level ≤ 1 then 3
   else if level ≤ 2 then 8
   else if level ≤ 3 then 32
   else if level ≤ 4 then 128
@@ -1650,7 +1652,7 @@ def l7ProfileFor (data : ByteArray) : L7Profile := Id.run do
 
 Levels 3–5 reuse level 7's allocation-free large-input content profile. The
 route constructors name fixed production pipelines: `.level2` is the retained
-c8/i8 former-public-L2 source (not today's c4/i2 public L2), `.level4` is the
+c8/i8 former-public-L2 source (not today's c4/i3 public L2), `.level4` is the
 c16/i128 greedy point, `.level5` is split level 5, and `.level7` is
 retained-profile level 7. Keeping the constituents separate prevents recursive
 calls through the public level dispatch.
@@ -1785,7 +1787,7 @@ def lazy2StepsLevel (level : UInt8) : Nat :=
     lookahead at `lazyDepth` (half-depth), a heuristic knob invisible to the proof.
     Levels 6–8 additionally enable the hash3 length-3 singleton, content-gated by
     `useH3For` (on only when the input classifies as low-compressibility). Its
-    level-1 branch is the retained dense/reference c4/i2 source; public L1 uses
+    level-1 branch is the retained dense/reference c4/i3 source; public L1 uses
     `deflateRawL1DirectHead16` instead. -/
 def lzMatch (data : ByteArray) (level : UInt8) : Array LZ77Token :=
   if level == 7 then l7MatchFor data (l7ProfileFor data)
@@ -3473,7 +3475,7 @@ theorem deflateRawBaseFU64Greedy_eq (data : ByteArray) (level : UInt8)
   rw [lz77ChainIterPMergedFNU64_eq, lz77ChainIterPMergedFNU_eq]
 
 /-- The reference greedy-tier (levels 1–4) base candidate computed from **one
-    fused pass**. Its level-one arm retains the dense c4/i2 guarded matcher;
+    fused pass**. Its level-one arm retains the dense c4/i3 guarded matcher;
     public L1 bypasses this wrapper for `deflateRawL1DirectHead16`. Levels 2–4
     use the guarded parameterized native-word matcher. All four reference arms
     keep their histograms in one
@@ -3772,15 +3774,15 @@ def deflateRawAdaptiveFast (data : ByteArray) : ByteArray :=
   deflateRawBaseFNU64 data 8 12 258
 
 /-- Fixed level-2 bridge between the direct-head L1 and the denser greedy tier.
-    This promotes the former public L1's proven c4/i2 implementation wholesale:
-    the new L1→L2 segment therefore retains that old fast-frontier endpoint,
+    This promotes the retained literal-specialized level-one implementation,
+    retuned to c4/i3: the new L1→L2 segment therefore retains the fast endpoint,
     while the L2→L3 segment absorbs the retired c8/i8 public point within the
     dashboard's paired frontier tolerance. -/
 def deflateRawL2Adaptive (data : ByteArray) : ByteArray :=
   deflateRawBaseF data 1
 
 /-- Adaptive L3 core. The compatibility name `.level2` deliberately selects
-    the retained c8/i8 former-L2 source rather than today's c4/i2 public L2.
+    the retained c8/i8 former-L2 source rather than today's c4/i3 public L2.
     Every named route is a pre-adaptive exact helper, so this function never
     recurses through the public dispatch. -/
 def deflateRawL3Adaptive (data : ByteArray) : ByteArray :=
@@ -3868,7 +3870,7 @@ def deflateRawL9AdaptiveP (data : ByteArray) : ByteArray :=
 
     Level 0 is stored. Level 1 uses a full 16-bit direct-head table with one
     candidate probe and no skipped-position insertion; level 2 promotes the
-    former dense c4/i2 level-1 policy. Levels 2, 6, and 9 are fixed
+    retained dense c4/i3 level-one policy. Levels 2, 6, and 9 are fixed
     policies. In the
     large-profile regime, levels 3–5
     reuse level 7's content profile to select among the retained c8/i8

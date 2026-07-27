@@ -82,7 +82,7 @@ private def checkDenseL1WideFused (label : String) (data : ByteArray) : IO Unit 
   let (wideTokens, wideLit, wideDist) := lz77ChainIterPMergedF1U64 data
   let (boxedTokens, boxedLit, boxedDist) := lz77ChainIterPMergedF1U data
   let (genericTokens, genericLit, genericDist) :=
-    lz77ChainIterPMergedF data 4 32768 2 258
+    lz77ChainIterPMergedF data 4 32768 3 258
   unless wideTokens.toArray == boxedTokens.toArray do
     throw (IO.userError
       s!"{label}: lz77ChainIterPMergedF1U64 token stream \
@@ -118,7 +118,7 @@ private def checkDenseL1WideFused (label : String) (data : ByteArray) : IO Unit 
     unless publicL2 == production do
       throw (IO.userError
         s!"{label}: public L2 ({publicL2.size} bytes) ≠ \
-           promoted dense c4/i2 source ({production.size} bytes)")
+           promoted dense c4/i3 source ({production.size} bytes)")
 
 /-- Compiled-path gate for the selected 16-bit direct-head L1 matcher.  Its
     tokens and fused histograms must equal the generic one-probe/zero-insert
@@ -155,7 +155,7 @@ private def checkL1DirectHead16 (label : String) (data : ByteArray) : IO Unit :=
     sources. Compare native-wide, native-boxed, and generic fused token streams
     and histograms, then compare both the specialized and level-indexed wrapper
     byte output with the established packed base path. Public L2's promoted
-    dense c4/i2 path is checked independently above. -/
+    dense c4/i3 path is checked independently above. -/
 private def checkL2To4WideFused (label : String) (data : ByteArray) : IO Unit := do
   for level in [(2 : UInt8), 3, 4] do
     let maxChain := chainDepth level

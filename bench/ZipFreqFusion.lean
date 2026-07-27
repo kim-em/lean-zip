@@ -6,7 +6,7 @@ walk over the packed token array. The greedy matcher already touches every token
 as it pushes it, so counting frequencies *there* would eliminate the re-read.
 This exe measures whether that fusion is worth doing before any proof work:
 
-* **matcher alone**    — `lz77ChainIterPMerged data 4` (the retained dense c4/i2
+* **matcher alone**    — `lz77ChainIterPMerged data 4 32768 3 258` (the retained dense c4/i3
                           reference path)
 * **matcher + freqs**  — a copy of the greedy merged loop that also threads the
                           two histogram arrays, bumping at each `acc.push` site
@@ -79,7 +79,7 @@ partial def fusedGreedyLoop (data : ByteArray)
   else
     fusedTrailing data pos acc litF distF
 
-/-- Fused entry mirroring `lz77ChainIterPMerged` at L1 knobs (chain 4, cap 2,
+/-- Fused entry mirroring `lz77ChainIterPMerged` at L1 knobs (chain 4, cap 3,
     niceLen 258). Returns the tokens and the two histograms in one pass. -/
 def fusedMatchWithFreqs (data : ByteArray) (maxChain insertCap niceLen : Nat) :
     Array UInt32 × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
@@ -144,9 +144,9 @@ call forces a genuine recomputation every iteration. -/
 
 def analyzeFile (name : String) (data : ByteArray) (iters reps : Nat) : IO Unit := do
   let size := data.size
-  -- Retained dense/reference knobs: chain 4, cap 2, niceLen 258.
+  -- Retained dense/reference knobs: chain 4, cap 3, niceLen 258.
   let maxChain := 4
-  let insertCap := 2
+  let insertCap := 3
   let niceLen := 258
   -- Correctness sanity: fused tokens == real matcher tokens, fused freqs ==
   -- tokenFreqsP over those tokens.
@@ -193,7 +193,7 @@ Both full-compress paths exist in-code (`deflateRawBase` is the unfused referenc
 `deflateRawBaseF` supplies production source points at levels 2–4), so this A/B
 isolates the fusion on the whole compress inside one binary, with a same-binary
 noise floor (unfused timed twice). At level 1 it compares the retained dense
-c4/i2 source, not the public direct-head route. -/
+c4/i3 source, not the public direct-head route. -/
 
 @[noinline] def opBaseOld (data : ByteArray) (level : UInt8) (salt : Nat) : Nat :=
   (deflateRawBase data level).size + (salt &&& 1)

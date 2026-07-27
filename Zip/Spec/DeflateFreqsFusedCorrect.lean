@@ -662,7 +662,7 @@ theorem directHeadPrefixMatch_chainOne_bounded (data : ByteArray)
       maxLenU.toNat 258 hposMax head hmax511, dif_neg hcN]
     simp
 
-/-- One native cap-2 insertion is the corresponding guarded `Nat` insertion
+/-- One native insertion from the fixed cap-three prefix is the corresponding guarded `Nat` insertion
     step, before the latter's recursive call. -/
 private theorem insertHashL1U_eq (data : ByteArray) (prevSize pos j : Nat)
     (dataSizeU prevSizeU posU jU : USize) (c : Array Nat)
@@ -671,7 +671,7 @@ private theorem insertHashL1U_eq (data : ByteArray) (prevSize pos j : Nat)
     (hfit : data.size * 512 + 511 < USize.size)
     (hprev : prevSize ≤ chainWinSize)
     (hcs : prevSize + 65536 ≤ c.size) (hpos : posU.toNat ≤ data.size)
-    (hj : jU.toNat ≤ 2) :
+    (hj : jU.toNat ≤ 3) :
     (insertHashL1U data prevSize dataSizeU prevSizeU posU jU c
       hds hpsU hfit hprev hcs hpos hj).val =
       if h : pos + j + 2 < data.size then
@@ -720,52 +720,95 @@ private theorem insertHashL1U_eq (data : ByteArray) (prevSize pos j : Nat)
     simp only [Array.uget, Array.uset, eset, eget, eidx, emask, epj]
   · rw [dif_neg (fun h => hd (hcond.mp h)), dif_neg hd]
 
-/-- For a reference (`matchLen ≥ 3`), the two fixed level-one insertions are
-    exactly the generic `j = 1`, cap-2 merged update. -/
-private theorem insertHashL1U_cap2_eq (data : ByteArray) (prevSize : Nat)
-    (dataSizeU prevSizeU posU : USize) (c : Array Nat)
+/-- For a reference, the fixed first two insertions plus the third insertion
+    guarded by `3 < matchLen` are exactly the generic cap-3 merged update. -/
+private theorem insertHashL1U_cap3_eq (data : ByteArray) (prevSize : Nat)
+    (dataSizeU prevSizeU posU matchLenU : USize) (c : Array Nat)
     (hds : dataSizeU.toNat = data.size) (hpsU : prevSizeU.toNat = prevSize)
     (hfit : data.size * 512 + 511 < USize.size)
     (hprev : prevSize ≤ chainWinSize)
     (hcs : prevSize + 65536 ≤ c.size) (hpos : posU.toNat ≤ data.size)
-    (matchLen : Nat) (hml : 3 ≤ matchLen) :
+    (hml : 3 ≤ matchLenU.toNat) :
     let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 c
       hds hpsU hfit hprev hcs hpos (by rw [USize.toNat_one]; omega)
     let hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcs
     let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
       hds hpsU hfit hprev hc1s hpos (by
-        rw [USize.toNat_ofNat]
-        exact Nat.le_of_eq (Nat.mod_eq_of_lt
-          (Nat.lt_of_lt_of_le (by decide) USize.le_size)))
-    c2.val = updateHashesMergedGuarded data 65536 prevSize c posU.toNat 1 matchLen 2 := by
+        have h2 : (2 : USize).toNat = 2 :=
+          USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+        omega)
+    let hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
+    let c3 : {a : Array Nat // a.size = c2.val.size} :=
+      if 3 < matchLenU then
+        insertHashL1U data prevSize dataSizeU prevSizeU posU 3 c2.val
+          hds hpsU hfit hprev hc2s hpos (by
+            have h3 : (3 : USize).toNat = 3 :=
+              USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+            omega)
+      else ⟨c2.val, rfl⟩
+    c3.val = updateHashesMergedGuarded data 65536 prevSize c posU.toNat 1
+      matchLenU.toNat 3 := by
   let c1 := insertHashL1U data prevSize dataSizeU prevSizeU posU 1 c
     hds hpsU hfit hprev hcs hpos (by rw [USize.toNat_one]; omega)
   have hc1s : prevSize + 65536 ≤ c1.val.size := by rw [c1.property]; exact hcs
-  let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
-    hds hpsU hfit hprev hc1s hpos (by
-      rw [USize.toNat_ofNat]
-      exact Nat.le_of_eq (Nat.mod_eq_of_lt
-        (Nat.lt_of_lt_of_le (by decide) USize.le_size)))
-  change c2.val = _
-  have hc1eq := insertHashL1U_eq data prevSize posU.toNat 1 dataSizeU prevSizeU posU 1 c
-    hds hpsU rfl USize.toNat_one hfit hprev hcs hpos (by rw [USize.toNat_one]; omega)
   have h2nat : (2 : USize).toNat = 2 :=
     USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
+    hds hpsU hfit hprev hc1s hpos (by rw [h2nat]; omega)
+  have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
+  have h3nat : (3 : USize).toNat = 3 :=
+    USize.toNat_ofNat_of_lt (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+  let c3 : {a : Array Nat // a.size = c2.val.size} :=
+    if 3 < matchLenU then
+      insertHashL1U data prevSize dataSizeU prevSizeU posU 3 c2.val
+        hds hpsU hfit hprev hc2s hpos (by rw [h3nat]; omega)
+    else ⟨c2.val, rfl⟩
+  change c3.val = _
+  have hc1eq := insertHashL1U_eq data prevSize posU.toNat 1 dataSizeU prevSizeU posU 1 c
+    hds hpsU rfl USize.toNat_one hfit hprev hcs hpos (by rw [USize.toNat_one]; omega)
   have hc2eq := insertHashL1U_eq data prevSize posU.toNat 2 dataSizeU prevSizeU posU 2 c1.val
     hds hpsU rfl h2nat hfit hprev hc1s hpos (by rw [h2nat]; omega)
-  rw [updateHashesMergedGuarded_eq]
-  rw [hc2eq, hc1eq]
-  by_cases h1 : posU.toNat + 1 + 2 < data.size <;>
-    by_cases h2 : posU.toNat + 2 + 2 < data.size <;>
-      simp only [h1, h2, ↓reduceDIte]
-  all_goals
-    rw [updateHashesMerged, if_pos (by omega)]
-    simp only [h1, ↓reduceDIte]
-    rw [updateHashesMerged, if_pos (by omega)]
-    simp only [h2, ↓reduceDIte]
-    rw [updateHashesMerged, if_neg (by omega)]
-  all_goals
-    simp only [headProbeGuarded_eq, guardedSet_eq, Nat.reduceAdd]
+  by_cases hcap : (3 : USize) < matchLenU
+  · have hcapN : 3 < matchLenU.toNat := by
+      have h := USize.lt_iff_toNat_lt.mp hcap
+      rwa [h3nat] at h
+    have hc3eq := insertHashL1U_eq data prevSize posU.toNat 3 dataSizeU prevSizeU posU 3 c2.val
+      hds hpsU rfl h3nat hfit hprev hc2s hpos (by rw [h3nat]; omega)
+    simp only [c3, hcap, ↓reduceIte]
+    rw [updateHashesMergedGuarded_eq]
+    rw [hc3eq, hc2eq, hc1eq]
+    by_cases h1 : posU.toNat + 1 + 2 < data.size <;>
+      by_cases h2 : posU.toNat + 2 + 2 < data.size <;>
+        by_cases h3 : posU.toNat + 3 + 2 < data.size <;>
+          simp only [h1, h2, h3, ↓reduceDIte]
+    all_goals
+      rw [updateHashesMerged, if_pos (by omega)]
+      simp only [h1, ↓reduceDIte]
+      rw [updateHashesMerged, if_pos (by omega)]
+      simp only [h2, ↓reduceDIte]
+      rw [updateHashesMerged, if_pos (by omega)]
+      simp only [h3, ↓reduceDIte]
+      rw [updateHashesMerged, if_neg (by omega)]
+    all_goals
+      simp only [headProbeGuarded_eq, guardedSet_eq, Nat.reduceAdd]
+  · have hcapN : ¬ 3 < matchLenU.toNat := by
+      intro h
+      exact hcap (USize.lt_iff_toNat_lt.mpr (by rwa [h3nat]))
+    have hmlEq : matchLenU.toNat = 3 := by omega
+    simp only [c3, hcap, ↓reduceIte]
+    rw [updateHashesMergedGuarded_eq]
+    rw [hc2eq, hc1eq]
+    by_cases h1 : posU.toNat + 1 + 2 < data.size <;>
+      by_cases h2 : posU.toNat + 2 + 2 < data.size <;>
+        simp only [h1, h2, ↓reduceDIte]
+    all_goals
+      rw [updateHashesMerged, if_pos (by omega)]
+      simp only [h1, ↓reduceDIte]
+      rw [updateHashesMerged, if_pos (by omega)]
+      simp only [h2, ↓reduceDIte]
+      rw [updateHashesMerged, if_neg (by omega)]
+    all_goals
+      simp only [headProbeGuarded_eq, guardedSet_eq, Nat.reduceAdd]
 
 /-- Updating an in-bounds array slot with a bounded value preserves a pointwise
     bound on every slot. -/
@@ -789,7 +832,7 @@ private theorem insertHashL1U_bounded (data : ByteArray) (prevSize : Nat)
     (hfit : data.size * 512 + 511 < USize.size)
     (hprev : prevSize ≤ chainWinSize)
     (hcs : prevSize + 65536 ≤ c.size) (hpos : posU.toNat ≤ data.size)
-    (hj : jU.toNat ≤ 2)
+    (hj : jU.toNat ≤ 3)
     (hc : ∀ i, i < c.size → c[i]! ≤ data.size) :
     ∀ i, i < (insertHashL1U data prevSize dataSizeU prevSizeU posU jU c
       hds hpsU hfit hprev hcs hpos hj).val.size →
@@ -841,7 +884,7 @@ private theorem eqTrans3Opaque {α : Sort u} {a b c d : α}
 
 /- The reference branch is deliberately an opaque declaration of its own.
    Besides keeping the outer strong-recursion term small, this keeps the
-   cap-two insertion proof and the dependent recursive-call transports out of
+   cap-three insertion proof and the dependent recursive-call transports out of
    the kernel term for the common one-step normalization. -/
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 200000 in
@@ -866,7 +909,7 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
     (hgeCommon : walk % 512 ≥ 3)
     (hleCommon : posU.toNat + walk % 512 ≤ data.size)
     (hsum : (posU + (rU &&& 0x1FF)).toNat = posU.toNat + walk % 512)
-    (h2 : (2 : USize).toNat = 2)
+    (h2 : (2 : USize).toNat = 2) (h3 : (3 : USize).toNat = 3)
     (n : Nat) (hn : data.size - posU.toNat = n)
     (ih : ∀ (m : Nat), m < n →
       ∀ (c' : Array Nat) (hcs' : prevSize + 65536 ≤ c'.size)
@@ -878,7 +921,7 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
         data.size - posU'.toNat = m →
         lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
             hpv hprev c' hcs' posU' hpos' acc' litF' distF' =
-          lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+          lz77GreedyMergedLoopF data 32768 65536 prevSize 4 3 258
             c' posU'.toNat acc' litF' distF') :
     let hcsRingS : prevSize + 65536 ≤ cRingS.size := by
       rw [ecRingS]
@@ -893,6 +936,14 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
     let hc2s : prevSize + 65536 ≤ c2.val.size := by
       rw [c2.property]
       exact hc1s
+    let c3 : {a : Array Nat // a.size = c2.val.size} :=
+      if 3 < (rRaw &&& 0x1FF) then
+        insertHashL1U data prevSize dataSizeU prevSizeU posU 3 c2.val
+          hds hpsU hfit hprev hc2s hpos (by rw [h3]; omega)
+      else ⟨c2.val, rfl⟩
+    let hc3s : prevSize + 65536 ≤ c3.val.size := by
+      rw [c3.property]
+      exact hc2s
     let nextRaw := posU + (rRaw &&& 0x1FF)
     let hrawBound : nextRaw.toNat ≤ data.size := by
       simp only [nextRaw, erRaw]
@@ -901,12 +952,12 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
     let wRaw := packTok (.reference (rRaw &&& 0x1FF).toNat
       (posU - (rRaw >>> 9)).toNat)
     let updated := updateHashesMergedGuarded data 65536 prevSize cRing
-      posU.toNat 1 (walk % 512) 2
+      posU.toNat 1 (walk % 512) 3
     let wN := packTok (.reference (walk % 512) (posU.toNat - walk / 512))
     lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
-        hpv hprev c2.val hc2s nextRaw hrawBound
+        hpv hprev c3.val hc3s nextRaw hrawBound
         (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) =
-      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258 updated
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 3 258 updated
         (posU.toNat + walk % 512) (acc.push wN)
         (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN) := by
   simp only
@@ -941,6 +992,8 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
   have hmlU : 3 ≤ (rU &&& 0x1FF).toNat := by
     rw [hlow]
     exact hgeCommon
+  have hmlRaw : 3 ≤ (rRaw &&& 0x1FF).toNat := by
+    simpa only [erRaw] using hmlU
   have hcsRingS : prevSize + 65536 ≤ cRingS.size := by
     rw [ecRingS]
     exact hcsRing
@@ -959,16 +1012,32 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
   have hc2b : ∀ i, i < c2.val.size → c2.val[i]! ≤ data.size :=
     insertHashL1U_bounded data prevSize dataSizeU prevSizeU posU 2 c1.val
       hds hpsU hfit hprev hc1s hpos (by rw [h2]; omega) hc1b
-  have hc12 : c2.val = updateHashesMergedGuarded data 65536 prevSize cRing
-      posU.toNat 1 (walk % 512) 2 := by
+  let c3 : {a : Array Nat // a.size = c2.val.size} :=
+    if 3 < (rRaw &&& 0x1FF) then
+      insertHashL1U data prevSize dataSizeU prevSizeU posU 3 c2.val
+        hds hpsU hfit hprev hc2s hpos (by rw [h3]; omega)
+    else ⟨c2.val, rfl⟩
+  have hc3s : prevSize + 65536 ≤ c3.val.size := by
+    rw [c3.property]
+    exact hc2s
+  have hc3b : ∀ i, i < c3.val.size → c3.val[i]! ≤ data.size := by
+    dsimp only [c3]
+    split
+    · exact insertHashL1U_bounded data prevSize dataSizeU prevSizeU posU 3 c2.val
+        hds hpsU hfit hprev hc2s hpos (by rw [h3]; omega) hc2b
+    · exact hc2b
+  have hc123 : c3.val = updateHashesMergedGuarded data 65536 prevSize cRing
+      posU.toNat 1 (walk % 512) 3 := by
     calc
-      c2.val = updateHashesMergedGuarded data 65536 prevSize cRingS
-          posU.toNat 1 (rU &&& 0x1FF).toNat 2 := by
-        dsimp only [c2, c1]
-        exact insertHashL1U_cap2_eq data prevSize dataSizeU prevSizeU posU cRingS
-          hds hpsU hfit hprev hcsRingS hpos (rU &&& 0x1FF).toNat hmlU
+      c3.val = updateHashesMergedGuarded data 65536 prevSize cRingS
+          posU.toNat 1 (rRaw &&& 0x1FF).toNat 3 := by
+        dsimp only [c3, c2, c1]
+        exact insertHashL1U_cap3_eq data prevSize dataSizeU prevSizeU posU
+          (rRaw &&& 0x1FF) cRingS hds hpsU hfit hprev hcsRingS hpos hmlRaw
       _ = updateHashesMergedGuarded data 65536 prevSize cRing
-          posU.toNat 1 (rU &&& 0x1FF).toNat 2 := by rw [ecRingS]
+          posU.toNat 1 (rRaw &&& 0x1FF).toNat 3 := by rw [ecRingS]
+      _ = updateHashesMergedGuarded data 65536 prevSize cRing
+          posU.toNat 1 (rU &&& 0x1FF).toNat 3 := by rw [erRaw]
       _ = _ := by rw [hlow]
   let nextU := posU + (rU &&& 0x1FF)
   have hnext : nextU.toNat = posU.toNat + walk % 512 := hsum
@@ -986,15 +1055,15 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
     rw [enextRaw]
     exact hnextBound
   let updated := updateHashesMergedGuarded data 65536 prevSize cRing
-    posU.toNat 1 (walk % 512) 2
+    posU.toNat 1 (walk % 512) 3
   have hupdatedSize : prevSize + 65536 ≤ updated.size := by
     dsimp only [updated]
-    rw [← hc12]
-    exact hc2s
+    rw [← hc123]
+    exact hc3s
   have hi := ih (data.size - nextU.toNat) (by rw [hnext, ← hn]; omega)
-    c2.val hc2s nextU hnextBound hc2b
+    c3.val hc3s nextU hnextBound hc3b
     (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w) rfl
-  simp only [hc12, hnext, ew] at hi
+  simp only [hc123, hnext, ew] at hi
   have hcall := dependentUSizeBound_congr
     (fun p hp =>
       lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz
@@ -1024,14 +1093,14 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
     lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
         hpv hprev updated hupdatedSize nextU hnextBound
         (acc.push wN) (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN) =
-      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258 updated
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 3 258 updated
         (posU.toNat + walk % 512) (acc.push wN)
         (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN) at hi
   change
     lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
-        hpv hprev c2.val hc2s nextRaw hrawBound
+        hpv hprev c3.val hc3s nextRaw hrawBound
         (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) =
-      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258 updated
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 3 258 updated
         (posU.toNat + walk % 512) (acc.push wN)
         (bumpRefLitFreqP litF wN) (bumpRefDistFreqP distF wN)
   have hcNative := dependentArrayBound_congr
@@ -1039,10 +1108,10 @@ private theorem lz77GreedyMergedLoopF1U_reference_step
       lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
         hpv hprev z hz nextRaw hrawBound
         (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw))
-    hc2s hupdatedSize hc12
+    hc3s hupdatedSize hc123
   change
     lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
-        hpv hprev c2.val hc2s nextRaw hrawBound
+        hpv hprev c3.val hc3s nextRaw hrawBound
         (acc.push wRaw) (bumpRefLitFreqP litF wRaw) (bumpRefDistFreqP distF wRaw) =
       lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
         hpv hprev updated hupdatedSize nextRaw hrawBound
@@ -1073,11 +1142,11 @@ private theorem lz77GreedyMergedLoopF1U_eq_step (data : ByteArray) (prevSize : N
         data.size - posU'.toNat = m →
         lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit
             hpv hprev c' hcs' posU' hpos' acc' litF' distF' =
-          lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+          lz77GreedyMergedLoopF data 32768 65536 prevSize 4 3 258
             c' posU'.toNat acc' litF' distF') :
     lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
         c hcs posU hpos acc litF distF =
-      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 3 258
         c posU.toNat acc litF distF := by
     rw [lz77GreedyMergedLoopF1U, lz77GreedyMergedLoopF]
     have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
@@ -1295,7 +1364,7 @@ private theorem lz77GreedyMergedLoopF1U_eq_step (data : ByteArray) (prevSize : N
             (rRaw := rRaw) (rU := rU)
             (erRaw := erRaw) (walk := walk) (hwalkEq := rfl) (hlow := hlow)
             (hhigh := hhigh) (hgeCommon := hgeCommon) (hleCommon := hleCommon)
-            (hsum := hsum) (h2 := h2) (n := n) (hn := hn) (ih := ih)
+            (hsum := hsum) (h2 := h2) (h3 := hthree) (n := n) (hn := hn) (ih := ih)
         · rename_i hleU
           exact absurd hleU' hleU
       · rename_i hgeU
@@ -1337,7 +1406,7 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
     (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30}) :
     lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
         c hcs posU hpos acc litF distF =
-      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+      lz77GreedyMergedLoopF data 32768 65536 prevSize 4 3 258
         c posU.toNat acc litF distF := by
   induction hn : data.size - posU.toNat using Nat.strongRecOn
       generalizing c posU acc litF distF with
@@ -1347,7 +1416,7 @@ theorem lz77GreedyMergedLoopF1U_eq (data : ByteArray) (prevSize : Nat)
 
 /-- The guarded level-one native entry is the fixed-policy generic fused entry. -/
 theorem lz77ChainIterPMergedF1U_eq (data : ByteArray) :
-    lz77ChainIterPMergedF1U data = lz77ChainIterPMergedF data 4 32768 2 258 := by
+    lz77ChainIterPMergedF1U data = lz77ChainIterPMergedF data 4 32768 3 258 := by
   unfold lz77ChainIterPMergedF1U lz77ChainIterPMergedF
   by_cases hsmall : data.size < 3
   · simp only [hsmall, ↓reduceIte]

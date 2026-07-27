@@ -97,7 +97,7 @@ decreasing_by all_goals omega
 
 The generic fused loop keeps its outer position in `Nat` and re-enters guarded
 wrappers at every byte.  Level one has fixed policy (`hashSize = 65536`, chain
-depth 4, insertion cap 2, nice length 258), so its hot loop can keep the data
+depth 4, insertion cap 3, nice length 258), so its hot loop can keep the data
 position, hash-table indices, match length, and chain result in `USize` after one
 entry guard.  The combined chain/hash state deliberately remains `Array Nat`;
 only its indices are native words.
@@ -144,7 +144,7 @@ theorem hash3L1U_toNat_lt (data : ByteArray) (dataSizeU pU : USize)
   have := UInt32.toNat_lt (word * 0x1E35A7BD)
   omega
 
-/-- Insert one of level one's two interior positions.  Returning a subtype
+/-- Insert one of level one's first three interior positions. Returning a subtype
     records (proof-only) that the ordinary `Array Nat` state keeps its size. -/
 @[inline] def insertHashL1U (data : ByteArray) (prevSize : Nat)
     (dataSizeU prevSizeU posU jU : USize) (c : Array Nat)
@@ -152,7 +152,7 @@ theorem hash3L1U_toNat_lt (data : ByteArray) (dataSizeU pU : USize)
     (hfit : data.size * 512 + 511 < USize.size)
     (hprev : prevSize ≤ chainWinSize)
     (hcs : prevSize + 65536 ≤ c.size) (hpos : posU.toNat ≤ data.size)
-    (hj : jU.toNat ≤ 2) : {a : Array Nat // a.size = c.size} :=
+    (hj : jU.toNat ≤ 3) : {a : Array Nat // a.size = c.size} :=
   if hd : posU + jU + 2 < dataSizeU then
     have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
     have hj2 : (2 : USize).toNat = 2 :=
@@ -207,6 +207,9 @@ def lz77GreedyMergedLoopF1U (data : ByteArray) (prevSize : Nat)
   if hlt : posU + 2 < dataSizeU then
     have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
     have h2v : (2 : USize).toNat = 2 :=
+      USize.toNat_ofNat_of_lt
+        (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    have h3v : (3 : USize).toNat = 3 :=
       USize.toNat_ofNat_of_lt
         (Nat.lt_of_lt_of_le (by decide) USize.le_size)
     have ep2 : (posU + 2).toNat = posU.toNat + 2 := by
@@ -311,9 +314,17 @@ def lz77GreedyMergedLoopF1U (data : ByteArray) (prevSize : Nat)
         let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
           hds hpsU hfit hprev hc1s hpos (by rw [h2v]; omega)
         have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
+        let c3 : {a : Array Nat // a.size = c2.val.size} :=
+          if 3 < matchLenU then
+            insertHashL1U data prevSize dataSizeU prevSizeU posU 3 c2.val
+              hds hpsU hfit hprev hc2s hpos (by rw [h3v]; omega)
+          else ⟨c2.val, rfl⟩
+        have hc3s : prevSize + 65536 ≤ c3.val.size := by
+          rw [c3.property]
+          exact hc2s
         let w := packTok (.reference matchLenU.toNat (posU - matchPosU).toNat)
         lz77GreedyMergedLoopF1U data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
-          c2.val hc2s (posU + matchLenU) hnextPos
+          c3.val hc3s (posU + matchLenU) hnextPos
           (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w)
       else
         let b := data.uget posU (by omega)
@@ -362,7 +373,7 @@ def lz77ChainIterPMergedF1U (data : ByteArray) :
       (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
   else
     let prevSize := min chainWinSize data.size
-    lz77GreedyMergedLoopF data 32768 65536 prevSize 4 2 258
+    lz77GreedyMergedLoopF data 32768 65536 prevSize 4 3 258
       (.replicate (prevSize + 65536) data.size) 0
       (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
 
@@ -386,7 +397,7 @@ def lz77ChainIterPMergedF (data : ByteArray) (maxChain : Nat) (windowSize : Nat 
 /-! ## Parameterized native-word greedy outer loop
 
 The original `F1U` specialization bakes level one's chain depth and insertion
-cap into an unrolled cap-two loop.  Levels two through four use the same greedy
+cap into an unrolled cap-three loop. Levels two through four use the same greedy
 parser but different policy constants.  `lz77GreedyMergedLoopFNU` keeps the
 outer position, hash and packed chain result in `USize`, while delegating the
 policy-dependent interior insertion to the existing guarded merged updater.
@@ -1382,6 +1393,9 @@ def lz77GreedyMergedLoopF1U64 (data : ByteArray) (prevSize : Nat)
     have h2v : (2 : USize).toNat = 2 :=
       USize.toNat_ofNat_of_lt
         (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    have h3v : (3 : USize).toNat = 3 :=
+      USize.toNat_ofNat_of_lt
+        (Nat.lt_of_lt_of_le (by decide) USize.le_size)
     have ep2 : (posU + 2).toNat = posU.toNat + 2 := by
       rw [USize.toNat_add, h2v]
       apply Nat.mod_eq_of_lt
@@ -1484,10 +1498,18 @@ def lz77GreedyMergedLoopF1U64 (data : ByteArray) (prevSize : Nat)
         let c2 := insertHashL1U data prevSize dataSizeU prevSizeU posU 2 c1.val
           hds hpsU hfit hprev hc1s hpos (by rw [h2v]; omega)
         have hc2s : prevSize + 65536 ≤ c2.val.size := by rw [c2.property]; exact hc1s
+        let c3 : {a : Array Nat // a.size = c2.val.size} :=
+          if 3 < matchLenU then
+            insertHashL1U data prevSize dataSizeU prevSizeU posU 3 c2.val
+              hds hpsU hfit hprev hc2s hpos (by rw [h3v]; omega)
+          else ⟨c2.val, rfl⟩
+        have hc3s : prevSize + 65536 ≤ c3.val.size := by
+          rw [c3.property]
+          exact hc2s
         let w := packTok (.reference matchLenU.toNat (posU - matchPosU).toNat)
         let freqs := bumpRefLitFreqU64 freqs w
         lz77GreedyMergedLoopF1U64 data prevSize dataSizeU prevSizeU hds hpsU hsz hfit hpv hprev
-          c2.val hc2s (posU + matchLenU) hnextPos
+          c3.val hc3s (posU + matchLenU) hnextPos
           (acc.push w) (bumpRefDistFreqU64 freqs w)
       else
         let b := data.uget posU (by omega)
