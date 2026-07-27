@@ -111,8 +111,79 @@ def series_style(key, colour):
     )
 
 
+def provenance_groups(meta):
+    """Validated flat row-provenance groups, or an empty list for old data."""
+    provenance = meta.get("row_provenance")
+    groups = provenance.get("groups") if isinstance(provenance, dict) else None
+    if not isinstance(groups, list):
+        return []
+    return [group for group in groups
+            if isinstance(group, dict)
+            and isinstance(group.get("keys"), list)
+            and isinstance(group.get("meta"), dict)]
+
+
+def provenance_keys(group):
+    return {
+        tuple(row_key) for row_key in group.get("keys", [])
+        if isinstance(row_key, list) and len(row_key) == 3
+    }
+
+
+def _session_label(groups):
+    sessions = {}
+    for group in groups:
+        group_meta = group["meta"]
+        identity = (
+            group_meta.get("git_commit"),
+            group_meta.get("date"),
+            group_meta.get("machine"),
+            group.get("sha256"),
+        )
+        sessions[identity] = group_meta
+    if len(sessions) == 1:
+        group_meta = next(iter(sessions.values()))
+        return (f"@ {group_meta.get('git_commit', '?')} "
+                f"({str(group_meta.get('date', '?'))[:10]})")
+    return f"across {len(sessions)} sessions"
+
+
 def _provenance(meta):
     timing = f"{meta.get('timing_aggregation', '?')}-of-{meta.get('timing_reps', '?')}"
+    row_provenance = meta.get("row_provenance")
+    groups = provenance_groups(meta)
+    if isinstance(row_provenance, dict) and groups:
+        fresh_keys = {
+            tuple(row_key) for row_key in row_provenance.get("fresh_keys", [])
+            if isinstance(row_key, list) and len(row_key) == 3
+        }
+        fresh_groups = [group for group in groups
+                        if provenance_keys(group) & fresh_keys]
+        reused_groups = [group for group in groups
+                         if provenance_keys(group) - fresh_keys]
+        all_keys = set().union(*(provenance_keys(group) for group in groups))
+        compressors = {row_key[0] for row_key in fresh_keys}
+        complete_native = (
+            compressors == {"native"}
+            and not any(row_key[0] == "native"
+                        for row_key in all_keys - fresh_keys)
+        )
+        if compressors == {"native"}:
+            fresh_label = "native" if complete_native else "fresh native rows"
+        else:
+            fresh_label = "fresh rows"
+        reused_label = (
+            "reused refs"
+            if not any(row_key[0] == "native" for row_key in all_keys - fresh_keys)
+            else "reused rows"
+        )
+        if fresh_groups and reused_groups:
+            return (
+                f"{fresh_label} {_session_label(fresh_groups)}  ·  "
+                f"{reused_label} {_session_label(reused_groups)}  ·  "
+                f"{meta.get('machine', '?')}  ·  "
+                f"throughput = {timing}; ratio is deterministic"
+            )
     return (f"{meta.get('date','?')}  ·  {meta.get('machine','?')}  ·  "
             f"commit {meta.get('git_commit','?')}  ·  {meta.get('toolchain','?')}  ·  "
             f"throughput = {timing}; ratio is deterministic")

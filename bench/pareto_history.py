@@ -198,6 +198,35 @@ def history_timing_summary(frames, corpus):
             else "legacy protocol undeclared")
 
 
+def reference_meta(meta):
+    """Metadata for rows reused as the current animation's reference curves."""
+    groups = [
+        group for group in plot.provenance_groups(meta)
+        if any(row_key[0] != "native"
+               for row_key in plot.provenance_keys(group))
+    ]
+    sessions = {}
+    for group in groups:
+        group_meta = group["meta"]
+        identity = (
+            group_meta.get("git_commit"),
+            group_meta.get("date"),
+            group_meta.get("machine"),
+            group.get("sha256"),
+        )
+        sessions[identity] = group_meta
+    if len(sessions) == 1:
+        return next(iter(sessions.values()))
+    if sessions:
+        machines = {m.get("machine") for m in sessions.values()}
+        return {
+            "git_commit": f"{len(sessions)} sessions",
+            "date": "mixed",
+            "machine": machines.pop() if len(machines) == 1 else "mixed",
+        }
+    return meta
+
+
 def drop_spikes(frames):
     """Drop stale-refresh spikes: a frame that jumps away from its
     predecessor, matches an older frame's deterministic ratios, AND is
@@ -323,13 +352,14 @@ def extract(corpus, include_worktree=False, only=None):
         sys.exit(f"corpus {corpus!r} has history but no rows in the current "
                  "latest.json — nothing to anchor the reference curves to")
     m = now.get("meta", {})
+    refs = reference_meta(m)
     meta = dict(corpus=corpus, nfiles=nfiles,
                 first_date=frames[0]["commit_date"][:10],
                 last_date=frames[-1]["commit_date"][:10],
-                ref_commit=m.get("git_commit", "?"),
-                ref_date=m.get("date", "?")[:10],
+                ref_commit=refs.get("git_commit", "?"),
+                ref_date=str(refs.get("date", "?"))[:10],
                 history_timing=history_timing_summary(frames, corpus),
-                machine=m.get("machine", "?")
+                machine=refs.get("machine", m.get("machine", "?"))
                          .replace("Linux ", "").replace(" x86_64", ""))
     return references, frames, meta
 

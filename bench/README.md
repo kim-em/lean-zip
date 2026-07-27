@@ -19,13 +19,20 @@ bench/run.sh --history-only  # render tracked animations from that committed his
 That runs [`lake -d bench exe bench-report`](ZipBenchReport.lean) (writes
 [`results/latest.json`](results/latest.json) and dumps the exact payloads), then
 the standalone external comparators (see below), then [`plot.py`](plot.py) (writes
-the static SVGs) and local animation previews. Ratios are deterministic;
-throughput is a **median-of-5 snapshot of the machine recorded in the JSON
-`meta`, for every corpus**. The producer records `meta.timing_aggregation =
-"median"` and `meta.timing_reps = 5`; merge and plot tools reject routine
-snapshots that do not declare that protocol. Routine before/after claims must
-compare two median-of-5 snapshots produced with this same protocol; exploratory
-single-shot timings are useful for tuning, but are not dashboard evidence.
+the static SVGs) and local animation previews. Ratios are deterministic and
+every routine throughput row is a **median-of-5**. A full refresh measures one
+session; a native-only refresh deliberately reuses earlier reference rows.
+Merged documents therefore partition every row into flat exact-key measurement
+groups under `meta.row_provenance`, retain both immediate input hashes, and
+reject cross-machine splices. Repeated and level-restricted merges trim those
+groups without nesting them, so graph footers distinguish complete fresh native
+curves from partially reused native rows and preserve the original reference
+session. The producer records
+`meta.timing_aggregation = "median"` and `meta.timing_reps = 5`; merge and plot
+tools reject routine snapshots that do not declare that protocol. Routine
+before/after claims must compare two median-of-5 snapshots produced with this
+same protocol; exploratory single-shot timings are useful for tuning, but are
+not dashboard evidence.
 
 For a long native before/after audit, use [`paired_native.py`](paired_native.py)
 instead of running the two revisions as separate sweeps. It runs each matching
@@ -56,8 +63,15 @@ coresched new -- taskset -c 95 python3 bench/paired_native.py \
 
 Re-running the same command resumes every fully checkpointed pair. To replace a
 known-contaminated pair, add a quoted key such as
-`--rerun-cell 'silesia/mozilla|9'`; both sides of that cell are discarded and
+`--rerun-cell 'silesia/mozilla|1'`; both sides of that cell are discarded and
 remeasured adjacently in the new recorded session.
+
+For review-grade campaigns, commit the finalized manifest under
+[`results/archive/`](results/archive/) alongside any focused row archive. The
+manifest is the authoritative record of both revisions: a baseline may carry a
+fingerprinted benchmark-interface backport while keeping compressor sources at
+the named commit, and that dirty state must remain visible rather than being
+described as a clean checkout.
 
 Commit the JSON and static SVGs, then run `bench/run.sh --history-only` and
 commit the two tracked history SVGs in a separate commit. Do not amend the data
@@ -164,6 +178,9 @@ adjacent-run signal to its four-region cardinality sketch (1 MiB); it has no
 upper cutoff or per-file byte-length exception. Levels 2, 6, and 9 no longer
 use content routing. In particular, level 6 uses one chain-48/depth-6 split
 pipeline for both individual files and whole-corpus tar streams.
+The fixed public L2 point is the fused c4/i3 fast-tier bridge. Relative to its
+former c8/i8 point it spends 3.0% equal-file-geomean ratio on Canterbury and
+2.9% on Silesia for 38.6% and 46.4% more throughput, respectively.
 
 The published Pareto uses an equal-file geomean for both ratio and throughput.
 The separate [`hull_check.py`](hull_check.py) diagnostic pools bytes and time
@@ -173,10 +190,12 @@ Because raw `deflateRaw` defaults to level 6, the fixed L6 point is also the
 whole-stream default. Gzip/zlib wrapper defaults are unchanged.
 
 The miniz_oxide comparisons were also repeated in fresh, matched-session
-median-of-5 runs. On Silesia, native L1 directly beats miniz_oxide L1 at a
-better ratio: 273.7 vs 235.2 MB/s (+16.4%), with an equal-file geomean ratio
-of 0.392833 vs 0.430526 from exact output/input sizes (8.8% smaller). The raw
-rows are archived in
+median-of-5 runs. On Silesia's equal-file-geomean aggregate, native L1 directly
+beats miniz_oxide L1 at a better ratio: 273.7 vs 235.2 MB/s (+16.4%), with a
+ratio of 0.392833 vs 0.430526 from exact output/input sizes (8.8% smaller). The
+public L1 implementation measured at `0771f741` is unchanged through this
+dashboard refresh; the intervening production edits tune L2. The raw rows are
+archived in
 [`matched-l1.chungus2.0771f741.json`](results/archive/matched-l1.chungus2.0771f741.json).
 In the separate L3/L4 run, native's L3→L4 reciprocal-throughput mix led at the
 exact miniz L3 and L4 ratios by 1.18% and 1.28%, respectively (1.14% and 1.21%

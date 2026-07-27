@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -75,6 +76,51 @@ def checkpoint_fixture():
 
 
 class PairedNativeTests(unittest.TestCase):
+    def test_committed_campaign_manifest_is_complete_and_auditable(self):
+        path = (
+            Path(__file__).resolve().parent
+            / "results/archive/paired-native.88ed5fa0-54b38299.chungus2.manifest.json"
+        )
+        self.assertEqual(
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+            "ee3f9be3d9a84cec7b7a45c5fe2afc53c68273779ef007fa770c5a0f1e6dc03b",
+        )
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        patterns = sorted(manifest["input_size"])
+        levels = tuple(manifest["levels"])
+        keys = planned_cells(patterns, levels)
+        validate_checkpoint(
+            manifest,
+            {
+                "protocol_version": 3,
+                "private_cookie_required": True,
+            },
+            keys,
+            manifest["input_size"],
+        )
+        self.assertEqual(levels, tuple(range(1, 11)))
+        self.assertEqual(len(patterns), 23)
+        self.assertEqual(len(manifest["cells"]), 230)
+        self.assertEqual(manifest["pending_rerun_cells"], [])
+        self.assertEqual(
+            [entry["cells"] for entry in manifest["rerun_history"]],
+            [["silesia/mozilla|1"], ["silesia/mozilla|1"]],
+        )
+        first_roles = [cell["order"][0] for cell in manifest["cells"].values()]
+        self.assertEqual(first_roles.count("before"), 115)
+        self.assertEqual(first_roles.count("after"), 115)
+        self.assertEqual(
+            manifest["before"]["commit"],
+            "88ed5fa052468d95df28087d0eb825b0aa50eced",
+        )
+        self.assertTrue(manifest["before"]["dirty"])
+        self.assertEqual(
+            manifest["after"]["commit"],
+            "54b38299fa43af22d450ba76b0351ec89b61d3a1",
+        )
+        self.assertFalse(manifest["after"]["dirty"])
+        self.assertEqual(manifest["cells"]["silesia/mozilla|1"]["session"], 2)
+
     def test_response_link_flags_excludes_objects_and_keeps_flag_arguments(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "checkout"
@@ -348,7 +394,7 @@ class PairedNativeTests(unittest.TestCase):
             self.assertIn("miniz_oxide_shim", hashes)
             self.assertEqual(
                 hashes["miniz_oxide_shim"],
-                __import__("hashlib").sha256(b"fixture-7").hexdigest(),
+                hashlib.sha256(b"fixture-7").hexdigest(),
             )
 
 

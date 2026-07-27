@@ -2042,9 +2042,10 @@ def trailingPT (data : ByteArray) (pos : Nat) (acc : TokenArray) : TokenArray :=
   else acc
 termination_by data.size - pos
 
-/-- One active iteration of the packed greedy matcher.  Keeping the
+/-- One active iteration of the packed greedy matcher. Keeping the
     non-recursive state transition separate gives correctness proofs a compact
-    equation while `@[inline]` preserves the hot loop after compilation. -/
+    equation. The inlined post-probe helper below keeps the reference loop's
+    shape after compilation; production levels use the fused matchers. -/
 structure LZ77ChainIterPNext (data : ByteArray) (startPos : Nat) where
   hashTable : Array Nat
   prev : Array Nat

@@ -1,6 +1,7 @@
 import unittest
 
 import pareto_history
+import plot
 
 
 def frame(commit, timing, declared, speed=100.0):
@@ -15,6 +16,39 @@ def frame(commit, timing, declared, speed=100.0):
 
 
 class ParetoHistoryTimingTests(unittest.TestCase):
+    def test_scoped_provenance_labels_fresh_native_and_reused_references(self):
+        meta = {
+            "timing_aggregation": "median",
+            "timing_reps": 5,
+            "row_provenance": {
+                "schema_version": 1,
+                "fresh_keys": [["native", "c/a", 1]],
+                "groups": [{
+                    "input_role": "fresh",
+                    "keys": [["native", "c/a", 1]],
+                    "meta": {
+                        "git_commit": "new12345",
+                        "date": "2026-07-27T10:00:00Z",
+                        "machine": "Linux fixture x86_64",
+                    },
+                }, {
+                    "input_role": "reused",
+                    "keys": [["zlib", "c/a", 1]],
+                    "meta": {
+                        "git_commit": "old12345",
+                        "date": "2026-07-26T10:00:00Z",
+                        "machine": "Linux fixture x86_64",
+                    }
+                }],
+            },
+        }
+        label = plot._provenance(meta)
+        self.assertIn("native @ new12345", label)
+        self.assertIn("reused refs @ old12345", label)
+        self.assertEqual(
+            pareto_history.reference_meta(meta)["git_commit"], "old12345"
+        )
+
     def test_legacy_silesia_is_labelled_single_rep_without_mutating_data(self):
         doc = {"meta": {}, "results": []}
         self.assertEqual(

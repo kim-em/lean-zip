@@ -1514,20 +1514,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
           (headProbeGuarded c
             (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt))
           maxChain
-      · have hgMax : chainWalkPackedUUSafe data
-            (guardedSet
-              (guardedSet c
-                (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt)
-                posU.toNat)
-              (posU.toNat &&& 0x7FFF)
-              (headProbeGuarded c
-                (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt)))
-            32768 maxLen
-            (headProbeGuarded c
-              (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt))
-            maxChain := by
-          simpa only [maxLen] using hg
-        simp only [dif_pos hg]
+      · simp only [dif_pos hg]
         let cRing := guardedSet
           (guardedSet c
             (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt)
@@ -1638,20 +1625,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
               (posU + 1) (by rw [hnext]; omega)
               (acc.push (packTok (.literal data[posU.toNat])))
               (bumpLitFreqP litF (packTok (.literal data[posU.toNat]))) distF rfl
-      · have hgMax : ¬chainWalkPackedUUSafe data
-            (guardedSet
-              (guardedSet c
-                (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt)
-                posU.toNat)
-              (posU.toNat &&& 0x7FFF)
-              (headProbeGuarded c
-                (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt)))
-            32768 maxLen
-            (headProbeGuarded c
-              (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt))
-            maxChain := by
-          simpa only [maxLen] using hg
-        simp only [dif_neg hg, uget_eq_getElem]
+      · simp only [dif_neg hg, uget_eq_getElem]
     · have hnU : ¬posU + 2 < dataSizeU := fun h => hlt (hcond.mp h)
       simp only [hnU, hlt, ↓reduceDIte]
 
