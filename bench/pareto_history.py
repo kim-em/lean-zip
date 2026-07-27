@@ -92,6 +92,17 @@ DENY_COMMITS = {
     # _dspeed is 0.0352, a hair over LOGSPEED_EPS (0.035), so drop_noise keeps
     # it — but a decoder edit cannot move compress speed, so it is pure jitter.
     "9e62f214",  # perf(decode): subtables for 12-15-bit codes (#2819)
+
+    # Not jitter — these numbers were measured correctly, but of inputs shaped
+    # like the benchmark. #2889 routed on exact Silesia file sizes (a 5-64 MiB
+    # band whose cap sat just above the largest corpus member), so every
+    # per-file input in this dashboard was in-band and showed large gains, while
+    # anything outside the band saw none: the 202 MiB whole-tar stream moved
+    # 1.2%, and its output bytes were unchanged. #2890 removed those routes. The
+    # frame is dropped because replaying it shows the frontier leaping forward
+    # and then back, when what actually happened is that a corpus-fitted policy
+    # was added and withdrawn.
+    "9c283ead",  # bench: record the miniz L2-L9 frontier (#2889)
 }
 
 # animation timeline
