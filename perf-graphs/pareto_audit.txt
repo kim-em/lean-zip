@@ -1,6 +1,6 @@
 LEAN-ZIP BEFORE/AFTER PARETO AUDIT
 evidence mode: FINAL — complete native L1-L10 + hardened paired metadata required
-evidence date: 2026-07-27T22:00:15.232219+00:00
+evidence date: 2026-07-27T22:34:54.707998+00:00
 generator: pareto_evidence.py | sha256=bdcd19023b2afe71e98d186ac8b0d5b544d215cbb352383d956849f248c761d5
 metric: compress_mbps
 aggregation: exact per-file out_size/size ratios; geometric mean over files; median-of-5 throughput
@@ -10,9 +10,9 @@ scope: the breakpoint proof is exact for the dashboard's plotted geomean-endpoin
 proof of pointwise comparison: evaluate the union of both piecewise-linear hull breakpoint sets
 allowed frontier slowdown: 3.000000%
 
-references: latest.json | sha256=7e871e467e184f85875df2b48217f00ddb5746afd57ce0ab22cc844da3a3760e | commit=db16e7ed | date=2026-07-27T02:52:32Z | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
-    before: final-v4-before.137e00f7.json | sha256=0c05f285f9a424ad515f8da6357f8b3a55e24802d7c8f64ddf999c6abadde8c4 | commit=88ed5fa0 | date=2026-07-27T22:00:15.232219+00:00 | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
-     after: final-v4-after.137e00f7.json | sha256=ad0067359e1d5ea4baedcb868cd400cc4d0db19fb6685fb73e8a6f148678b55c | commit=137e00f7 | date=2026-07-27T22:00:15.232219+00:00 | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
+references: lean-zip-current-master-reference.5f15833e.json | sha256=6b5cd4309092f5adad0b2b48576ee3fcb1210dbc08deccd63d6bf8da3d9ceae2 | commit=88ed5fa0 | date=2026-07-27T10:57:00Z | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
+    before: final-v6-before.54b38299.json | sha256=ebcf186fc6b5daaf26b4e4355a1d996cf108b929100d5e2c5f86b503f8818a44 | commit=88ed5fa0 | date=2026-07-27T22:34:54.707998+00:00 | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
+     after: final-v6-after.54b38299.json | sha256=4d7f7d68edf1049b64d379d71952401d6ab45f9c7c3802aea189a932878464d3 | commit=54b38299 | date=2026-07-27T22:34:54.707998+00:00 | machine=Linux chungus2 x86_64 | toolchain=leanprover/lean4:v4.33.0-rc1 | median-of-5=verified
 
 canterbury: native measured levels
  lvl    ratio-before   ratio-after      before       after    speed factor      Δratio
@@ -94,7 +94,7 @@ canterbury: zlib-rs vs zlib same-level reference relationship
 
 silesia: native measured levels
  lvl    ratio-before   ratio-after      before       after    speed factor      Δratio
- L1       0.361439      0.392833     157.421     259.859       1.6507x   +0.0313940
+ L1       0.361439      0.392833     162.895     267.322       1.6411x   +0.0313940
  L2       0.348082      0.358106     114.570     167.767       1.4643x   +0.0100234
  L3       0.342545      0.342545     100.793     103.862       1.0304x   +0.0000000
  L4       0.332062      0.332062      77.955      78.943       1.0127x   +0.0000000
@@ -108,8 +108,8 @@ silesia: native measured levels
 silesia: exact per-row ratio delta: worst +0.047385156 at silesia/reymont L1; best +0.000000000 at silesia/dickens L3; max |Δ| 0.047385156 at silesia/reymont L1; changed out_size rows 24/120
 
 silesia: achievable native frontier
- before: L10@(0.308738, 2.742) → L8@(0.317487, 31.274) → L7@(0.318243, 43.660) → L5@(0.327301, 67.756) → L4@(0.332062, 77.955) → L3@(0.342545, 100.793) → L2@(0.348082, 114.570) → L1@(0.361439, 157.421)
- after : L10@(0.308738, 2.734) → L8@(0.317487, 31.323) → L7@(0.318243, 43.512) → L5@(0.327301, 67.846) → L4@(0.332062, 78.943) → L3@(0.342545, 103.862) → L2@(0.358106, 167.767) → L1@(0.392833, 259.859)
+ before: L10@(0.308738, 2.742) → L8@(0.317487, 31.274) → L7@(0.318243, 43.660) → L5@(0.327301, 67.756) → L4@(0.332062, 77.955) → L3@(0.342545, 100.793) → L2@(0.348082, 114.570) → L1@(0.361439, 162.895)
+ after : L10@(0.308738, 2.734) → L8@(0.317487, 31.323) → L7@(0.318243, 43.512) → L5@(0.327301, 67.846) → L4@(0.332062, 78.943) → L3@(0.342545, 103.862) → L2@(0.358106, 167.767) → L1@(0.392833, 267.322)
  ratio checkpoint    before MB/s    after MB/s    after/before    result
        0.308738          2.742         2.734         0.99701x    OK
        0.317487         31.274        31.323         1.00158x    OK
@@ -118,14 +118,14 @@ silesia: achievable native frontier
        0.332062         77.955        78.943         1.01267x    OK
        0.342545        100.793       103.862         1.03044x    OK
        0.348082        114.570       120.147         1.04868x    OK
-       0.358106        143.982       167.767         1.16519x    OK
-       0.361439        157.421       173.674         1.10325x    OK
+       0.358106        147.382       167.767         1.13832x    OK
+       0.361439        162.895       173.986         1.06809x    OK
  POINTWISE FRONTIER: PASS; worst after/before speed factor 0.99662x at ratio 0.318243
 
 silesia: native-after relationship to miniz_oxide target levels (native capability uses same-or-better ratio)
  lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
- L1        0.430526     232.146       259.859      1.1194x   native dominates/matches
- L2        0.361487     136.746       173.763      1.2707x   native dominates/matches
+ L1        0.430526     232.146       267.322      1.1515x   native dominates/matches
+ L2        0.361487     136.746       174.079      1.2730x   native dominates/matches
  L3        0.335451      81.581        85.581      1.0490x   native dominates/matches
  L4        0.332140      75.988        79.084      1.0407x   native dominates/matches
  L5        0.327302      58.877        67.849      1.1524x   native dominates/matches
@@ -136,8 +136,8 @@ silesia: native-after relationship to miniz_oxide target levels (native capabili
 
 silesia: native-after relationship to zlib-rs context (L9 highlighted by inclusion) (native capability uses same-or-better ratio)
  lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
- L1        0.460991     358.452       259.859      0.7249x   external faster at this ratio
- L2        0.362947     184.597       176.487      0.9561x   external faster at this ratio
+ L1        0.460991     358.452       267.322      0.7458x   external faster at this ratio
+ L2        0.362947     184.597       176.955      0.9586x   external faster at this ratio
  L3        0.344468     148.891       108.993      0.7320x   external faster at this ratio
  L4        0.334680     120.965        83.975      0.6942x   external faster at this ratio
  L5        0.327672     110.349        68.598      0.6216x   external faster at this ratio
@@ -148,8 +148,8 @@ silesia: native-after relationship to zlib-rs context (L9 highlighted by inclusi
 
 silesia: native-after relationship to zlib (native capability uses same-or-better ratio)
  lvl       ext ratio    ext MB/s   native MB/s   native/ext   relationship
- L1        0.375080     129.657       202.917      1.5650x   native dominates/matches
- L2        0.362412     116.486       175.480      1.5064x   native dominates/matches
+ L1        0.375080     129.657       205.103      1.5819x   native dominates/matches
+ L2        0.362412     116.486       175.891      1.5100x   native dominates/matches
  L3        0.350265      86.746       128.064      1.4763x   native dominates/matches
  L4        0.341333      83.851       100.206      1.1950x   native dominates/matches
  L5        0.329719      56.425        73.062      1.2948x   native dominates/matches

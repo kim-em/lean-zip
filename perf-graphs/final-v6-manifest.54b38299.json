@@ -159,8 +159,8 @@
   },
   "after": {
     "root": "/tmp/lean-zip-l1.dkGxgf",
-    "commit": "137e00f71a5c2ac7e4456211468b1be5b9f43e7e",
-    "commit_short": "137e00f7",
+    "commit": "54b38299fa43af22d450ba76b0351ec89b61d3a1",
+    "commit_short": "54b38299",
     "toolchain": "leanprover/lean4:v4.33.0-rc1",
     "binary": "/tmp/lean-zip-l1.dkGxgf/bench/.lake/build/bin/bench-report",
     "binary_sha256": "d7731b58dfe11f336c30c6a5b66d960b9efeb6125d8a39549d19f35573186081",
@@ -352,7 +352,7 @@
   },
   "order_scheme": "checkerboard (file index + level index) parity",
   "started": "2026-07-27T21:24:04.906432+00:00",
-  "finished": "2026-07-27T22:00:15.232219+00:00",
+  "finished": "2026-07-27T22:34:54.707998+00:00",
   "sessions": [
     {
       "id": 0,
@@ -360,6 +360,22 @@
       "finished": "2026-07-27T22:00:15.232219+00:00",
       "core_scheduling_cookie": "0x5c1ba4a8",
       "completed_cells_at_start": 0,
+      "completed_cells_at_end": 230
+    },
+    {
+      "id": 1,
+      "started": "2026-07-27T22:33:32.146801+00:00",
+      "finished": "2026-07-27T22:33:40.613137+00:00",
+      "core_scheduling_cookie": "0xc24a7caf",
+      "completed_cells_at_start": 229,
+      "completed_cells_at_end": 230
+    },
+    {
+      "id": 2,
+      "started": "2026-07-27T22:34:47.786119+00:00",
+      "finished": "2026-07-27T22:34:54.707998+00:00",
+      "core_scheduling_cookie": "0xe3e1ef73",
+      "completed_cells_at_start": 229,
       "completed_cells_at_end": 230
     }
   ],
@@ -3724,34 +3740,6 @@
         "decompress_mbps": null
       }
     },
-    "silesia/mozilla|1": {
-      "order": [
-        "before",
-        "after"
-      ],
-      "session": 0,
-      "elapsed_seconds": 8.898,
-      "before": {
-        "compressor": "native",
-        "pattern": "silesia/mozilla",
-        "size": 51220480,
-        "level": 1,
-        "out_size": 21266943,
-        "ratio": 0.4152,
-        "compress_mbps": 81.47,
-        "decompress_mbps": 248.89
-      },
-      "after": {
-        "compressor": "native",
-        "pattern": "silesia/mozilla",
-        "size": 51220480,
-        "level": 1,
-        "out_size": 22247838,
-        "ratio": 0.4344,
-        "compress_mbps": 133.23,
-        "decompress_mbps": 261.24
-      }
-    },
     "silesia/mozilla|2": {
       "order": [
         "after",
@@ -6803,8 +6791,55 @@
         "compress_mbps": 3.1,
         "decompress_mbps": null
       }
+    },
+    "silesia/mozilla|1": {
+      "order": [
+        "before",
+        "after"
+      ],
+      "session": 2,
+      "elapsed_seconds": 6.914,
+      "before": {
+        "compressor": "native",
+        "pattern": "silesia/mozilla",
+        "size": 51220480,
+        "level": 1,
+        "out_size": 21266943,
+        "ratio": 0.4152,
+        "compress_mbps": 122.78,
+        "decompress_mbps": 267.13
+      },
+      "after": {
+        "compressor": "native",
+        "pattern": "silesia/mozilla",
+        "size": 51220480,
+        "level": 1,
+        "out_size": 22247838,
+        "ratio": 0.4344,
+        "compress_mbps": 187.14,
+        "decompress_mbps": 266.96
+      }
     }
   },
   "pending_rerun_cells": [],
-  "rerun_history": []
+  "rerun_history": [
+    {
+      "cells": [
+        "silesia/mozilla|1"
+      ],
+      "completed": "2026-07-27T22:33:40.613137+00:00",
+      "cell_sessions": {
+        "silesia/mozilla|1": 1
+      }
+    },
+    {
+      "cells": [
+        "silesia/mozilla|1"
+      ],
+      "completed": "2026-07-27T22:34:54.707998+00:00",
+      "cell_sessions": {
+        "silesia/mozilla|1": 2
+      }
+    }
+  ]
 }

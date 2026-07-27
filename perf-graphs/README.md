@@ -3,21 +3,30 @@
 This directory pins the inputs, generator, audit, and rendered before/after
 graphs used to review PR #2892.
 
-- reference dashboard: `latest.json` at source commit `db16e7ed`
-- native before: clean commit `88ed5fa0`, paired median-of-5
-- native after: clean commit `137e00f7`, paired median-of-5
-- pairing manifest: one CPU-95 checkerboard AB/BA session under a private
-  core-scheduling cookie
+- reference dashboard: `lean-zip-current-master-reference.5f15833e.json`,
+  copied from current `master` at `5f15833e` (its native snapshot metadata
+  names `88ed5fa0`)
+- native before: compressor sources at `88ed5fa0`, paired median-of-5; this was
+  not a clean checkout because it carried only the required, fingerprinted
+  benchmark-interface backport
+- native after: clean commit `54b38299`, paired median-of-5
+- pairing manifest: `final-v6-manifest.54b38299.json`, recording one complete
+  CPU-95 checkerboard AB/BA session plus two audited reruns of
+  `silesia/mozilla|1`, each under a recorded private core-scheduling cookie;
+  final session 2 replaced the contaminated timing
 - frontier tolerance: 3% only for cross-session native timing drift; miniz
   containment remains strict
+
+The updated Silesia L1 equal-file-geomean throughput is
+`162.895 -> 267.322 MB/s`.
 
 Reproduce from the project Nix shell:
 
 ```sh
 python3 perf-graphs/pareto_evidence.py \
-  perf-graphs/latest.json \
-  perf-graphs/final-v4-before.137e00f7.json \
-  perf-graphs/final-v4-after.137e00f7.json \
+  perf-graphs/lean-zip-current-master-reference.5f15833e.json \
+  perf-graphs/final-v6-before.54b38299.json \
+  perf-graphs/final-v6-after.54b38299.json \
   --frontier-tolerance-pct 3 \
   -o perf-graphs/reproduced
 ```
