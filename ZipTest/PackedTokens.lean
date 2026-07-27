@@ -156,6 +156,45 @@ private def checkL2To4WideFused (label : String) (data : ByteArray) : IO Unit :=
         s!"{label} L{level}: parameterized production output mismatch \
            ({specialized.size}/{production.size}/{boxedOut.size}/{established.size} bytes)")
 
+/-- Compiled-path gate for the shared c8/i12 adaptive source point.  Unlike the
+    fixed L2–L4 policies above, this policy is not named by a public level, so
+    compare its native-wide matcher directly with both the native-boxed and
+    generic fused entries, independently recount the histograms, and compare
+    the emitted bytes with the established packed base pipeline. -/
+private def checkAdaptiveFastWideFused (label : String) (data : ByteArray) : IO Unit := do
+  let maxChain := 8
+  let cap := 12
+  let nice := 258
+  let (wideTokens, wideLit, wideDist) :=
+    lz77ChainIterPMergedFNU64 data maxChain cap nice
+  let (boxedTokens, boxedLit, boxedDist) :=
+    lz77ChainIterPMergedFNU data maxChain cap nice
+  let (genericTokens, genericLit, genericDist) :=
+    lz77ChainIterPMergedF data maxChain 32768 cap nice
+  unless wideTokens.toArray == boxedTokens.toArray do
+    throw (IO.userError
+      s!"{label} adaptive-fast: wide/native-boxed token mismatch \
+         ({wideTokens.size} vs {boxedTokens.size} tokens)")
+  unless wideLit == boxedLit.val && wideDist == boxedDist.val do
+    throw (IO.userError
+      s!"{label} adaptive-fast: wide/native-boxed histogram mismatch")
+  unless wideTokens.toArray == genericTokens.toArray do
+    throw (IO.userError
+      s!"{label} adaptive-fast: wide/generic token mismatch \
+         ({wideTokens.size} vs {genericTokens.size} tokens)")
+  unless wideLit == genericLit.val && wideDist == genericDist.val do
+    throw (IO.userError s!"{label} adaptive-fast: wide/generic histogram mismatch")
+  let counted := tokenFreqsPTA wideTokens
+  unless wideLit == counted.1 && wideDist == counted.2 do
+    throw (IO.userError s!"{label} adaptive-fast: wide histogram ≠ token recount")
+  let specialized := deflateRawBaseFNU64 data maxChain cap nice
+  let established :=
+    deflateRawBaseP data (lz77ChainIterP data maxChain 32768 cap nice)
+  unless specialized == established do
+    throw (IO.userError
+      s!"{label} adaptive-fast: specialized/established output mismatch \
+         ({specialized.size}/{established.size} bytes)")
+
 /-- Direct compiled conformance for the narrowly routed flat token emitter and
     its single-block core.  Canonical tables built from a real L1 token stream
     satisfy the production route's bounds.  Starting the two emitters at every
@@ -391,6 +430,7 @@ def tests : IO Unit := do
        ("alice29", alice)] do
     checkL1WideFused label data
     checkL2To4WideFused label data
+    checkAdaptiveFastWideFused label data
 
   -- Force the flat emitter independently of stored/fixed/dynamic arbitration.
   -- The three nonempty shapes cover reference-heavy, literal-heavy, and mixed

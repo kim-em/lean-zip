@@ -1037,7 +1037,7 @@ def lz77ChainIterPMergedF1U64 (data : ByteArray) :
 
 /-- Production-ready parameterized native-word matcher with unboxed wide
     histogram counters.  The addressability guard covers the native outer loop;
-    its fallback retains the generic-position wide-counter matcher. -/
+    its fallback is the established boxed generic-position matcher. -/
 def lz77ChainIterPMergedFNU64 (data : ByteArray)
     (maxChain insertCap niceLen : Nat) : TokenArray × Array Nat × Array Nat :=
   if data.size < 3 then
