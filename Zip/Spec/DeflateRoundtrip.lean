@@ -308,7 +308,7 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
   have hl2 : Zip.Native.Inflate.inflateReference
       (deflateRawL2Adaptive data) maxOutputSize = .ok data := by
     unfold deflateRawL2Adaptive
-    exact hgreedyLevel 2 (by decide)
+    exact hgreedyLevel 1 (by decide)
   have hl3 : Zip.Native.Inflate.inflateReference
       (deflateRawL3Adaptive data) maxOutputSize = .ok data := by
     unfold deflateRawL3Adaptive
@@ -645,7 +645,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       Deflate.Spec.bytesToBits (deflateRawL2Adaptive data) =
         contentBits ++ padding ∧ padding.length < 8 := by
     unfold deflateRawL2Adaptive
-    exact hgreedyLevel 2 (by decide)
+    exact hgreedyLevel 1 (by decide)
   have hl3 : ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (deflateRawL3Adaptive data) =
         contentBits ++ padding ∧ padding.length < 8 := by
@@ -1081,7 +1081,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
           (Deflate.Spec.bytesToBits (deflateRawL2Adaptive data)) [] =
         some (data.data.toList, remaining) ∧ remaining.length < 8 := by
     unfold deflateRawL2Adaptive
-    exact hgreedyLevel 2 (by decide)
+    exact hgreedyLevel 1 (by decide)
   have hl3 : ∃ remaining,
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits (deflateRawL3Adaptive data)) [] =

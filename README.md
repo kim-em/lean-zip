@@ -72,11 +72,14 @@ Comparing at matched compression ratios, the Lean implementation:
   ratio fflate reaches, native is within a few percent of its speed, pulling
   ahead — and compressing further — at fflate's densest settings;
 - on the dashboard's equal-file-geomean Silesia view, puts every Rust
-  **miniz_oxide level L2–L9 inside native's convex achievable frontier**: at
+  **miniz_oxide level L1–L9 inside native's convex achievable frontier**: at
   each miniz_oxide ratio, native is faster at a same-or-better ratio under
-  reciprocal-throughput mixing. Independent median-of-5 reruns put the
-  narrow L3/L4 leads at about 1.2%; miniz_oxide's L1 fast corner remains
-  1.44× faster. L9-fast and the exact-DP L10 reach still denser ratios;
+  reciprocal-throughput mixing. On Silesia, an independent matched-session
+  median-of-5 rerun puts native L1 directly ahead of miniz_oxide L1: 273.7 vs
+  235.2 MB/s (+16.4%)
+  while its equal-file geomean ratio is 8.8% smaller. Separate matched reruns
+  put the narrow L3/L4 mixing leads at about 1.2%. L9-fast and the exact-DP L10
+  reach still denser ratios;
 - trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 3.5–11×, as
   expected for the format.
 

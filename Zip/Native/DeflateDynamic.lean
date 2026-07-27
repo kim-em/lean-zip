@@ -1146,12 +1146,16 @@ attribute [irreducible] symbolBitCount fixedBlockBytes dynBlockBytes dynBlockByt
     so the deep-chain point fell inside the new frontier and L7 adopts the old
     L6 config wholesale. L8 keeps 512; past that the chain saturates.
 
-    **L2/L3 dropped to 8/16 in the greedy re-grid** (`l1-sweep2`, run after the
-    merged-greedy-loop and packed-emit landings shifted the tier's cost
-    balance): with the `niceLen` cutoff disabled (see there), (chain 8, cap 8)
-    matches the old L2's weighted-Silesia ratio exactly at +12% speed, and
-    (chain 16, cap 32) beats the old L3 on both axes — the old rows sat ~10%
-    below the greedy-band mixing frontier.  Before the adaptive re-grid below,
+    **The retained c8/i8 and L3 source points dropped to depths 8/16 in the
+    greedy re-grid** (`l1-sweep2`, run after the merged-greedy-loop and
+    packed-emit landings shifted the tier's cost balance): with the `niceLen`
+    cutoff disabled (see there), (chain 8, cap 8) matched the then-public L2's
+    weighted-Silesia ratio exactly at +12% speed and remains the compatibility
+    source named `.level2` by adaptive L3; public L2 now promotes the former
+    dense c4/i2 L1 source
+    below. The (chain 16, cap 32) point beats the old L3 on both axes — the old
+    rows sat ~10% below the greedy-band mixing frontier. Before the adaptive
+    re-grid below,
     the complete median-of-5 refresh placed this fixed L3 source about 0.5%
     inside the direct L2↔L4 mixing curve on both headline corpora; other matched
     runs straddled zero. That marginal result motivated content routing for the
@@ -1193,9 +1197,10 @@ def chainDepth (level : UInt8) : Nat :=
     4, `cap = 2` is +12% end-to-end vs `cap = 16` because the interior-insertion
     saving outweighs the slightly higher token count the worse ratio produces
     (the emit walk is the bound, not the cap). Public L1 bypasses this table and
-    uses insert cap `0`; L2/L3 dropped to 8/32 with the greedy re-grid
-    (`l1-sweep2`), paired with their new chain depths. The chain is a heuristic,
-    so any cap stays correct (`lz77ChainIter_resolves` holds ∀ cap). -/
+    uses insert cap `0`; public L2 also bypasses it for its fixed c4/i2 source.
+    The retained `.level2` and L3 sources dropped to caps 8/32 with the greedy
+    re-grid (`l1-sweep2`), paired with their new chain depths. The chain is a
+    heuristic, so any cap stays correct (`lz77ChainIter_resolves` holds ∀ cap). -/
 def insertCap (level : UInt8) : Nat :=
   if level ≤ 1 then 2
   else if level ≤ 2 then 8
@@ -1644,10 +1649,11 @@ def l7ProfileFor (data : ByteArray) : L7Profile := Id.run do
 /-! ## Content-profile fast-tier routes
 
 Levels 3–5 reuse level 7's allocation-free large-input content profile. The
-route constructors name fixed production pipelines: `.level4` is the c16/i128
-greedy point, `.level5` is split level 5, and `.level7` is retained-profile
-level 7. Keeping the constituents separate prevents recursive calls through
-the public level dispatch.
+route constructors name fixed production pipelines: `.level2` is the retained
+c8/i8 former-public-L2 source (not today's c4/i2 public L2), `.level4` is the
+c16/i128 greedy point, `.level5` is split level 5, and `.level7` is
+retained-profile level 7. Keeping the constituents separate prevents recursive
+calls through the public level dispatch.
 
 The only size boundary is `h3ProbeMinSize`, where `l7ProfileFor` itself changes
 from its small-input adjacent-run signal to the four-region cardinality sketch.
@@ -3451,9 +3457,9 @@ theorem deflateRawBaseFNU64_eq (data : ByteArray)
       (lz77ChainIterP data maxChain 32768 insertCap niceLen))
 
 /-- Parameterized greedy matcher with a native-word outer loop and one unboxed
-    wide histogram. It provides fixed greedy source points for fixed L2 and the
-    content-routed L3–L4 policies; the matcher owns its addressability guards
-    and exact generic fallback. -/
+    wide histogram. It provides the level-indexed c8/i8 compatibility source
+    used by adaptive L3 and the other content-routed L3–L4 source points. The
+    matcher owns its addressability guards and exact generic fallback. -/
 def deflateRawBaseFU64Greedy (data : ByteArray) (level : UInt8) : ByteArray :=
   deflateRawBaseFNU64 data (chainDepth level) (insertCap level) (niceLen level)
 
@@ -3765,12 +3771,18 @@ def deflateRawL7P (data : ByteArray) (profile : L7Profile) : ByteArray :=
 def deflateRawAdaptiveFast (data : ByteArray) : ByteArray :=
   deflateRawBaseFNU64 data 8 12 258
 
-/-- Fixed level-2 core. Kept as a named helper for the dispatch proof. -/
+/-- Fixed level-2 bridge between the direct-head L1 and the denser greedy tier.
+    This promotes the former public L1's proven c4/i2 implementation wholesale:
+    the new L1→L2 segment therefore retains that old fast-frontier endpoint,
+    while the L2→L3 segment absorbs the retired c8/i8 public point within the
+    dashboard's paired frontier tolerance. -/
 def deflateRawL2Adaptive (data : ByteArray) : ByteArray :=
-  deflateRawBaseF data 2
+  deflateRawBaseF data 1
 
-/-- Adaptive L3 core.  Every named level route is a pre-adaptive exact helper,
-    so this function never recurses through the public dispatch. -/
+/-- Adaptive L3 core. The compatibility name `.level2` deliberately selects
+    the retained c8/i8 former-L2 source rather than today's c4/i2 public L2.
+    Every named route is a pre-adaptive exact helper, so this function never
+    recurses through the public dispatch. -/
 def deflateRawL3Adaptive (data : ByteArray) : ByteArray :=
   match l3AdaptiveRouteFor data with
   | .current => deflateRawBaseF data 3
@@ -3855,11 +3867,13 @@ def deflateRawL9AdaptiveP (data : ByteArray) : ByteArray :=
     (The zlib/FFI bindings are a separate 0–9 path and are unchanged.)
 
     Level 0 is stored. Level 1 uses a full 16-bit direct-head table with one
-    candidate probe and no skipped-position insertion; level 2 retains the
-    denser fixed greedy policy. Levels 2, 6, and 9 are fixed policies. In the
+    candidate probe and no skipped-position insertion; level 2 promotes the
+    former dense c4/i2 level-1 policy. Levels 2, 6, and 9 are fixed
+    policies. In the
     large-profile regime, levels 3–5
-    reuse level 7's content profile to select among fixed greedy L2/L4, the
-    shared c8/i12 greedy point, split L5, and retained-profile L7. The regime
+    reuse level 7's content profile to select among the retained c8/i8
+    former-L2 source, fixed greedy L4, the shared c8/i12 greedy point, split L5,
+    and retained-profile L7. The regime
     begins exactly where the classifier changes to its four-region signal and
     has no upper size cutoff. Level 7 keeps its content-selected matcher/output
     route directly, while level 8 keeps the packed base-vs-cross-block split
