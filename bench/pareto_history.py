@@ -290,9 +290,12 @@ def extract(corpus, include_worktree=False, only=None):
     Lean-vs-Rust cut used in the blog. `None` keeps every reference curve."""
     now = load_routine(REPO / "bench/results/latest.json")
     results_now = now["results"]
+    ceiling_meta = None
     ceiling_path = REPO / "bench/results/zopfli-ceiling.json"
     if ceiling_path.exists():
-        ceiling = load_frozen_zopfli(ceiling_path)["results"]
+        ceiling_doc = load_frozen_zopfli(ceiling_path)
+        ceiling = ceiling_doc["results"]
+        ceiling_meta = ceiling_doc["meta"]
         results_now = [r for r in results_now
                        if r["compressor"] != "zopfli"] + ceiling
 
@@ -353,6 +356,9 @@ def extract(corpus, include_worktree=False, only=None):
                  "latest.json — nothing to anchor the reference curves to")
     m = now.get("meta", {})
     refs = reference_meta(m)
+    frozen_overlays = []
+    if ceiling_meta is not None and any(r["key"] == "zopfli" for r in references):
+        frozen_overlays.append({"compressor": "zopfli", "meta": ceiling_meta})
     meta = dict(corpus=corpus, nfiles=nfiles,
                 first_date=frames[0]["commit_date"][:10],
                 last_date=frames[-1]["commit_date"][:10],
@@ -360,7 +366,8 @@ def extract(corpus, include_worktree=False, only=None):
                 ref_date=str(refs.get("date", "?"))[:10],
                 history_timing=history_timing_summary(frames, corpus),
                 machine=refs.get("machine", m.get("machine", "?"))
-                         .replace("Linux ", "").replace(" x86_64", ""))
+                         .replace("Linux ", "").replace(" x86_64", ""),
+                frozen_overlays=frozen_overlays)
     return references, frames, meta
 
 
@@ -369,11 +376,20 @@ def title_of(meta):
             f"{meta['nfiles']} files, {meta['first_date']} → {meta['last_date']})")
 
 
+def provenance_lines(meta):
+    lines = [
+        f"native history · refs @ {meta['ref_commit']} "
+        f"({meta['ref_date']}, {meta['machine']}) · "
+        f"per-frame routine timing: {meta['history_timing']} · ratios deterministic"
+    ]
+    frozen = plot.frozen_provenance_labels(meta)
+    if frozen:
+        lines.append(" + ".join(frozen))
+    return lines
+
+
 def provenance_of(meta):
-    return (f"native history · refs @ {meta['ref_commit']} "
-            f"({meta['ref_date']}, {meta['machine']}) · "
-            f"per-frame timing: {meta['history_timing']} · "
-            f"ratio deterministic")
+    return "\n".join(provenance_lines(meta))
 
 
 def ticker_text(frame, index, count, max_chars=102):
@@ -659,8 +675,12 @@ def build_svg(references, frames, meta, outfile):
                    f'font-weight="{"bold" if filled else "normal"}">{escape(label)}</text>')
     out.append("</g>")
 
-    out.append(f'<text x="{SVG_W/2:.0f}" y="{SVG_H-7}" text-anchor="middle" '
-               f'font-size="9.5" fill="#777777">{escape(provenance_of(meta))}</text>')
+    provenance = provenance_lines(meta)
+    first_y = SVG_H - 7 if len(provenance) == 1 else SVG_H - 18
+    for index, line in enumerate(provenance):
+        out.append(f'<text x="{SVG_W/2:.0f}" y="{first_y + 11 * index}" '
+                   f'text-anchor="middle" font-size="9.5" fill="#777777">'
+                   f'{escape(line)}</text>')
     out.append("</svg>")
 
     outfile.write_text("\n".join(out))
@@ -759,9 +779,9 @@ def draw_video_frame(plt, references, frames, meta, t, outfile):
     # left-anchored so the line doesn't wobble as its width changes
     fig.text(0.075, 0.912, ticker_text(fr, k, N, max_chars=112),
              ha="left", fontsize=8.5, family="monospace")
-    fig.text(0.5, 0.005, provenance_of(meta), ha="center", fontsize=7,
-             color="#555555")
-    fig.tight_layout(rect=(0, 0.03, 1, 0.90))
+    fig.text(0.5, 0.005, provenance_of(meta), ha="center", va="bottom",
+             fontsize=7, linespacing=1.2, color="#555555")
+    fig.tight_layout(rect=(0, 0.05, 1, 0.90))
     fig.savefig(outfile)
     plt.close(fig)
 

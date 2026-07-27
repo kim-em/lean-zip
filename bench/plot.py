@@ -148,8 +148,34 @@ def _session_label(groups):
     return f"across {len(sessions)} sessions"
 
 
+def frozen_provenance_labels(meta):
+    """Compact provenance labels for non-routine speed overlays such as Zopfli."""
+    labels = []
+    for overlay in meta.get("frozen_overlays", []):
+        if not isinstance(overlay, dict) or not isinstance(overlay.get("meta"), dict):
+            continue
+        overlay_meta = overlay["meta"]
+        machine = str(overlay_meta.get("machine", "?"))
+        machine = machine.replace("Linux ", "").replace(" x86_64", "")
+        aggregation = overlay_meta.get("timing_aggregation", "?")
+        reps = overlay_meta.get("timing_reps", "?")
+        timing = "single-rep" if aggregation == "single" and reps == 1 \
+            else f"{aggregation}-of-{reps}"
+        labels.append(
+            f"{overlay.get('compressor', 'overlay')}: frozen {timing} "
+            f"@{overlay_meta.get('git_commit', '?')}/{machine} (indicative)"
+        )
+    return labels
+
+
+def frozen_provenance_suffix(meta, separator="  ·  "):
+    labels = frozen_provenance_labels(meta)
+    return (separator + " + ".join(labels)) if labels else ""
+
+
 def _provenance(meta):
     timing = f"{meta.get('timing_aggregation', '?')}-of-{meta.get('timing_reps', '?')}"
+    frozen = frozen_provenance_suffix(meta, separator="\n")
     row_provenance = meta.get("row_provenance")
     groups = provenance_groups(meta)
     if isinstance(row_provenance, dict) and groups:
@@ -182,11 +208,16 @@ def _provenance(meta):
                 f"{fresh_label} {_session_label(fresh_groups)}  ·  "
                 f"{reused_label} {_session_label(reused_groups)}  ·  "
                 f"{meta.get('machine', '?')}  ·  "
-                f"throughput = {timing}; ratio is deterministic"
+                f"routine speed={timing}{frozen}; ratios deterministic"
             )
     return (f"{meta.get('date','?')}  ·  {meta.get('machine','?')}  ·  "
             f"commit {meta.get('git_commit','?')}  ·  {meta.get('toolchain','?')}  ·  "
-            f"throughput = {timing}; ratio is deterministic")
+            f"routine speed={timing}{frozen}; ratios deterministic")
+
+
+def add_provenance(fig, meta, y=0.005):
+    fig.text(0.5, y, _provenance(meta), ha="center", va="bottom",
+             fontsize=7, linespacing=1.2, color="#555")
 
 
 def _level_points(results, corpus, key, speed_metric, ratio_mode="geomean"):
@@ -333,7 +364,7 @@ def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outf
             fontsize=10, va="top", color="#2a8a3a", fontweight="bold")
     fig.suptitle(f"{title}  ({corpus} — {ratio_agg})",
                  fontsize=13, fontweight="bold")
-    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    add_provenance(fig, meta)
     fig.tight_layout(rect=(0, 0.03, 1, 0.97))
     fig.savefig(outfile)
     plt.close(fig)
@@ -400,7 +431,7 @@ def summary_table(results, meta, corpus, outfile, level=CORPUS_LEVEL):
             ax.text(j + 1.5, y, txt, ha="center", va="center", fontsize=8, fontweight=bold)
     fig.suptitle(f"{corpus} — geomean over files, level {level}",
                  fontsize=13, fontweight="bold")
-    fig.text(0.5, 0.01, _provenance(meta), ha="center", fontsize=7, color="#555")
+    add_provenance(fig, meta, y=0.01)
     fig.savefig(outfile, bbox_inches="tight")
     plt.close(fig)
     print(f"wrote {outfile}")
@@ -456,7 +487,7 @@ def relative_heatmap(results, meta, corpus, metric, title, outfile, *,
                  label=f"% vs {baseline} ({'higher=faster' if higher_better else 'higher=bigger'})")
     fig.suptitle(f"{title}  ({corpus}, level {level}, relative to {baseline})",
                  fontsize=12, fontweight="bold")
-    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    add_provenance(fig, meta)
     fig.tight_layout(rect=(0, 0.03, 1, 0.96))
     fig.savefig(outfile)
     plt.close(fig)
@@ -532,7 +563,7 @@ def decode_density_plot(results, meta, corpus, outfile, level=DECODE_LEVEL):
     fig.suptitle(f"Decode throughput vs input density  ({corpus} — {npat} files, one point each; "
                  f"all decoders on identical libdeflate L{level} streams)",
                  fontsize=12, fontweight="bold")
-    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    add_provenance(fig, meta)
     fig.tight_layout(rect=(0, 0.03, 1, 0.97))
     fig.savefig(outfile)
     plt.close(fig)
@@ -598,7 +629,7 @@ def decode_ranking_plot(results, meta, corpus, outfile):
     ax.grid(True, axis="x", which="both", linewidth=0.4, alpha=0.5)
     fig.suptitle(f"Decode throughput ranking  ({corpus} — libdeflate L1/3/6/9/12 + zopfli streams)",
                  fontsize=12, fontweight="bold")
-    fig.text(0.5, 0.005, _provenance(meta), ha="center", fontsize=7, color="#555")
+    add_provenance(fig, meta)
     fig.tight_layout(rect=(0, 0.03, 1, 0.96))
     fig.savefig(outfile)
     plt.close(fig)
@@ -620,8 +651,14 @@ def main():
     # single-rep speed is indicative only).
     ceiling_path = results_path.parent / "zopfli-ceiling.json"
     if ceiling_path.exists():
-        ceiling = load_frozen_zopfli(ceiling_path)["results"]
+        ceiling_doc = load_frozen_zopfli(ceiling_path)
+        ceiling = ceiling_doc["results"]
         results = [r for r in results if r["compressor"] != "zopfli"] + ceiling
+        meta = dict(meta)
+        meta["frozen_overlays"] = [{
+            "compressor": "zopfli",
+            "meta": ceiling_doc["meta"],
+        }]
 
     corpora = corpora_in(results)
     if not corpora:

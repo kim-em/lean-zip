@@ -20,6 +20,15 @@ class ParetoHistoryTimingTests(unittest.TestCase):
         meta = {
             "timing_aggregation": "median",
             "timing_reps": 5,
+            "frozen_overlays": [{
+                "compressor": "zopfli",
+                "meta": {
+                    "git_commit": "frozen12",
+                    "machine": "Linux oldbox x86_64",
+                    "timing_aggregation": "single",
+                    "timing_reps": 1,
+                },
+            }],
             "row_provenance": {
                 "schema_version": 1,
                 "fresh_keys": [["native", "c/a", 1]],
@@ -45,8 +54,36 @@ class ParetoHistoryTimingTests(unittest.TestCase):
         label = plot._provenance(meta)
         self.assertIn("native @ new12345", label)
         self.assertIn("reused refs @ old12345", label)
+        self.assertIn(
+            "zopfli: frozen single-rep @frozen12/oldbox (indicative)",
+            label,
+        )
         self.assertEqual(
             pareto_history.reference_meta(meta)["git_commit"], "old12345"
+        )
+
+    def test_history_provenance_mentions_only_visible_frozen_overlay(self):
+        meta = {
+            "ref_commit": "ref12345",
+            "ref_date": "2026-07-27",
+            "machine": "fixture",
+            "history_timing": "median-of-5",
+            "frozen_overlays": [{
+                "compressor": "zopfli",
+                "meta": {
+                    "git_commit": "frozen12",
+                    "machine": "Linux oldbox x86_64",
+                    "timing_aggregation": "single",
+                    "timing_reps": 1,
+                },
+            }],
+        }
+        label = pareto_history.provenance_of(meta)
+        self.assertIn("per-frame routine timing: median-of-5", label)
+        self.assertIn("zopfli: frozen single-rep", label)
+        self.assertNotIn(
+            "zopfli",
+            pareto_history.provenance_of({**meta, "frozen_overlays": []}),
         )
 
     def test_legacy_silesia_is_labelled_single_rep_without_mutating_data(self):

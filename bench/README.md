@@ -27,7 +27,8 @@ groups under `meta.row_provenance`, retain both immediate input hashes, and
 reject cross-machine splices. Repeated and level-restricted merges trim those
 groups without nesting them, so graph footers distinguish complete fresh native
 curves from partially reused native rows and preserve the original reference
-session. The producer records
+session. Frozen non-routine overlays retain their own timing and machine label
+instead of inheriting the routine protocol. The producer records
 `meta.timing_aggregation = "median"` and `meta.timing_reps = 5`; merge and plot
 tools reject routine snapshots that do not declare that protocol. Routine
 before/after claims must compare two median-of-5 snapshots produced with this
@@ -144,8 +145,11 @@ lake -d bench env bench/.lake/build/bin/bench-report --zopfli-ceiling bench/resu
 ```
 
 Its `ratio`/`out_size` are deterministic (the meaningful signal); its single-rep
-`compress_mbps` is an artifact, not a benchmark. A language-native comparator
-whose toolchain is unavailable is skipped, so the dashboard degrades gracefully.
+`compress_mbps` is an artifact, not a benchmark. Static and full-history graph
+footers therefore call out the frozen single-rep Zopfli speed, producer commit,
+and machine separately; filtered animations that omit Zopfli omit that label.
+A language-native comparator whose toolchain is unavailable is skipped, so the
+dashboard degrades gracefully.
 
 ## Workloads
 

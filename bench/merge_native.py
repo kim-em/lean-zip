@@ -24,7 +24,7 @@ import json
 import sys
 from pathlib import Path
 
-from benchmark_json import load_routine
+from benchmark_json import load_routine, require_routine_timing
 
 old_path, new_path, out_path = sys.argv[1:4]
 old = load_routine(old_path)
@@ -32,10 +32,16 @@ new = load_routine(new_path)
 
 if "row_provenance" in new["meta"]:
     sys.exit("new input must be a raw freshly measured snapshot, not a prior merge")
-if old["meta"].get("machine") != new["meta"].get("machine"):
+if not new["results"]:
+    sys.exit("new input contains no freshly measured rows")
+old_machine = old["meta"].get("machine")
+new_machine = new["meta"].get("machine")
+if not isinstance(old_machine, str) or not isinstance(new_machine, str):
+    sys.exit("old and new benchmark inputs must declare their measurement machine")
+if old_machine != new_machine:
     sys.exit(
         "old and new benchmark rows were measured on different machines: "
-        f"{old['meta'].get('machine')!r} != {new['meta'].get('machine')!r}"
+        f"{old_machine!r} != {new_machine!r}"
     )
 
 key = lambda r: (r["compressor"], r["pattern"], r["level"])
@@ -104,8 +110,17 @@ def prior_groups(doc, path):
             sys.exit("old provenance groups contain duplicate keys")
         if not group_keys <= all_keys:
             sys.exit("old provenance groups contain keys absent from results")
-        if not isinstance(group.get("meta"), dict):
+        group_meta = group.get("meta")
+        if not isinstance(group_meta, dict):
             sys.exit(f"old provenance group {index} has no metadata block")
+        try:
+            require_routine_timing(group_meta, f"old provenance group {index}.meta")
+        except ValueError as error:
+            sys.exit(str(error))
+        if group_meta.get("machine") != doc["meta"].get("machine"):
+            sys.exit(
+                f"old provenance group {index} was measured on a different machine"
+            )
         seen.update(group_keys)
         validated.append((group, group_keys))
     if seen != all_keys:
