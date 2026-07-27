@@ -7,8 +7,8 @@ The classifier inputs below are deterministic summaries of the eleven
 Canterbury and twelve Silesia files used to tune the policy.  Canterbury is
 tracked in the repository, so those files also exercise signal extraction.
 Silesia extraction is checked when the optional downloaded corpus is present;
-the summary goldens still cover all twelve files in ordinary CI.  A synthetic
-input above the adaptive gate exercises production L2–L6 in ordinary CI.
+the summary goldens still cover all twelve files in ordinary CI. A synthetic
+input within the adaptive band exercises production L2–L6 in ordinary CI.
 -/
 
 open Zip.Native.Deflate
@@ -111,7 +111,7 @@ def checkFileIfPresent (path : String) (expectedProfile : L7Profile)
     unless routed.size == expectedSize do
       throw (IO.userError
         s!"L7 route {path}: expected {expectedSize} bytes, got {routed.size}")
-    if adaptiveFastTierMinSize ≤ data.size then
+    if useAdaptiveFastTier data.size then
       assertL2Route path (l2AdaptiveRouteFor data)
         (l2AdaptiveRouteForProfile data.size profile)
       assertL3Route path (l3AdaptiveRouteFor data)
@@ -175,7 +175,8 @@ def tests : IO Unit := do
   checkLarge "x-ray" 726 917 1000 .h3Fast
   checkLarge "xml" 99 199 416 .deep
 
-  -- Every profile stays on its exact pre-adaptive pipeline below 5 MiB.
+  -- Every profile stays on its exact pre-adaptive pipeline outside the
+  -- inclusive 5–64 MiB adaptive band.
   let profiles : List L7Profile := [
     .shallow, .h3Fast, .h3Balanced, .chain64Probe8, .chain64Probe16,
     .chain96Probe16, .chain128Probe16, .chain128Probe32,
@@ -184,8 +185,10 @@ def tests : IO Unit := do
   for profile in profiles do
     checkAdaptiveRoutes s!"below-gate/{repr profile}" (adaptiveFastTierMinSize - 1)
       profile .current .current .current .current .current
+    checkAdaptiveRoutes s!"above-gate/{repr profile}" (adaptiveFastTierMaxSize + 1)
+      profile .current .current .current .current .current
 
-  -- Pin every profile's large-input route at the adaptive gate.
+  -- Pin every profile's route at the inclusive lower edge.
   let gate := adaptiveFastTierMinSize
   checkAdaptiveRoutes "gate/shallow" gate .shallow
     .level1 .level2 .fast .fast .level7
@@ -206,6 +209,11 @@ def tests : IO Unit := do
   checkAdaptiveRoutes "gate/chain128LongProbe32" gate .chain128LongProbe32
     .level1 .level4 .level5 .level7 .level7
   checkAdaptiveRoutes "gate/deep" gate .deep
+    .level1 .level4 .level5 .level7 .level7
+
+  -- The upper edge is inclusive; immediately above it every public adaptive
+  -- selector returns its exact pre-adaptive constituent.
+  checkAdaptiveRoutes "upper-edge/deep" adaptiveFastTierMaxSize .deep
     .level1 .level4 .level5 .level7 .level7
 
   -- The L3 7,000,000-byte boundary is deliberately decimal.  The L4–L6

@@ -211,13 +211,19 @@ def tests : IO Unit := do
   let prng := mkPrngData 65536
   unless (deflateRaw prng 9).size ≤ prng.size + 600 do
     throw (IO.userError "deflateRaw-9: incompressible input expanded past stored bound")
-  -- Inputs above the memory gate run the region-capped windowed candidates
-  -- (#2787), with byte-identical tokens. Public adaptive L9 now selects L10 for
-  -- this chain128LongProbe32 fixture, so exercise the retained windowed
-  -- L9-fast source explicitly and the exact crown through public dispatch.
+  -- Inputs above the shared memory/adaptive gate run the region-capped
+  -- candidates (#2787), with byte-identical tokens. Public L5/L6 must retain
+  -- their pre-adaptive split pipelines, while public L9 retains windowed
+  -- L9-fast and public L10 uses the exact windowed crown.
   let big := mkConstantData (optimalMaxSize + 1)
+  for level in [5, 6] do
+    let production := deflateRaw big level
+    let current := deflateRawSplitLevelP big level
+    unless production == current do
+      throw (IO.userError
+        s!"deflateRaw-{level} above-gate: differed from pre-adaptive pipeline")
   for (label, out) in [
-      ("deflateRawL9P", deflateRawL9P big),
+      ("deflateRaw-9", deflateRaw big 9),
       ("deflateRaw-10", deflateRaw big 10)] do
     match Zip.Native.Inflate.inflate out (big.size + 1) with
     | .ok r =>

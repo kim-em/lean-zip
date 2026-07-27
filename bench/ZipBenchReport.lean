@@ -143,8 +143,8 @@ def Row.toJson (r : Row) : String :=
 def levels : List Nat := [1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 /-- Native lean-zip's level range. Wider than the zlib/miniz FFI cap of 9:
-    level 9 is adaptive on large inputs (selecting the exact L8 or L10 source
-    point) and retains L9-fast below its size gate; **level 10 is the exact-DP
+    level 9 is adaptive within 5–64 MiB (selecting the exact L8 or L10 source
+    point) and retains L9-fast outside that band; **level 10 is the exact-DP
     crown** (the max-ratio ceiling). The dashboard must always sweep
     native through 10 so the crown stays on the Pareto — otherwise the headline
     graph loses our best-ratio point. `runWorkloads` already omits the decode
@@ -564,8 +564,8 @@ def main (args : List String) : IO Unit := do
   | ["--zopfli-ceiling", out] => runZopfliCeiling out
   | ["--native-only", out] => runReport out (nativeOnly := true)
   | ["--native-only", out, lvlCsv] =>
-    -- e.g. "1,2,3,4,5,6,7,8" to skip the slow optimal-parse L9 when a Lean change
-    -- does not touch the L9 path; the dashboard splice keeps the prior L9 + reference rows.
+    -- e.g. "1,2,3,4,5,6,7,8" to skip adaptive L9 and exact-DP L10 when a Lean
+    -- change does not touch those paths; the dashboard splice keeps prior rows.
     let lvls := (lvlCsv.splitOn ",").filterMap (·.trim.toNat?)
     runReport out (nativeOnly := true) (levelOverride := some lvls)
   | _ => runReport (args.head?.getD "bench/results/latest.json")

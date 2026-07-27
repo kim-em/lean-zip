@@ -181,17 +181,26 @@ def checkSilesiaIfPresent : IO Unit := do
 def tests : IO Unit := do
   IO.println "  L9 adaptive-selector tests..."
 
-  -- The gate is strict: every profile preserves current L9 immediately below
-  -- 5 MiB, and selects an L8/L10 source point exactly at the boundary.
+  -- The bounded gate is inclusive: every profile preserves current L9
+  -- immediately outside 5–64 MiB and selects an L8/L10 source point at both
+  -- edges.
   for profile in allProfiles do
     assertRoute s!"below-gate/{repr profile}"
       (l9AdaptiveRouteFor (l9AdaptiveMinSize - 1) profile) .currentL9
+    assertRoute s!"above-gate/{repr profile}"
+      (l9AdaptiveRouteFor (l9AdaptiveMaxSize + 1) profile) .currentL9
   for profile in l8Profiles do
     assertRoute s!"at-gate/L8/{repr profile}"
       (l9AdaptiveRouteFor l9AdaptiveMinSize profile) .level8
+    assertRoute s!"at-upper-edge/L8/{repr profile}"
+      (l9AdaptiveRouteFor l9AdaptiveMaxSize profile) .level8
   for profile in l10Profiles do
     assertRoute s!"at-gate/L10/{repr profile}"
       (l9AdaptiveRouteFor l9AdaptiveMinSize profile) .level10
+    assertRoute s!"at-upper-edge/L10/{repr profile}"
+      (l9AdaptiveRouteFor l9AdaptiveMaxSize profile) .level10
+  assertRoute "at-upper-edge/balanced"
+    (l9AdaptiveRouteFor l9AdaptiveMaxSize .h3Balanced) .level8
 
   -- Balanced-H3 switches from exact L10 to exact L8 at 20 MiB.
   assertRoute "balanced/at-gate"

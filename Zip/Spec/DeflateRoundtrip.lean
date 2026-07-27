@@ -13,13 +13,14 @@ Proves the unified roundtrip theorem for `deflateRaw`:
 `inflate (deflateRaw data level) = .ok data`.
 
 `deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is stored
-and level 1 is the single-block cost-model point.  Below 5 MiB, levels 2–6 keep
-their exact pre-adaptive greedy/split pipelines; on larger inputs they use a
-content profile to select among proven greedy, split, and retained-profile L7
-constituents.  Level 7 uses that retained profile directly, level 8 compares
-the cross-block shared-window split at the observation-divergence boundaries
-(#2737) against its base, and levels 9/10 compare the near-optimal / exact-DP
-candidates instead.
+and level 1 is the single-block cost-model point. Within the inclusive
+5–64 MiB band, levels 2–6 use a content profile to select among proven greedy,
+split, and retained-profile L7 constituents; outside it they keep their exact
+pre-adaptive pipelines. Level 7 uses its retained profile directly, level 8
+compares the cross-block shared-window split at the observation-divergence
+boundaries (#2737) against its base, adaptive level 9 selects exact L8/L10
+constituents within the same bounded band, and level 10 remains the exact-DP
+crown.
 
 This composes:
 - `inflate_deflateRawBase` — the stored / fixed / dynamic base, in turn built

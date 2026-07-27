@@ -1106,10 +1106,12 @@ def niceLen (level : UInt8) : Nat :=
     slack. The probe still runs — it is shallower, not skipped — so the ratio cost
     stays in the noise while the second walk's cycles roughly halve.
 
-    **L6 probes at depth 8 (`chainDepth/8`), no rolling — the whole-tar anchor
-    (#2837)**: the priority for L6 is strict domination of miniz_oxide L6 on the
-    single-stream `zip silesia.tar` workload (211 MB, one `deflateRaw` call), on
-    *both* size and wall time. Deeper/rolling variants (ld18 from the pre-roll
+    **The pre-adaptive L6 constituent probes at depth 8 (`chainDepth/8`), no
+    rolling — the whole-tar anchor (#2837)**: the priority for that constituent
+    is strict domination of miniz_oxide L6 on the single-stream
+    `zip silesia.tar` workload (211 MB, one `deflateRaw` call), on *both* size
+    and wall time. Public L6 retains it outside the bounded adaptive band,
+    including for the whole-tar workload. Deeper/rolling variants (ld18 from the pre-roll
     re-pair, then ld10/cap2) each bought geomean ratio margin but spent whole-tar
     wall: lean's ~0.24s system-time fault tax (the materialized 45.9M-token,
     ~367 MB array, level-independent) means added matcher compute pushes the
@@ -1464,14 +1466,15 @@ def l7ClassifyLarge (minUnique meanUnique maxUnique : Nat) : L7Profile :=
   else if meanUnique < 545 then .chain128Probe32
   else .chain96Probe16
 
-/-- Content-selected matcher profile shared by adaptive levels 2–7 and 9.
+/-- Content-selected matcher profile shared by levels 2–7 and 9.
 
     Inputs below 1 MiB use the 63-probe adjacent-run signal.  Larger inputs use
     four spread 32 KiB regions and the allocation-free four-word cardinality
     sketch.  Levels 2–7 share the selected profile: level 7 uses the selected
-    matcher directly, while sufficiently large levels 2–6 reuse it to select
-    among proven production frontier constituents.  Adaptive level 9 also
-    reuses the profile to select an exact level-8 or level-10 endpoint. -/
+    matcher directly, while levels 2–6 within the bounded adaptive band reuse
+    it to select among proven production frontier constituents. Level 9 also
+    reuses the profile within that band to select an exact level-8 or level-10
+    endpoint. -/
 def l7ProfileFor (data : ByteArray) : L7Profile := Id.run do
   if data.size < h3ProbeMinSize then
     return l7ClassifySmall data.size (l7AdjacentRunSamples data)
@@ -1492,16 +1495,26 @@ def l7ProfileFor (data : ByteArray) : L7Profile := Id.run do
 
 /-! ## Adaptive fast-tier routes
 
-Levels 2–6 reuse level 7's allocation-free content classifier on sufficiently
-large inputs.  The route constructors name *pre-adaptive* pipelines: in
+Levels 2–6 reuse level 7's allocation-free content classifier within a bounded,
+Silesia-targeted input-size band. The route constructors name *pre-adaptive* pipelines: in
 particular, `.level4` is the fixed c16/i128 greedy point, `.level5` is the
 current split-level-5 pipeline, and `.level7` is the current retained-profile
 level-7 pipeline.  Keeping those constituents separate prevents recursive
 calls through the public level dispatch. -/
 
-/-- Inputs below 5 MiB retain the current L2–L6 bytes and avoid the profile
-    scan. -/
+/-- Lower edge of the inclusive adaptive-routing band. -/
 def adaptiveFastTierMinSize : Nat := 5 * 1024 * 1024
+
+/-- Upper edge of the inclusive adaptive-routing band. Every Silesia member is
+    at most 51,220,480 bytes; inputs above this round cap retain the established
+    pipelines instead of extrapolating the corpus-trained policy indefinitely.
+    This edge also matches `optimalMaxSize`: an L10-selected L9 call exactly at
+    64 MiB can use global DP, while larger L9 calls retain windowed L9-fast. -/
+def adaptiveFastTierMaxSize : Nat := 64 * 1024 * 1024
+
+/-- Whether a byte length lies in the inclusive, Silesia-targeted band. -/
+def useAdaptiveFastTier (size : Nat) : Bool :=
+  adaptiveFastTierMinSize ≤ size && size ≤ adaptiveFastTierMaxSize
 
 /-- Upper edge of L3's fast `h3Balanced` band (7,000,000 bytes, deliberately
     decimal: ooffice stays fast while sao routes to L2). -/
@@ -1586,58 +1599,62 @@ def l6AdaptiveLargeRouteFor (size : Nat) : L7Profile → L6AdaptiveRoute
 
 /-- Pure size/profile L2 selector, exposed for route conformance tests. -/
 def l2AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L2AdaptiveRoute :=
-  if size < adaptiveFastTierMinSize then .current
-  else l2AdaptiveLargeRouteFor profile
+  if useAdaptiveFastTier size then l2AdaptiveLargeRouteFor profile
+  else .current
 
 /-- Pure size/profile L3 selector, exposed for route conformance tests. -/
 def l3AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L3AdaptiveRoute :=
-  if size < adaptiveFastTierMinSize then .current
-  else l3AdaptiveLargeRouteFor size profile
+  if useAdaptiveFastTier size then l3AdaptiveLargeRouteFor size profile
+  else .current
 
 /-- Pure size/profile L4 selector, exposed for route conformance tests. -/
 def l4AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L4AdaptiveRoute :=
-  if size < adaptiveFastTierMinSize then .current
-  else l4AdaptiveLargeRouteFor size profile
+  if useAdaptiveFastTier size then l4AdaptiveLargeRouteFor size profile
+  else .current
 
 /-- Pure size/profile L5 selector, exposed for route conformance tests. -/
 def l5AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L5AdaptiveRoute :=
-  if size < adaptiveFastTierMinSize then .current
-  else l5AdaptiveLargeRouteFor size profile
+  if useAdaptiveFastTier size then l5AdaptiveLargeRouteFor size profile
+  else .current
 
 /-- Pure size/profile L6 selector, exposed for route conformance tests. -/
 def l6AdaptiveRouteForProfile (size : Nat) (profile : L7Profile) : L6AdaptiveRoute :=
-  if size < adaptiveFastTierMinSize then .current
-  else l6AdaptiveLargeRouteFor size profile
+  if useAdaptiveFastTier size then l6AdaptiveLargeRouteFor size profile
+  else .current
 
-/-- Production L2 selector.  The outer gate avoids computing `l7ProfileFor` on
-    small inputs. -/
+/-- Production L2 selector. The outer gate avoids computing `l7ProfileFor`
+    outside the bounded input-size band. -/
 def l2AdaptiveRouteFor (data : ByteArray) : L2AdaptiveRoute :=
-  if data.size < adaptiveFastTierMinSize then .current
-  else l2AdaptiveLargeRouteFor (l7ProfileFor data)
+  if useAdaptiveFastTier data.size then l2AdaptiveLargeRouteFor (l7ProfileFor data)
+  else .current
 
-/-- Production L3 selector.  The outer gate avoids computing `l7ProfileFor` on
-    small inputs. -/
+/-- Production L3 selector. -/
 def l3AdaptiveRouteFor (data : ByteArray) : L3AdaptiveRoute :=
-  if data.size < adaptiveFastTierMinSize then .current
-  else l3AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+  if useAdaptiveFastTier data.size then
+    l3AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+  else
+    .current
 
-/-- Production L4 selector.  The outer gate avoids computing `l7ProfileFor` on
-    small inputs. -/
+/-- Production L4 selector. -/
 def l4AdaptiveRouteFor (data : ByteArray) : L4AdaptiveRoute :=
-  if data.size < adaptiveFastTierMinSize then .current
-  else l4AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+  if useAdaptiveFastTier data.size then
+    l4AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+  else
+    .current
 
-/-- Production L5 selector.  The outer gate avoids computing `l7ProfileFor` on
-    small inputs. -/
+/-- Production L5 selector. -/
 def l5AdaptiveRouteFor (data : ByteArray) : L5AdaptiveRoute :=
-  if data.size < adaptiveFastTierMinSize then .current
-  else l5AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+  if useAdaptiveFastTier data.size then
+    l5AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+  else
+    .current
 
-/-- Production L6 selector.  The outer gate avoids computing `l7ProfileFor` on
-    small inputs. -/
+/-- Production L6 selector. -/
 def l6AdaptiveRouteFor (data : ByteArray) : L6AdaptiveRoute :=
-  if data.size < adaptiveFastTierMinSize then .current
-  else l6AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+  if useAdaptiveFastTier data.size then
+    l6AdaptiveLargeRouteFor data.size (l7ProfileFor data)
+  else
+    .current
 
 /-- Boxed lazy matcher at an already-selected level-7 profile. -/
 def l7MatchFor (data : ByteArray) (profile : L7Profile) : Array LZ77Token :=
@@ -1664,11 +1681,12 @@ def l7MatchPFor (data : ByteArray) (profile : L7Profile) : TokenArray :=
     a single lookahead misses. L7 rolls at cap 4 (the certified spike's
     knee: cap 2 captures most of the gain, cap 64 adds nothing over 4):
     +0.053pp corpus-weighted Silesia at ~+2.4% matcher — ~5x more
-    ratio-efficient than deepening toward L8. **L6 does NOT roll (cap 1)**: the
-    ld10/cap2 roll won geomean ratio but cost single-stream `zip silesia.tar`
-    wall time (see `lazyDepth` — the whole-tar anchor takes priority over the
-    per-file geomean margin), so L6 is back at its ld8/no-roll config that
-    strictly beats miniz L6 on the whole tar in both size and time. L8's deeper
+    ratio-efficient than deepening toward L8. **The pre-adaptive L6 constituent
+    does NOT roll (cap 1)**: the ld10/cap2 roll won geomean ratio but cost
+    single-stream `zip silesia.tar` wall time (see `lazyDepth` — the whole-tar
+    anchor takes priority over the per-file geomean margin), so the public
+    whole-tar bypass uses the ld8/no-roll config that strictly beats miniz L6
+    on the whole tar in both size and time. L8's deeper
     chain makes each extra probe ~8x costlier (the spike measured +7.3% matcher
     there), so it stays at 1; the fast band never rolls. Pure parse heuristic —
     the tower (`mergedLoop_eq` and the contracts) is proven for every value. -/
@@ -3422,8 +3440,8 @@ theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     projected ~2.1 GB peak. Above the gate, region-capped choice storage
     preserves the same tokens in bounded memory instead of falling back to a
     split parse. The explicit L9-fast source helper shares this threshold for
-    conformance, although public adaptive L9 selects it only below 5 MiB. -/
-def optimalMaxSize : Nat := 67108864
+    conformance; public L9 uses it outside the 5–64 MiB adaptive band. -/
+def optimalMaxSize : Nat := adaptiveFastTierMaxSize
 
 /-- Cross-block (shared-window) block-split dynamic compression over the
     **near-optimal** token stream: like `deflateDynamicBlocksShared`, but the
@@ -3442,7 +3460,7 @@ def deflateDynamicBlocksOptimal (data : ByteArray) (tokChunk : Nat) : ByteArray 
     but the cheaper single-round, bounds-free, shallow-cache parser. The tokens
     satisfy the same encoder contracts, so the roundtrip proof is the exact
     twin (`decode_deflateDynamicBlocksOptimalFast` etc.). It remains the
-    production level-9 source point below the adaptive size gate; the exact
+    production level-9 source point outside the adaptive size band; the exact
     crown is level 10. -/
 def deflateDynamicBlocksOptimalFast (data : ByteArray) (tokChunk : Nat) : ByteArray :=
   if data.size == 0 then
@@ -3679,10 +3697,10 @@ def deflateRawL4Adaptive (data : ByteArray) : ByteArray :=
   | .fast => deflateRawAdaptiveFast data
   | .level5 => deflateRawSplitLevelP data 5
 
-/-- Adaptive L5 core.  On large inputs it computes the profile once and retains
-    it if the exact current L7 route is selected. -/
+/-- Adaptive L5 core. Within the bounded band it computes the profile once and
+    retains it if the exact current L7 route is selected. -/
 def deflateRawL5Adaptive (data : ByteArray) : ByteArray :=
-  if data.size < adaptiveFastTierMinSize then
+  if !useAdaptiveFastTier data.size then
     deflateRawSplitLevelP data 5
   else
     let profile := l7ProfileFor data
@@ -3694,7 +3712,7 @@ def deflateRawL5Adaptive (data : ByteArray) : ByteArray :=
 /-- Adaptive L6 core.  Exact L5 and retained-profile L7 constituents call their
     pre-adaptive helpers rather than the public level dispatch. -/
 def deflateRawL6Adaptive (data : ByteArray) : ByteArray :=
-  if data.size < adaptiveFastTierMinSize then
+  if !useAdaptiveFastTier data.size then
     deflateRawSplitLevelP data 6
   else
     let profile := l7ProfileFor data
@@ -3704,16 +3722,20 @@ def deflateRawL6Adaptive (data : ByteArray) : ByteArray :=
     | .level5 => deflateRawSplitLevelP data 5
     | .level7 => deflateRawL7P data profile
 
-/-- Source production point selected by adaptive level 9.  Below the size gate,
-    `currentL9` preserves the established L9-fast pipeline byte-for-byte. -/
+/-- Source production point selected by adaptive level 9.  Outside the bounded
+    size band, `currentL9` preserves the established L9-fast pipeline
+    byte-for-byte. -/
 inductive L9AdaptiveRoute where
   | currentL9
   | level8
   | level10
   deriving BEq, ReflBEq, LawfulBEq, Repr
 
-/-- Adaptive level 9 shares the fast-tier 5 MiB size gate. -/
+/-- Adaptive level 9 shares the fast-tier lower edge. -/
 def l9AdaptiveMinSize : Nat := adaptiveFastTierMinSize
+
+/-- Adaptive level 9 shares the fast-tier upper edge. -/
+def l9AdaptiveMaxSize : Nat := adaptiveFastTierMaxSize
 
 /-- Balanced-H3 shares the fast-tier 20 MiB upper edge: below it adaptive L9
     selects exact L10, and at or above it exact L8. -/
@@ -3721,14 +3743,15 @@ def l9AdaptiveH3BalancedL10MaxSize : Nat := adaptiveBalancedMaxSize
 
 /-- Pure size/profile routing policy for adaptive level 9. -/
 def l9AdaptiveRouteFor (size : Nat) (profile : L7Profile) : L9AdaptiveRoute :=
-  if size < l9AdaptiveMinSize then .currentL9
-  else
+  if useAdaptiveFastTier size then
     match profile with
     | .chain128LongProbe32 | .h3Fast | .deep => .level10
     | .h3Balanced =>
         if size < l9AdaptiveH3BalancedL10MaxSize then .level10 else .level8
     | .chain64Probe8 | .shallow | .chain64Probe16 | .chain96Probe16
     | .chain128Probe16 | .chain128Probe32 => .level8
+  else
+    .currentL9
 
 /-- Exact pre-adaptive production L8 tail over retained packed tokens. -/
 def deflateRawL8TokensP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
@@ -3776,8 +3799,8 @@ def deflateRawL9RouteP (data : ByteArray) (route : L9AdaptiveRoute) : ByteArray 
   | .level8 => deflateRawL8P data
   | .level10 => deflateRawL10P data
 
-/-- Adaptive L9 after the size gate and shared incompressible prescan.  The
-    retained profile is consumed exactly once and every arm is an existing
+/-- Adaptive L9 within the bounded band, after the shared incompressible
+    prescan. The retained profile is consumed exactly once and every arm is an existing
     production pipeline, with no recursive `deflateRaw` call. -/
 def deflateRawL9AdaptiveP (data : ByteArray) (profile : L7Profile) : ByteArray :=
   deflateRawL9RouteP data (l9AdaptiveRouteFor data.size profile)
@@ -3785,9 +3808,9 @@ def deflateRawL9AdaptiveP (data : ByteArray) (profile : L7Profile) : ByteArray :
 /-- Unified raw DEFLATE compression dispatch. The native level range is **0–10**
     (wider than zlib's 0–9). Since #2638 the top of the ladder is:
 
-      * **level 9** — below 5 MiB, the **L9-fast** approximate-optimal parse;
-        from 5 MiB upward, a content profile selects the exact production L8
-        or L10 point;
+      * **level 9** — within the inclusive 5–64 MiB adaptive band, a content
+        profile selects the exact production L8 or L10 point; outside that
+        band it retains the **L9-fast** approximate-optimal parse;
       * **level ≥ 10** — the exact backward-DP **crown** (the max-ratio ceiling,
         the former level-9 output); 11+ alias level 10.
 
@@ -3795,10 +3818,10 @@ def deflateRawL9AdaptiveP (data : ByteArray) (profile : L7Profile) : ByteArray :
     (The zlib/FFI bindings are a separate 0–9 path and are unchanged.)
 
     Level 0 = stored and level 1 is the fused greedy single-block point.
-    Below 5 MiB, levels 2–6 retain their pre-adaptive pipelines byte-for-byte.
-    At and above that gate they reuse level 7's content profile to select among
-    already-proven frontier constituents: fixed greedy L1/L2/L4, the shared
-    c8/i12 greedy point, split L5/L6, and retained-profile L7.  Level 7 keeps
+    Outside the inclusive 5–64 MiB band, levels 2–6 retain their pre-adaptive
+    pipelines byte-for-byte. Within it they reuse level 7's content profile to
+    select among already-proven frontier constituents: fixed greedy L1/L2/L4,
+    the shared c8/i12 greedy point, split L5/L6, and retained-profile L7. Level 7 keeps
     its content-selected matcher/output route directly, while level 8 keeps
     the packed base-vs-cross-block split arbitration described below.
 
@@ -3853,16 +3876,16 @@ def deflateRawL9AdaptiveP (data : ByteArray) (profile : L7Profile) : ByteArray :
     any input, and one packed emit pass is far cheaper than the two boxed
     sizing walks it replaces.
 
-    The level-10 source and the L9-fast source retained below the adaptive gate
+    The level-10 source and the L9-fast source retained outside the adaptive band
     use a cost-model DP parse (grouped into blocks on the fixed
     `sharedTokChunk` cadence, emitted as `pickSmaller(base, optimal)`), choosing
     the globally cheapest token sequence under an estimated bit cost instead of
     the locally longest match. **Level 10** runs the exact backward-DP crown
-    (`deflateDynamicBlocksOptimal`) — the max-ratio ceiling. Below the 5 MiB
-    adaptive gate, **level 9** retains the cheaper **L9-fast**
+    (`deflateDynamicBlocksOptimal`) — the max-ratio ceiling. Outside the
+    5–64 MiB adaptive band, **level 9** retains the cheaper **L9-fast**
     approximate-optimal parse (`deflateDynamicBlocksOptimalFast`, #2638):
-    single round, no length-code boundary scan, shallower cache. On larger
-    inputs, level 9 instead classifies the content once with `l7ProfileFor` and
+    single round, no length-code boundary scan, shallower cache. Within the
+    bounded band, level 9 instead classifies the content once with `l7ProfileFor` and
     selects an exact existing endpoint: L10 for `chain128LongProbe32`, `h3Fast`,
     and `deep`; L10 for `h3Balanced` below 20 MiB and L8 at or above it; L8 for
     every other profile. The adaptive layer performs one `l7ProfileFor` scan
@@ -3914,7 +3937,7 @@ def deflateRawL9AdaptiveP (data : ByteArray) (profile : L7Profile) : ByteArray :
     ratio — the split's per-block trees buy more than the deep chain did.
     Inputs of at least 4 MiB subsequently move to chain 22 and a 2016-token
     split cadence; smaller L5 inputs retain the chain-24/512-token point.
-    Inputs below the 5 MiB adaptive gate retain those exact historical bytes.
+    Inputs outside the 5–64 MiB adaptive band retain those exact historical bytes.
 
     Before any of that, an `incompressiblePrescan` reads a bounded sample (≤128 KiB,
     short-circuited on the first compressible region) and, on unambiguously
@@ -3951,10 +3974,10 @@ def deflateRaw (data : ByteArray) (level : UInt8 := 6) : ByteArray :=
       let profile := l7ProfileFor data
       deflateRawL7P data profile
     else if level == 9 then
-      -- Large L9 is a content-selected point on the exact production L8/L10
-      -- envelope.  Keep the 5 MiB gate before the classifier so smaller inputs
-      -- retain both the established L9-fast bytes and its former cost.
-      if l9AdaptiveMinSize ≤ data.size then
+      -- Within the bounded size band L9 is a content-selected point on the
+      -- exact production L8/L10 envelope. Keep the bounded gate before the
+      -- classifier so other inputs retain the established L9-fast bytes/cost.
+      if useAdaptiveFastTier data.size then
         let profile := l7ProfileFor data
         deflateRawL9AdaptiveP data profile
       else
