@@ -413,5 +413,6 @@
 <path d="M722.00,535.90L726.85,538.70L726.85,544.30L722.00,547.10L717.15,544.30L717.15,538.70Z" fill="none" stroke="#17becf" stroke-width="1.6"/>
 <text x="735" y="546" font-weight="normal">OCaml decompress</text>
 </g>
-<text x="470" y="653" text-anchor="middle" font-size="9.5" fill="#777777">native history · refs @ 88ed5fa0 (2026-07-27, chungus2) · per-frame timing: legacy Silesia single-rep → median-of-5 at 486a77db · ratio deterministic</text>
+<text x="470" y="642" text-anchor="middle" font-size="9.5" fill="#777777">native history · refs @ 88ed5fa0 (2026-07-27, chungus2) · per-frame routine timing: legacy Silesia single-rep → median-of-5 at 486a77db · ratios deterministic</text>
+<text x="470" y="653" text-anchor="middle" font-size="9.5" fill="#777777">zopfli: frozen single-rep @118a98e/chungus (indicative)</text>
 </svg>
