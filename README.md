@@ -76,7 +76,7 @@ Comparing at matched compression ratios, the Lean implementation:
   each miniz_oxide ratio, native is faster at a same-or-better ratio under
   reciprocal-throughput mixing. Independent median-of-5 reruns put the
   narrow L3/L4 leads at about 1.2%; miniz_oxide's L1 fast corner remains
-  1.44× faster. Adaptive L9 and the exact-DP L10 reach still denser ratios;
+  1.44× faster. L9-fast and the exact-DP L10 reach still denser ratios;
 - trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 3.5–11×, as
   expected for the format.
 

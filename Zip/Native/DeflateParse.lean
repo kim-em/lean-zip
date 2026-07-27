@@ -1283,9 +1283,8 @@ def lz77OptimalWindowedIter (data : ByteArray) : Array LZ77Token :=
         st.1 st.2.1 st.2.2 ht prev h3)
 
 /-- Windowed L9-fast parse (#2787): the region-capped twin of
-    `lz77OptimalFastIter`. Retained for the explicit pre-adaptive L9-fast
-    source helper and its conformance coverage; public level 9 selects this
-    source outside its bounded adaptive band, including above 64 MiB. -/
+    `lz77OptimalFastIter`. Public level 9 selects this byte-identical,
+    memory-bounded implementation above its DP memory-policy threshold. -/
 def lz77OptimalWindowedFastIter (data : ByteArray) : Array LZ77Token :=
   let st := staticCostTables
   lz77OptimalWindowedWith data

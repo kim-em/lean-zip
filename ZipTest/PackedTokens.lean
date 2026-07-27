@@ -333,10 +333,14 @@ private def checkLargeL5CompiledPath : IO Unit := do
   if packedCuts.isEmpty then
     throw (IO.userError "large-L5 fixture did not exercise split arbitration")
 
-  let production := deflateRaw data 5
+  -- The public L5 policy may route this profile to another established
+  -- constituent.  Exercise the exact L5 pipeline here: this test is about
+  -- its large-input matcher and packed split specialization, not the outer
+  -- content router (covered by L7Adaptive).
+  let production := deflateRawSplitLevelP data 5
   let established := emitL5Reference data reference referenceCuts
   unless production == established do
-    throw (IO.userError "large-L5 production/reference output mismatch")
+    throw (IO.userError "large-L5 pipeline/reference output mismatch")
 
 /-- Direct compiled conformance for the two level-7 `@[implemented_by]`
     specializations. Calling the proof-facing wrappers exercises their native

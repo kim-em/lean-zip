@@ -13,14 +13,13 @@ Proves the unified roundtrip theorem for `deflateRaw`:
 `inflate (deflateRaw data level) = .ok data`.
 
 `deflateRaw` is defined in `Zip/Native/DeflateDynamic.lean`. Level 0 is stored
-and level 1 is the single-block cost-model point. Within the inclusive
-5–64 MiB band, levels 2–6 use a content profile to select among proven greedy,
-split, and retained-profile L7 constituents; outside it they keep their exact
-pre-adaptive pipelines. Level 7 uses its retained profile directly, level 8
-compares the cross-block shared-window split at the observation-divergence
-boundaries (#2737) against its base, adaptive level 9 selects exact L8/L10
-constituents within the same bounded band, and level 10 remains the exact-DP
-crown.
+and level 1 is the single-block cost-model point. Levels 2, 6, and 9 are fixed
+policies. In the classifier's large-input regime, levels 3–5 use a content
+profile to select among proven greedy, split, and retained-profile L7
+constituents, with no upper size cutoff. Level 7 uses its retained profile
+directly, level 8 compares the cross-block shared-window split at the
+observation-divergence boundaries (#2737) against its base, and level 10
+remains the exact-DP crown.
 
 This composes:
 - `inflate_deflateRawBase` — the stored / fixed / dynamic base, in turn built
@@ -179,9 +178,9 @@ set_option maxRecDepth 8000 in
     `maxOutputSize` large enough to hold the input. The incompressible pre-scan
     and the level-0 path both dispatch to `deflateStoredPure` directly; the
     cost-model stored fallback is covered by `deflateRawBase`; every adaptive
-    L2–L6 constituent, the level-8 size-arbitrated split (`emitSmallerBy`,
-    #2753), retained L9-fast source, adaptive L9 endpoint, and level-10 optimal
-    candidate each emit concretely-roundtripping blocks.
+    L3–L5 constituent, the fixed L2/L6/L9 points, the level-8 size-arbitrated
+    split (`emitSmallerBy`, #2753), and the level-10 optimal candidate each
+    emit concretely-roundtripping blocks.
 
     The whole inductive proof is built on the reference decoder; the capstone
     stated against the decoder we actually ship, `Inflate.inflate`, is
@@ -284,9 +283,7 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
   have hl2 : Zip.Native.Inflate.inflateReference
       (deflateRawL2Adaptive data) maxOutputSize = .ok data := by
     unfold deflateRawL2Adaptive
-    split
-    · exact hgreedyLevel 2 (by decide)
-    · exact hgreedyLevel 1 (by decide)
+    exact hgreedyLevel 2 (by decide)
   have hl3 : Zip.Native.Inflate.inflateReference
       (deflateRawL3Adaptive data) maxOutputSize = .ok data := by
     unfold deflateRawL3Adaptive
@@ -315,14 +312,7 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
   have hl6 : Zip.Native.Inflate.inflateReference
       (deflateRawL6Adaptive data) maxOutputSize = .ok data := by
     unfold deflateRawL6Adaptive
-    split
-    · exact hsplitLevel 6
-    · dsimp only
-      split
-      · exact hsplitLevel 6
-      · exact hfast
-      · exact hsplitLevel 5
-      · exact hl7
+    exact hsplitLevel 6
   have hl8 : Zip.Native.Inflate.inflateReference
       (deflateRawL8P data) maxOutputSize = .ok data := by
     unfold deflateRawL8P deflateRawL8TokensP
@@ -350,12 +340,9 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
       | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase 10)
           (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
   have hadaptive : Zip.Native.Inflate.inflateReference
-      (deflateRawL9AdaptiveP data (l7ProfileFor data)) maxOutputSize = .ok data := by
-    unfold deflateRawL9AdaptiveP deflateRawL9RouteP
-    split
-    · exact hl9
-    · exact hl8
-    · exact hl10
+      (deflateRawL9AdaptiveP data) maxOutputSize = .ok data := by
+    unfold deflateRawL9AdaptiveP
+    exact hl9
   split
   · exact inflate_deflateStoredPure data _ (by omega)
   -- The incompressible pre-scan routes straight to the same stored block.
@@ -369,9 +356,7 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
           · split
             · exact hl7
             · split
-              · split
-                · exact hadaptive
-                · exact hl9
+              · exact hadaptive
               · split
                 · -- level ≥ 10: exact-DP crown, sized floor + optimal.
                   unfold deflateRawL10TokensP
@@ -383,7 +368,7 @@ theorem inflateReference_deflateRaw (data : ByteArray) (level : UInt8)
                     | exact inflate_emitSmallerBy _ _ _ _ data maxOutputSize (hbase _)
                         (inflate_deflateDynamicBlocksOptimalWindowed data sharedTokChunk _ hsize)
                 · split
-                  · -- level 8: exact named source point used by adaptive L9.
+                  · -- level 8: exact split source point.
                     have hlevel : level = 8 := by
                       simpa only [beq_iff_eq] using
                         (show (level == 8) = true by assumption)
@@ -623,9 +608,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       Deflate.Spec.bytesToBits (deflateRawL2Adaptive data) =
         contentBits ++ padding ∧ padding.length < 8 := by
     unfold deflateRawL2Adaptive
-    split
-    · exact hgreedyLevel 2 (by decide)
-    · exact hgreedyLevel 1 (by decide)
+    exact hgreedyLevel 2 (by decide)
   have hl3 : ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (deflateRawL3Adaptive data) =
         contentBits ++ padding ∧ padding.length < 8 := by
@@ -658,14 +641,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
       Deflate.Spec.bytesToBits (deflateRawL6Adaptive data) =
         contentBits ++ padding ∧ padding.length < 8 := by
     unfold deflateRawL6Adaptive
-    split
-    · exact hsplitLevel 6
-    · dsimp only
-      split
-      · exact hsplitLevel 6
-      · exact hfast
-      · exact hsplitLevel 5
-      · exact hl7
+    exact hsplitLevel 6
   have hl8 : ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits (deflateRawL8P data) =
         contentBits ++ padding ∧ padding.length < 8 := by
@@ -709,13 +685,10 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
           (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
   have hadaptive : ∃ (contentBits padding : List Bool),
       Deflate.Spec.bytesToBits
-          (deflateRawL9AdaptiveP data (l7ProfileFor data)) =
+          (deflateRawL9AdaptiveP data) =
         contentBits ++ padding ∧ padding.length < 8 := by
-    unfold deflateRawL9AdaptiveP deflateRawL9RouteP
-    split
-    · exact hl9
-    · exact hl8
-    · exact hl10
+    unfold deflateRawL9AdaptiveP
+    exact hl9
   split
   · -- Level 0: stored blocks — all byte-aligned, padding = []
     exact hstored
@@ -730,9 +703,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
           · split
             · exact hl7
             · split
-              · split
-                · exact hadaptive
-                · exact hl9
+              · exact hadaptive
               · split
                 · -- level ≥ 10: exact-DP crown, sized floor.
                   unfold deflateRawL10TokensP
@@ -750,7 +721,7 @@ theorem deflateRaw_pad (data : ByteArray) (level : UInt8) :
                         _ _ _ _ (hbase _)
                         (deflateDynamicBlocksOptimalWindowed_pad data sharedTokChunk)
                 · split
-                  · -- level 8: exact named source point used by adaptive L9.
+                  · -- level 8: exact split source point.
                     have hlevel : level = 8 := by
                       simpa only [beq_iff_eq] using
                         (show (level == 8) = true by assumption)
@@ -1059,9 +1030,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
           (Deflate.Spec.bytesToBits (deflateRawL2Adaptive data)) [] =
         some (data.data.toList, remaining) ∧ remaining.length < 8 := by
     unfold deflateRawL2Adaptive
-    split
-    · exact hgreedyLevel 2 (by decide)
-    · exact hgreedyLevel 1 (by decide)
+    exact hgreedyLevel 2 (by decide)
   have hl3 : ∃ remaining,
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits (deflateRawL3Adaptive data)) [] =
@@ -1098,14 +1067,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
           (Deflate.Spec.bytesToBits (deflateRawL6Adaptive data)) [] =
         some (data.data.toList, remaining) ∧ remaining.length < 8 := by
     unfold deflateRawL6Adaptive
-    split
-    · exact hsplitLevel 6
-    · dsimp only
-      split
-      · exact hsplitLevel 6
-      · exact hfast
-      · exact hsplitLevel 5
-      · exact hl7
+    exact hsplitLevel 6
   have hl8 : ∃ remaining,
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits (deflateRawL8P data)) [] =
@@ -1157,13 +1119,10 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
   have hadaptive : ∃ remaining,
       Deflate.Spec.decode.goR
           (Deflate.Spec.bytesToBits
-            (deflateRawL9AdaptiveP data (l7ProfileFor data))) [] =
+            (deflateRawL9AdaptiveP data)) [] =
         some (data.data.toList, remaining) ∧ remaining.length < 8 := by
-    unfold deflateRawL9AdaptiveP deflateRawL9RouteP
-    split
-    · exact hl9
-    · exact hl8
-    · exact hl10
+    unfold deflateRawL9AdaptiveP
+    exact hl9
   split
   · -- Level 0: stored blocks — byte-aligned, remaining = []
     exact hstored
@@ -1178,9 +1137,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
           · split
             · exact hl7
             · split
-              · split
-                · exact hadaptive
-                · exact hl9
+              · exact hadaptive
               · split
                 · -- level ≥ 10: exact-DP crown, sized floor.
                   unfold deflateRawL10TokensP
@@ -1200,7 +1157,7 @@ theorem deflateRaw_goR_pad (data : ByteArray) (level : UInt8) :
                         _ _ _ _ (hbase _)
                         (deflateDynamicBlocksOptimalWindowed_goR_pad data sharedTokChunk)
                 · split
-                  · -- level 8: exact named source point used by adaptive L9.
+                  · -- level 8: exact split source point.
                     have hlevel : level = 8 := by
                       simpa only [beq_iff_eq] using
                         (show (level == 8) = true by assumption)
