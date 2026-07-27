@@ -208,11 +208,11 @@ def _provenance(meta):
                 f"{fresh_label} {_session_label(fresh_groups)}  ·  "
                 f"{reused_label} {_session_label(reused_groups)}  ·  "
                 f"{meta.get('machine', '?')}  ·  "
-                f"routine speed={timing}{frozen}; ratios deterministic"
+                f"routine speed={timing}; ratios deterministic{frozen}"
             )
     return (f"{meta.get('date','?')}  ·  {meta.get('machine','?')}  ·  "
             f"commit {meta.get('git_commit','?')}  ·  {meta.get('toolchain','?')}  ·  "
-            f"routine speed={timing}{frozen}; ratios deterministic")
+            f"routine speed={timing}; ratios deterministic{frozen}")
 
 
 def add_provenance(fig, meta, y=0.005):

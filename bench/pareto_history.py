@@ -415,6 +415,7 @@ def build_svg(references, frames, meta, outfile):
     T = HOLD_FIRST + FRAME_SECONDS * (N - 1) + HOLD_LAST
     starts = [HOLD_FIRST + FRAME_SECONDS * i for i in range(N)]
     keytimes = [0.0] + [s / T for s in starts] + [1.0]
+    provenance = provenance_lines(meta)
 
     def keyframes(vals):
         seq = [vals[0]] + list(vals) + [vals[-1]]
@@ -516,7 +517,8 @@ def build_svg(references, frames, meta, outfile):
     out += grid + labels
     out.append(f'<rect x="{SVG_ML}" y="{SVG_MT}" width="{SVG_W-SVG_ML-SVG_MR}" '
                f'height="{SVG_H-SVG_MT-SVG_MB}" fill="none" stroke="#cccccc"/>')
-    out.append(f'<text x="{(SVG_ML+SVG_W-SVG_MR)/2:.0f}" y="{SVG_H-24}" text-anchor="middle" '
+    x_label_y = SVG_H - (35 if len(provenance) > 1 else 24)
+    out.append(f'<text x="{(SVG_ML+SVG_W-SVG_MR)/2:.0f}" y="{x_label_y}" text-anchor="middle" '
                f'font-size="15.5" fill="#222222">compression ratio   '
                f'(compressed / original  —  ← smaller is better)</text>')
     out.append(f'<text transform="translate(20 {(SVG_MT+SVG_H-SVG_MB)/2:.0f}) rotate(-90)" '
@@ -675,7 +677,6 @@ def build_svg(references, frames, meta, outfile):
                    f'font-weight="{"bold" if filled else "normal"}">{escape(label)}</text>')
     out.append("</g>")
 
-    provenance = provenance_lines(meta)
     first_y = SVG_H - 7 if len(provenance) == 1 else SVG_H - 18
     for index, line in enumerate(provenance):
         out.append(f'<text x="{SVG_W/2:.0f}" y="{first_y + 11 * index}" '

@@ -182,6 +182,24 @@ class MergeNativeTests(unittest.TestCase):
             self.assertIn("different machines", result.stderr)
             self.assertFalse(out_path.exists())
 
+    def test_rejects_missing_measurement_machine(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            old_path = root / "old.json"
+            new_path = root / "new.json"
+            out_path = root / "out.json"
+            old_path.write_text(json.dumps(document(
+                "old", [row("zlib", "c/a", 1, 2.0)]
+            )), encoding="utf-8")
+            new = document("new", [row("native", "c/a", 1, 3.0)])
+            new["meta"]["machine"] = None
+            new_path.write_text(json.dumps(new), encoding="utf-8")
+
+            result = run_merge(old_path, new_path, out_path, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("must declare their measurement machine", result.stderr)
+            self.assertFalse(out_path.exists())
+
     def test_rejects_duplicate_result_keys(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -246,6 +264,38 @@ class MergeNativeTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("provenance group 1", result.stderr)
             self.assertIn("different machine", result.stderr)
+            self.assertFalse(out_path.exists())
+
+    def test_rejects_non_median_prior_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            base_path = root / "base.json"
+            n1_path = root / "n1.json"
+            n2_path = root / "n2.json"
+            once_path = root / "once.json"
+            forged_path = root / "forged.json"
+            out_path = root / "out.json"
+            base_path.write_text(json.dumps(document(
+                "base", [row("zlib", "c/a", 1, 2.0)]
+            )), encoding="utf-8")
+            n1_path.write_text(json.dumps(document(
+                "n1", [row("native", "c/a", 1, 3.0)]
+            )), encoding="utf-8")
+            n2_path.write_text(json.dumps(document(
+                "n2", [row("native", "c/a", 2, 4.0)]
+            )), encoding="utf-8")
+            run_merge(base_path, n1_path, once_path)
+            forged = json.loads(once_path.read_text(encoding="utf-8"))
+            forged["meta"]["row_provenance"]["groups"][1]["meta"].update({
+                "timing_aggregation": "single",
+                "timing_reps": 1,
+            })
+            forged_path.write_text(json.dumps(forged), encoding="utf-8")
+
+            result = run_merge(forged_path, n2_path, out_path, check=False)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("old provenance group 1.meta", result.stderr)
+            self.assertIn("expected timing_aggregation='median'", result.stderr)
             self.assertFalse(out_path.exists())
 
 

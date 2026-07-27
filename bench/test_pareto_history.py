@@ -58,6 +58,10 @@ class ParetoHistoryTimingTests(unittest.TestCase):
             "zopfli: frozen single-rep @frozen12/oldbox (indicative)",
             label,
         )
+        self.assertIn(
+            "routine speed=median-of-5; ratios deterministic\nzopfli:",
+            label,
+        )
         self.assertEqual(
             pareto_history.reference_meta(meta)["git_commit"], "old12345"
         )

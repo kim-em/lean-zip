@@ -40,7 +40,7 @@
 <text x="922.0" y="610" text-anchor="middle">0.44</text>
 </g>
 <rect x="72" y="70" width="850" height="518" fill="none" stroke="#cccccc"/>
-<text x="497" y="636" text-anchor="middle" font-size="15.5" fill="#222222">compression ratio   (compressed / original  —  ← smaller is better)</text>
+<text x="497" y="625" text-anchor="middle" font-size="15.5" fill="#222222">compression ratio   (compressed / original  —  ← smaller is better)</text>
 <text transform="translate(20 329) rotate(-90)" text-anchor="middle" font-size="15.5" fill="#222222">compression speed   (MB/s, log)</text>
 <text x="84" y="94" font-size="16" fill="#2a8a3a" font-weight="bold">↖ fast &amp; small = best</text>
 <path d="M541.4,144.0L536.8,144.6L532.1,145.1L527.5,145.6L522.9,146.2L518.2,146.7L513.6,147.2L508.9,147.7L504.3,148.3L499.7,148.8L495.0,149.3L490.4,149.8L485.7,150.3L481.1,150.8L476.5,151.3L471.8,151.8L467.2,152.3" fill="none" stroke="#1f77b4" stroke-width="1.9" opacity="0.9"/>
