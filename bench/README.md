@@ -182,6 +182,9 @@ adjacent-run signal to its four-region cardinality sketch (1 MiB); it has no
 upper cutoff or per-file byte-length exception. Levels 2, 6, and 9 no longer
 use content routing. In particular, level 6 uses one chain-48/depth-6 split
 pipeline for both individual files and whole-corpus tar streams.
+The public L1 point is an intentional fast-tier retune: relative to its former
+point it raises the equal-file-geomean output/input ratio by 7.8% on Canterbury
+and 8.7% on Silesia for 52.5% and 64.1% more throughput, respectively.
 The fixed public L2 point is the fused c4/i3 fast-tier bridge. Relative to its
 former c8/i8 point it spends 3.0% equal-file-geomean ratio on Canterbury and
 2.9% on Silesia for 38.6% and 46.4% more throughput, respectively.

@@ -77,11 +77,13 @@ Comparing at matched compression ratios, the Lean implementation:
   reciprocal-throughput mixing. On Silesia, an independent matched-session
   median-of-5 rerun puts native L1 directly ahead of miniz_oxide L1 on the
   equal-file-geomean aggregate: 273.7 vs 235.2 MB/s (+16.4%), with a ratio
-  8.8% smaller. Public L2 is also an intentional fast-tier trade: it spends
-  3.0% ratio on Canterbury and 2.9% on Silesia for 38.6% and 46.4% more
-  throughput, respectively. Separate matched reruns put the narrow L3/L4
-  mixing leads at about 1.2%. L9-fast and the exact-DP L10 reach still denser
-  ratios;
+  8.8% smaller. Relative to the previous native L1, this intentional fast-tier
+  retune raises the output/input ratio by 7.8% on Canterbury and 8.7% on
+  Silesia for 52.5% and 64.1% more throughput, respectively. Public L2 is also
+  an intentional fast-tier trade: it spends 3.0% ratio on Canterbury and 2.9%
+  on Silesia for 38.6% and 46.4% more throughput, respectively. Separate
+  matched reruns put the narrow L3/L4 mixing leads at about 1.2%. L9-fast and
+  the exact-DP L10 reach still denser ratios;
 - trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 3.5–11×, as
   expected for the format.
 
