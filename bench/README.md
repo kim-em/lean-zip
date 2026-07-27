@@ -26,6 +26,39 @@ throughput is a **median-of-5 snapshot of the machine recorded in the JSON
 snapshots that do not declare that protocol. Routine before/after claims must
 compare two median-of-5 snapshots produced with this same protocol; exploratory
 single-shot timings are useful for tuning, but are not dashboard evidence.
+
+For a long native before/after audit, use [`paired_native.py`](paired_native.py)
+instead of running the two revisions as separate sweeps. It runs each matching
+file/level cell adjacently on one pinned CPU, keeps median-of-5 within each cell,
+and checkerboards before-first/after-first order across files and levels. Before
+measuring, it asks both binaries for their timing policy and requires exactly
+median-of-5. The resumable manifest fingerprints the driver, commits, dirty
+source state, binaries, corpus bytes, harness/timing objects, actual Rust miniz
+archive, link configuration, CPU affinity, and every core-scheduling session.
+Each resumed `coresched new` invocation may have a different private nonzero
+cookie; cells record which session measured them. Level lists must be nonempty,
+unique, and within 1–10.
+
+The matched link guard covers normalized external flags and byte-identical
+benchmark-support inputs. The manifest also records the full normalized linker
+response hash for audit, but does not require that full hash to match: an
+intended production change may legitimately add a root-local Lean object.
+
+Outputs and the manifest must be distinct paths outside both compared roots, so
+creating them cannot change a clean checkout's provenance and break resume. A
+canonical Linux invocation is:
+
+```
+coresched new -- taskset -c 95 python3 bench/paired_native.py \
+  BEFORE_ROOT AFTER_ROOT /tmp/lean-zip-before.json /tmp/lean-zip-after.json \
+  --manifest /tmp/lean-zip-paired-manifest.json --require-private-cookie
+```
+
+Re-running the same command resumes every fully checkpointed pair. To replace a
+known-contaminated pair, add a quoted key such as
+`--rerun-cell 'silesia/mozilla|9'`; both sides of that cell are discarded and
+remeasured adjacently in the new recorded session.
+
 Commit the JSON and static SVGs, then run `bench/run.sh --history-only` and
 commit the two tracked history SVGs in a separate commit. Do not amend the data
 commit afterward: its SHA, date, and subject are embedded in the animation
@@ -139,12 +172,17 @@ is a different aggregate and its dominance verdicts are not dashboard claims.
 Because raw `deflateRaw` defaults to level 6, the fixed L6 point is also the
 whole-stream default. Gzip/zlib wrapper defaults are unchanged.
 
-The two narrow miniz_oxide comparisons were also repeated in one fresh,
-matched-session median-of-5 run: native's L3→L4 reciprocal-throughput mix led
-at the exact miniz L3 and L4 ratios by 1.18% and 1.28%, respectively (1.14% and
-1.21% using the dashboard's stored rounded ratio fields). This corroborates,
-but does not turn the narrow lead into a noise-independent separation; the raw
+The miniz_oxide comparisons were also repeated in fresh, matched-session
+median-of-5 runs. On Silesia, native L1 directly beats miniz_oxide L1 at a
+better ratio: 273.7 vs 235.2 MB/s (+16.4%), with an equal-file geomean ratio
+of 0.392833 vs 0.430526 from exact output/input sizes (8.8% smaller). The raw
 rows are archived in
+[`matched-l1.chungus2.0771f741.json`](results/archive/matched-l1.chungus2.0771f741.json).
+In the separate L3/L4 run, native's L3→L4 reciprocal-throughput mix led at the
+exact miniz L3 and L4 ratios by 1.18% and 1.28%, respectively (1.14% and 1.21%
+using the dashboard's stored rounded ratio fields). This corroborates, but does
+not turn the narrow lead into a noise-independent separation; those raw rows
+are archived in
 [`matched-l34.chungus2.9f855ad9.json`](results/archive/matched-l34.chungus2.9f855ad9.json).
 
 The synthetic `prng` pattern used to be the only incompressible workload; its

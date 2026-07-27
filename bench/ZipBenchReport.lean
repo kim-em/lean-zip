@@ -18,6 +18,11 @@ are timed now (see `bench/corpora/`).
 
 Usage:
   lake exe bench-report [output.json]      # default: bench/results/latest.json
+  lake exe bench-report --levels output.json 1,2
+                                          # matched all-engine level subset
+  lake exe bench-report --native-cell canterbury/alice29.txt 1
+                                          # one median-of-5 native JSON row
+  lake exe bench-report --timing-policy    # machine-readable timing contract
 
 This is the measurement half of the Track D dashboard; see `bench/run.sh` for
 the one-command regenerate (report → plot) flow and `BENCH.md` for the rendered
@@ -231,6 +236,38 @@ def libdeflateCompress (data : ByteArray) (level : Nat) : IO ByteArray :=
 def zopfliCompress (data : ByteArray) (_level : Nat) : IO ByteArray :=
   Zopfli.compress data 0
 
+/-- Measure one native corpus-file/level cell with the exact dashboard timing
+    policy and print its JSON row. This is the primitive used by an external
+    cell-interleaved A/B driver: invoking the before and after binaries next to
+    each other cancels long-run machine drift without weakening median-of-5.
+
+    The corpus key is deliberately restricted to the flat, traversal-free
+    lexical shape `<corpus>/<file>` discovered by `loadCorpora`. Corpus cache
+    entries may themselves be symlinks (as Silesia commonly is). -/
+def runNativeCell (pattern : String) (level : Nat) : IO Unit := do
+  let parts := pattern.splitOn "/"
+  unless parts.length == 2 && parts.all (fun part => !part.isEmpty && part != "." && part != "..") do
+    throw (IO.userError "native-cell pattern must be <corpus>/<file>")
+  let path := System.FilePath.mk corporaDir / pattern
+  unless ← path.pathExists do
+    throw (IO.userError s!"native-cell corpus file not found: {path}")
+  if ← path.isDir then
+    throw (IO.userError s!"native-cell path is a directory: {path}")
+  let data ← IO.FS.readBinFile path
+  let rows ← runWorkloads Bench.dashboardTiming "native" [(pattern, data)]
+    nativeCompress (some nativeDecompress) (theLevels := [level])
+  match rows with
+  | [row] => IO.println row.toJson
+  | _ => throw (IO.userError s!"native-cell expected one row, got {rows.length}")
+
+/-- Print the timing policy consumed by the external paired driver. Keeping
+    this machine-readable contract in the benchmark binary prevents its JSON
+    provenance from drifting away from the repetitions actually measured. -/
+def printTimingPolicy : IO Unit := do
+  let timing := Bench.dashboardTiming
+  IO.println ("{\"timing_aggregation\": \"" ++ timing.aggregation ++
+    "\", \"timing_reps\": " ++ toString timing.repetitions ++ "}")
+
 /-! ## Meta + main -/
 
 def shell (cmd : String) (args : List String) : IO String := do
@@ -279,8 +316,8 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     -- level/rep it dominated the wall-clock of the whole matrix. Its FFI binding
     -- (`zopfliCompress`) is kept for ad-hoc ratio-ceiling checks.
     -- Native sweeps 1–10 (incl. the level-10 crown, #2638); the FFI references
-    -- (zlib/miniz) cap at 9. An explicit `levelOverride` (a native-only regen at
-    -- a chosen level list) applies to whichever codecs run.
+    -- (zlib/miniz) cap at 9. Command parsing validates an explicit override
+    -- against the range of whichever codecs run.
     let nlvls := levelOverride.getD nativeLevels
     let lvls := levelOverride.getD levels
     IO.eprintln s!"Running {corpus} corpus matrix ({files.length} files, native levels {nlvls}, {timing.aggregation}-of-{timing.repetitions})…"
@@ -295,9 +332,8 @@ def runReport (outPath : String) (nativeOnly : Bool := false)
     else
       let cz ← runWorkloads timing "zlib"        files zlibCompress       (some fun d _ => RawDeflate.decompress d) (theLevels := lvls)
       let cm ← runWorkloads timing "miniz_oxide" files minizCompress      (some fun d _ => MinizOxide.decompress d) (theLevels := lvls)
-      -- libdeflate sweeps 1–12 (its full range); the others cap at 9. A level
-      -- override (the native-only dashboard regen) is for the Lean codec, so
-      -- libdeflate keeps its own full list unless that override is in effect.
+      -- libdeflate sweeps 1–12 (its full range) normally. A matched `--levels`
+      -- audit instead gives every running codec the same validated subset.
       let llvls := match levelOverride with | some ls => ls | none => libdeflateLevels
       let cl ← runWorkloads timing "libdeflate"  files libdeflateCompress (some fun d _ => Libdeflate.decompress d) (theLevels := llvls)
       rows := rows ++ cn ++ cz ++ cm ++ cl
@@ -554,6 +590,24 @@ def runDecodeDensity (outPath streamsDir : String) : IO Unit := do
   IO.FS.writeFile outPath json
   IO.eprintln s!"Wrote {rows.length} decode-density rows → {outPath} (streams → {streamsDir})"
 
+def parseLevelCsv (kind csv : String) (allowed : List Nat) : IO (List Nat) := do
+  let parts := csv.splitOn ","
+  let mut parsed : List Nat := []
+  for raw in parts do
+    let token := raw.trimAscii.toString
+    if token.isEmpty then
+      throw (IO.userError s!"{kind} levels must be a nonempty comma-separated list")
+    let some level := token.toNat?
+      | throw (IO.userError s!"{kind} invalid level: {token}")
+    unless allowed.contains level do
+      throw (IO.userError s!"{kind} level is out of range: {level}")
+    if parsed.contains level then
+      throw (IO.userError s!"{kind} duplicate level: {level}")
+    parsed := level :: parsed
+  if parsed.isEmpty then
+    throw (IO.userError s!"{kind} levels must not be empty")
+  return parsed.reverse
+
 def main (args : List String) : IO Unit := do
   match args with
   | ["--presize-ab"] => runPresizeAB
@@ -561,10 +615,22 @@ def main (args : List String) : IO Unit := do
   | ["--decode-density", out, streamsDir] => runDecodeDensity out streamsDir
   | ["--dump-payloads", dir] => dumpPayloads dir
   | ["--zopfli-ceiling", out] => runZopfliCeiling out
+  | ["--timing-policy"] => printTimingPolicy
+  | ["--native-cell", pattern, lvlStr] =>
+    let some level := lvlStr.toNat?
+      | throw (IO.userError s!"native-cell invalid level: {lvlStr}")
+    unless nativeLevels.contains level do
+      throw (IO.userError s!"native-cell level must be 1 through 10: {level}")
+    runNativeCell pattern level
   | ["--native-only", out] => runReport out (nativeOnly := true)
   | ["--native-only", out, lvlCsv] =>
     -- e.g. "1,2,3,4,5,6,7,8" to skip L9-fast and exact-DP L10 when a Lean
     -- change does not touch those paths; the dashboard splice keeps prior rows.
-    let lvls := (lvlCsv.splitOn ",").filterMap (·.trim.toNat?)
+    let lvls ← parseLevelCsv "native-only" lvlCsv nativeLevels
     runReport out (nativeOnly := true) (levelOverride := some lvls)
+  | ["--levels", out, lvlCsv] =>
+    -- Matched-session audit over the same explicit level subset for native and
+    -- every reference codec (for example, L1 frontier work versus miniz_oxide).
+    let lvls ← parseLevelCsv "all-engine" lvlCsv levels
+    runReport out (levelOverride := some lvls)
   | _ => runReport (args.head?.getD "bench/results/latest.json")
