@@ -3439,9 +3439,16 @@ theorem deflateDynamicBlocksSharedAt_def (data : ByteArray)
     stream) over the process baseline. 64 MiB covers every Silesia file at a
     projected ~2.1 GB peak. Above the gate, region-capped choice storage
     preserves the same tokens in bounded memory instead of falling back to a
-    split parse. The explicit L9-fast source helper shares this threshold for
-    conformance; public L9 uses it outside the 5–64 MiB adaptive band. -/
-def optimalMaxSize : Nat := adaptiveFastTierMaxSize
+    split parse. This memory-policy constant deliberately remains independent
+    of the corpus-trained adaptive band even though both currently end at
+    64 MiB; public L9 uses it outside that band. -/
+def optimalMaxSize : Nat := 64 * 1024 * 1024
+
+/-- The two independently motivated gates currently meet at the same edge.
+    Keep this check explicit so a future corpus re-grid cannot silently move
+    the global-DP memory threshold. -/
+theorem optimalMaxSize_eq_adaptiveFastTierMaxSize :
+    optimalMaxSize = adaptiveFastTierMaxSize := rfl
 
 /-- Cross-block (shared-window) block-split dynamic compression over the
     **near-optimal** token stream: like `deflateDynamicBlocksShared`, but the

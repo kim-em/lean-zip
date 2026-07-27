@@ -53,9 +53,11 @@ zlib L7/L8 landed inside too (+30% to +71%).
 
 ## Method notes for the next campaign
 
-- The **weighted** (bytes/time) corpus aggregate is what the Pareto reads;
-  unweighted geomean buried the singleton win once already (#2742) and diluted
-  the Huffman win (x-ray +22% reads as +2% geomean). Check both.
+- The published dashboard Pareto reads the **equal-file geomean**. The weighted
+  bytes/time aggregate remains a useful campaign-steering complement:
+  geomean buried the singleton win once already (#2742) and diluted the Huffman
+  win (x-ray +22% reads as +2% geomean). Check both, and name the aggregation
+  when making a dominance claim.
 - `bench/hull_check.py` (committed alongside this note) computes the mixing
   frontier from a bench-report JSON and prints the dominance verdict against
   every reference-codec point — the session's steering instrument.

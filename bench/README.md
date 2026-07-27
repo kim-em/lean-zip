@@ -133,6 +133,24 @@ Silesia's largest individual file is 51,220,480 bytes (~51.2 MB, 48.8 MiB), so
 the rest of the band through 64 MiB is a conservative boundary range, not an
 independently tuned or corpus-validated workload region.
 
+The published Pareto uses an equal-file geomean for both ratio and throughput.
+The separate [`hull_check.py`](hull_check.py) diagnostic pools bytes and time
+over the whole corpus; that weighting is useful for campaign steering, but it
+is a different aggregate and its dominance verdicts are not dashboard claims.
+Because raw `deflateRaw` defaults to level 6, the re-grid also intentionally
+moves that in-band default: on Silesia it spends 0.25% aggregate geomean ratio
+for 20.5% throughput, while individual output sizes range from 3.97% smaller to
+4.90% larger than the pre-adaptive L6 bytes. Gzip/zlib wrapper defaults and all
+inputs outside the band are unchanged.
+
+The two narrow miniz_oxide comparisons were also repeated in one fresh,
+matched-session median-of-5 run: native's L3→L4 reciprocal-throughput mix led
+at the exact miniz L3 and L4 ratios by 1.18% and 1.28%, respectively (1.14% and
+1.21% using the dashboard's stored rounded ratio fields). This corroborates,
+but does not turn the narrow lead into a noise-independent separation; the raw
+rows are archived in
+[`matched-l34.chungus2.9f855ad9.json`](results/archive/matched-l34.chungus2.9f855ad9.json).
+
 The synthetic `prng` pattern used to be the only incompressible workload; its
 replacement is **real** poorly-compressible files in the corpora (Silesia `sao`,
 `x-ray`, `ooffice`). A near-1.0-ratio point, if wanted, comes from a real
