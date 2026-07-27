@@ -213,10 +213,9 @@ def pareto_scatter(results, meta, corpus, speed_metric, speed_label, title, outf
             ax.plot(cx, cy, color=colour, linewidth=style["linewidth"],
                     alpha=style["alpha"], zorder=style["zorder"])
         # Mark the level sweep direction on the subject's curve only (avoid clutter).
-        # When several levels land on the same plotted point (e.g. an above-64 MiB
-        # input where L9's optimal parse is gated off, so L9 and L10 emit
-        # byte-identical output and stack), label the endpoint with EVERY level
-        # there — "L9=L10", never a lone "L10" with an invisible twin beneath it.
+        # When several levels land on the same plotted point, label the endpoint
+        # with EVERY level there — e.g. "L9=L10", never a lone "L10" with an
+        # invisible twin beneath it.
         # Coincidence keys on the ratio being identical (dx < 1e-6: ratios are
         # deterministic, so identical-output twins share a ratio exactly, while
         # distinct-on-plot levels differ by ≥~3e-4 at the report's 4-dp rounding),

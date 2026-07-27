@@ -383,6 +383,180 @@ def lz77ChainIterPMergedF (data : ByteArray) (maxChain : Nat) (windowSize : Nat 
       (.replicate (prevSize + hashSize) data.size) 0
       (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
 
+/-! ## Parameterized native-word greedy outer loop
+
+The original `F1U` specialization bakes level one's chain depth and insertion
+cap into an unrolled cap-two loop.  Levels two through four use the same greedy
+parser but different policy constants.  `lz77GreedyMergedLoopFNU` keeps the
+outer position, hash and packed chain result in `USize`, while delegating the
+policy-dependent interior insertion to the existing guarded merged updater.
+That updater already selects its proven USize implementation in production.
+
+The checked chain walk is also the established generic guard.  If an unusual
+input or policy value cannot be represented faithfully, this loop finishes the
+current token with the guarded Nat walk and transfers the continuation to the
+generic fused loop.  Thus the fast route is structural only: it cannot change
+the token stream. -/
+
+/-- Greedy fused matcher with a native-word outer position, parameterized by
+    chain depth, insertion cap and nice length. -/
+def lz77GreedyMergedLoopFNU (data : ByteArray) (prevSize maxChain insertCap niceLen : Nat)
+    (dataSizeU : USize) (hds : dataSizeU.toNat = data.size)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (c : Array Nat) (posU : USize) (hpos : posU.toNat ≤ data.size)
+    (acc : TokenArray)
+    (litF : {a : Array Nat // a.size = 286}) (distF : {a : Array Nat // a.size = 30}) :
+    TokenArray × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
+  if hlt : posU + 2 < dataSizeU then
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have h2v : (2 : USize).toNat = 2 :=
+      USize.toNat_ofNat_of_lt
+        (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    have ep2 : (posU + 2).toNat = posU.toNat + 2 := by
+      rw [USize.toNat_add, h2v]
+      apply Nat.mod_eq_of_lt
+      omega
+    have hltN : posU.toNat + 2 < data.size := by
+      have hh := USize.lt_iff_toNat_lt.mp hlt
+      rw [ep2, hds] at hh
+      exact hh
+    let hshU := hash3L1U data dataSizeU posU hds hfit hltN
+    let hsh := hshU.toNat
+    let head := headProbeGuarded c (prevSize + hsh)
+    let cRing := guardedSet
+      (guardedSet c (prevSize + hsh) posU.toNat)
+      (posU.toNat &&& 0x7FFF) head
+    have hposLe : posU ≤ dataSizeU := by
+      rw [USize.le_iff_toNat_le, hds]
+      exact hpos
+    let remU := dataSizeU - posU
+    let maxLenU := if remU < 258 then remU else 258
+    have hmaxRem : maxLenU ≤ remU := by
+      unfold maxLenU
+      split
+      · exact USize.le_refl _
+      · have hn : ¬ remU < (258 : USize) := by assumption
+        rw [USize.le_iff_toNat_le]
+        have h258 : (258 : USize).toNat = 258 :=
+          USize.toNat_ofNat_of_lt
+            (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+        rw [h258]
+        exact Nat.le_of_not_lt fun hh => hn (USize.lt_iff_toNat_lt.mpr (by simpa [h258] using hh))
+    have hremN : remU.toNat = data.size - posU.toNat := by
+      unfold remU
+      rw [USize.toNat_sub_of_le _ _ hposLe, hds]
+    have hpm : posU.toNat + maxLenU.toNat ≤ data.size := by
+      have hh := USize.le_iff_toNat_le.mp hmaxRem
+      rw [hremN] at hh
+      omega
+    if hg : chainWalkPackedUUSafe data cRing 32768 maxLenU.toNat head maxChain then
+      let r := chainWalkPackedUUChecked data cRing 32768 posU.toNat maxLenU.toNat niceLen
+        hpm head maxChain hg
+      let matchLenU := r &&& 0x1FF
+      let matchPosU := r >>> 9
+      if hge : matchLenU ≥ 3 then
+        if hle : posU + matchLenU ≤ dataSizeU then
+          have hnextPos : (posU + matchLenU).toNat ≤ data.size := by
+            have hh := USize.le_iff_toNat_le.mp hle
+            rw [hds] at hh
+            exact hh
+          have hmask511 : matchLenU.toNat ≤ 511 := by
+            unfold matchLenU
+            rw [USize.toNat_and,
+              USize.toNat_ofNat_of_lt
+                (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+            exact Nat.and_le_right
+          have hthree : (3 : USize).toNat = 3 :=
+            USize.toNat_ofNat_of_lt
+              (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+          have hgeN : 3 ≤ matchLenU.toNat := by
+            have hh := USize.le_iff_toNat_le.mp hge
+            rw [hthree] at hh
+            exact hh
+          have hsum : (posU + matchLenU).toNat =
+              posU.toNat + matchLenU.toNat := by
+            rw [USize.toNat_add]
+            apply Nat.mod_eq_of_lt
+            omega
+          have hdec : data.size - (posU + matchLenU).toNat <
+              data.size - posU.toNat := by
+            rw [hsum] at hnextPos ⊢
+            omega
+          let updated := updateHashesMergedGuarded data 65536 prevSize cRing
+            posU.toNat 1 matchLenU.toNat insertCap
+          let w := packTok (.reference matchLenU.toNat
+            (posU.toNat - matchPosU.toNat))
+          lz77GreedyMergedLoopFNU data prevSize maxChain insertCap niceLen dataSizeU hds hfit
+            updated (posU + matchLenU) hnextPos
+            (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w)
+        else
+          let w := packTok (.literal (data.uget posU (by omega)))
+          have hnext : (posU + 1).toNat = posU.toNat + 1 := by
+            rw [USize.toNat_add, USize.toNat_one]
+            apply Nat.mod_eq_of_lt
+            omega
+          have hdec : data.size - (posU + 1).toNat <
+              data.size - posU.toNat := by
+            rw [hnext]
+            omega
+          lz77GreedyMergedLoopFNU data prevSize maxChain insertCap niceLen dataSizeU hds hfit
+            cRing (posU + 1) (by rw [hnext]; omega)
+            (acc.push w) (bumpLitFreqP litF w) distF
+      else
+        let w := packTok (.literal (data.uget posU (by omega)))
+        have hnext : (posU + 1).toNat = posU.toNat + 1 := by
+          rw [USize.toNat_add, USize.toNat_one]
+          apply Nat.mod_eq_of_lt
+          omega
+        have hdec : data.size - (posU + 1).toNat <
+            data.size - posU.toNat := by
+          rw [hnext]
+          omega
+        lz77GreedyMergedLoopFNU data prevSize maxChain insertCap niceLen dataSizeU hds hfit
+          cRing (posU + 1) (by rw [hnext]; omega)
+          (acc.push w) (bumpLitFreqP litF w) distF
+    else
+      let r := chainWalkGuardedPackedU data cRing 32768 posU.toNat maxLenU.toNat niceLen
+        hpm head maxChain 0 0
+      let matchLen := r % 512
+      let matchPos := r / 512
+      if hge : matchLen ≥ 3 then
+        if hle : posU.toNat + matchLen ≤ data.size then
+          let updated := updateHashesMergedGuarded data 65536 prevSize cRing
+            posU.toNat 1 matchLen insertCap
+          let w := packTok (.reference matchLen (posU.toNat - matchPos))
+          lz77GreedyMergedLoopF data 32768 65536 prevSize maxChain insertCap niceLen
+            updated (posU.toNat + matchLen)
+            (acc.push w) (bumpRefLitFreqP litF w) (bumpRefDistFreqP distF w)
+        else
+          let w := packTok (.literal (data.uget posU (by omega)))
+          lz77GreedyMergedLoopF data 32768 65536 prevSize maxChain insertCap niceLen
+            cRing (posU.toNat + 1) (acc.push w) (bumpLitFreqP litF w) distF
+      else
+        let w := packTok (.literal (data.uget posU (by omega)))
+        lz77GreedyMergedLoopF data 32768 65536 prevSize maxChain insertCap niceLen
+          cRing (posU.toNat + 1) (acc.push w) (bumpLitFreqP litF w) distF
+  else
+    trailingPF data posU.toNat acc litF distF
+termination_by data.size - posU.toNat
+decreasing_by
+  all_goals assumption
+
+/-- Guarded parameterized native-word entry with the boxed fused histograms.
+    The fallback is the established generic fused entry. -/
+def lz77ChainIterPMergedFNU (data : ByteArray) (maxChain insertCap niceLen : Nat) :
+    TokenArray × {a : Array Nat // a.size = 286} × {a : Array Nat // a.size = 30} :=
+  if data.size < 3 then
+    trailingPF data 0 TokenArray.empty initLitFreqF initDistFreqF
+  else if hg : data.size.toUSize.toNat = data.size ∧
+      data.size * 512 + 511 < USize.size then
+    let prevSize := min chainWinSize data.size
+    lz77GreedyMergedLoopFNU data prevSize maxChain insertCap niceLen data.size.toUSize
+      hg.1 hg.2 (.replicate (prevSize + 65536) data.size) 0 (by simp)
+      (TokenArray.emptyWithCapacity data.size) initLitFreqF initDistFreqF
+  else
+    lz77ChainIterPMergedF data maxChain 32768 insertCap niceLen
+
 /-! ## Unboxed fused histograms
 
 `Array USize` still uses generic boxed array slots in generated C
@@ -496,6 +670,192 @@ def trailingPFU64 (data : ByteArray) (pos : Nat) (acc : TokenArray)
     trailingPFU64 data (pos + 1) (acc.push w) (bumpLitFreqU64 freqs w)
   else (acc, freqs)
 termination_by data.size - pos
+
+/-- Generic-position fused matcher with the unboxed wide histogram state.  It
+    is the exact fallback for the parameterized native-word outer loop. -/
+def lz77GreedyMergedLoopFU64 (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap niceLen : Nat)
+    (c : Array Nat) (pos : Nat) (acc : TokenArray)
+    (freqs : FusedFreqBytes) : TokenArray × FusedFreqBytes :=
+  if hlt : pos + 2 < data.size then
+    let h := lz77Greedy.hash3 data pos hashSize hlt
+    let head := headProbeGuarded c (prevSize + h)
+    let c := guardedSet c (prevSize + h) pos
+    let c := guardedSet c (pos &&& 0x7FFF) head
+    let maxLen := min 258 (data.size - pos)
+    have hmaxLenP : pos + maxLen ≤ data.size := by omega
+    let next (matchLen matchPos : Nat) :=
+      if hge : matchLen ≥ 3 then
+        if hle : pos + matchLen ≤ data.size then
+          have : data.size - (pos + matchLen) < data.size - pos := by omega
+          let c := updateHashesMergedGuarded data hashSize prevSize c pos 1 matchLen insertCap
+          let w := packTok (.reference matchLen (pos - matchPos))
+          let freqs := bumpRefLitFreqU64 freqs w
+          lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen
+            c (pos + matchLen) (acc.push w) (bumpRefDistFreqU64 freqs w)
+        else
+          let w := packTok (.literal (data[pos]'(by omega)))
+          lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen
+            c (pos + 1) (acc.push w) (bumpLitFreqU64 freqs w)
+      else
+        let w := packTok (.literal (data[pos]'(by omega)))
+        lz77GreedyMergedLoopFU64 data windowSize hashSize prevSize maxChain insertCap niceLen
+          c (pos + 1) (acc.push w) (bumpLitFreqU64 freqs w)
+    if hg : chainWalkPackedUUSafe data c windowSize maxLen head maxChain then
+      let r := chainWalkPackedUUChecked data c windowSize pos maxLen niceLen hmaxLenP
+        head maxChain hg
+      next (r &&& 0x1FF).toNat (r >>> 9).toNat
+    else
+      let r := chainWalkGuardedPackedU data c windowSize pos maxLen niceLen hmaxLenP
+        head maxChain 0 0
+      next (r % 512) (r / 512)
+  else
+    trailingPFU64 data pos acc freqs
+termination_by data.size - pos
+decreasing_by all_goals omega
+
+/-- Parameterized native-word greedy outer loop with one unboxed wide
+    histogram buffer. -/
+def lz77GreedyMergedLoopFNU64 (data : ByteArray)
+    (prevSize maxChain insertCap niceLen : Nat)
+    (dataSizeU : USize) (hds : dataSizeU.toNat = data.size)
+    (hfit : data.size * 512 + 511 < USize.size)
+    (c : Array Nat) (posU : USize) (hpos : posU.toNat ≤ data.size)
+    (acc : TokenArray) (freqs : FusedFreqBytes) : TokenArray × FusedFreqBytes :=
+  if hlt : posU + 2 < dataSizeU then
+    have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
+    have h2v : (2 : USize).toNat = 2 :=
+      USize.toNat_ofNat_of_lt
+        (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+    have ep2 : (posU + 2).toNat = posU.toNat + 2 := by
+      rw [USize.toNat_add, h2v]
+      apply Nat.mod_eq_of_lt
+      omega
+    have hltN : posU.toNat + 2 < data.size := by
+      have hh := USize.lt_iff_toNat_lt.mp hlt
+      rw [ep2, hds] at hh
+      exact hh
+    let hshU := hash3L1U data dataSizeU posU hds hfit hltN
+    let hsh := hshU.toNat
+    let head := headProbeGuarded c (prevSize + hsh)
+    let cRing := guardedSet
+      (guardedSet c (prevSize + hsh) posU.toNat)
+      (posU.toNat &&& 0x7FFF) head
+    have hposLe : posU ≤ dataSizeU := by
+      rw [USize.le_iff_toNat_le, hds]
+      exact hpos
+    let remU := dataSizeU - posU
+    let maxLenU := if remU < 258 then remU else 258
+    have hmaxRem : maxLenU ≤ remU := by
+      unfold maxLenU
+      split
+      · exact USize.le_refl _
+      · have hn : ¬ remU < (258 : USize) := by assumption
+        rw [USize.le_iff_toNat_le]
+        have h258 : (258 : USize).toNat = 258 :=
+          USize.toNat_ofNat_of_lt
+            (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+        rw [h258]
+        exact Nat.le_of_not_lt fun hh => hn (USize.lt_iff_toNat_lt.mpr (by simpa [h258] using hh))
+    have hremN : remU.toNat = data.size - posU.toNat := by
+      unfold remU
+      rw [USize.toNat_sub_of_le _ _ hposLe, hds]
+    have hpm : posU.toNat + maxLenU.toNat ≤ data.size := by
+      have hh := USize.le_iff_toNat_le.mp hmaxRem
+      rw [hremN] at hh
+      omega
+    if hg : chainWalkPackedUUSafe data cRing 32768 maxLenU.toNat head maxChain then
+      let r := chainWalkPackedUUChecked data cRing 32768 posU.toNat maxLenU.toNat niceLen
+        hpm head maxChain hg
+      let matchLenU := r &&& 0x1FF
+      let matchPosU := r >>> 9
+      if hge : matchLenU ≥ 3 then
+        if hle : posU + matchLenU ≤ dataSizeU then
+          have hnextPos : (posU + matchLenU).toNat ≤ data.size := by
+            have hh := USize.le_iff_toNat_le.mp hle
+            rw [hds] at hh
+            exact hh
+          have hmask511 : matchLenU.toNat ≤ 511 := by
+            unfold matchLenU
+            rw [USize.toNat_and,
+              USize.toNat_ofNat_of_lt
+                (Nat.lt_of_lt_of_le (by decide) USize.le_size)]
+            exact Nat.and_le_right
+          have hthree : (3 : USize).toNat = 3 :=
+            USize.toNat_ofNat_of_lt
+              (Nat.lt_of_lt_of_le (by decide) USize.le_size)
+          have hgeN : 3 ≤ matchLenU.toNat := by
+            have hh := USize.le_iff_toNat_le.mp hge
+            rw [hthree] at hh
+            exact hh
+          have hsum : (posU + matchLenU).toNat =
+              posU.toNat + matchLenU.toNat := by
+            rw [USize.toNat_add]
+            apply Nat.mod_eq_of_lt
+            omega
+          have hdec : data.size - (posU + matchLenU).toNat <
+              data.size - posU.toNat := by
+            rw [hsum] at hnextPos ⊢
+            omega
+          let updated := updateHashesMergedGuarded data 65536 prevSize cRing
+            posU.toNat 1 matchLenU.toNat insertCap
+          let w := packTok (.reference matchLenU.toNat
+            (posU.toNat - matchPosU.toNat))
+          let freqs := bumpRefLitFreqU64 freqs w
+          lz77GreedyMergedLoopFNU64 data prevSize maxChain insertCap niceLen dataSizeU
+            hds hfit updated (posU + matchLenU) hnextPos
+            (acc.push w) (bumpRefDistFreqU64 freqs w)
+        else
+          let w := packTok (.literal (data.uget posU (by omega)))
+          have hnext : (posU + 1).toNat = posU.toNat + 1 := by
+            rw [USize.toNat_add, USize.toNat_one]
+            apply Nat.mod_eq_of_lt
+            omega
+          have hdec : data.size - (posU + 1).toNat <
+              data.size - posU.toNat := by
+            rw [hnext]
+            omega
+          lz77GreedyMergedLoopFNU64 data prevSize maxChain insertCap niceLen dataSizeU
+            hds hfit cRing (posU + 1) (by rw [hnext]; omega)
+            (acc.push w) (bumpLitFreqU64 freqs w)
+      else
+        let w := packTok (.literal (data.uget posU (by omega)))
+        have hnext : (posU + 1).toNat = posU.toNat + 1 := by
+          rw [USize.toNat_add, USize.toNat_one]
+          apply Nat.mod_eq_of_lt
+          omega
+        have hdec : data.size - (posU + 1).toNat <
+            data.size - posU.toNat := by
+          rw [hnext]
+          omega
+        lz77GreedyMergedLoopFNU64 data prevSize maxChain insertCap niceLen dataSizeU
+          hds hfit cRing (posU + 1) (by rw [hnext]; omega)
+          (acc.push w) (bumpLitFreqU64 freqs w)
+    else
+      let r := chainWalkGuardedPackedU data cRing 32768 posU.toNat maxLenU.toNat niceLen
+        hpm head maxChain 0 0
+      let matchLen := r % 512
+      let matchPos := r / 512
+      if hge : matchLen ≥ 3 then
+        if hle : posU.toNat + matchLen ≤ data.size then
+          let updated := updateHashesMergedGuarded data 65536 prevSize cRing
+            posU.toNat 1 matchLen insertCap
+          let w := packTok (.reference matchLen (posU.toNat - matchPos))
+          let freqs := bumpRefLitFreqU64 freqs w
+          lz77GreedyMergedLoopFU64 data 32768 65536 prevSize maxChain insertCap niceLen
+            updated (posU.toNat + matchLen) (acc.push w) (bumpRefDistFreqU64 freqs w)
+        else
+          let w := packTok (.literal (data.uget posU (by omega)))
+          lz77GreedyMergedLoopFU64 data 32768 65536 prevSize maxChain insertCap niceLen
+            cRing (posU.toNat + 1) (acc.push w) (bumpLitFreqU64 freqs w)
+      else
+        let w := packTok (.literal (data.uget posU (by omega)))
+        lz77GreedyMergedLoopFU64 data 32768 65536 prevSize maxChain insertCap niceLen
+          cRing (posU.toNat + 1) (acc.push w) (bumpLitFreqU64 freqs w)
+  else
+    trailingPFU64 data posU.toNat acc freqs
+termination_by data.size - posU.toNat
+decreasing_by all_goals assumption
 
 /-- Level-one native-word outer loop with one unboxed wide histogram buffer.
     Hashing, insertion, chain walking, and position arithmetic are identical to
@@ -673,6 +1033,28 @@ def lz77ChainIterPMergedF1U64 (data : ByteArray) :
     (r.1, f.1, f.2)
   else
     let r := lz77ChainIterPMergedF1U data
+    (r.1, r.2.1.val, r.2.2.val)
+
+/-- Production-ready parameterized native-word matcher with unboxed wide
+    histogram counters.  The addressability guard covers the native outer loop;
+    its fallback is the established boxed generic-position matcher. -/
+def lz77ChainIterPMergedFNU64 (data : ByteArray)
+    (maxChain insertCap niceLen : Nat) : TokenArray × Array Nat × Array Nat :=
+  if data.size < 3 then
+    let r := trailingPFU64 data 0 TokenArray.empty initFusedFreqBytes
+    let f := fusedFreqBytesToNat r.2
+    (r.1, f.1, f.2)
+  else if hg : data.size.toUSize.toNat = data.size ∧
+      data.size * 512 + 511 < USize.size then
+    let prevSize := min chainWinSize data.size
+    let r := lz77GreedyMergedLoopFNU64 data prevSize maxChain insertCap niceLen
+      data.size.toUSize hg.1 hg.2
+      (.replicate (prevSize + 65536) data.size) 0 (by simp)
+      (TokenArray.emptyWithCapacity data.size) initFusedFreqBytes
+    let f := fusedFreqBytesToNat r.2
+    (r.1, f.1, f.2)
+  else
+    let r := lz77ChainIterPMergedF data maxChain 32768 insertCap niceLen
     (r.1, r.2.1.val, r.2.2.val)
 
 end Zip.Native.Deflate

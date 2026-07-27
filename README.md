@@ -71,10 +71,12 @@ Comparing at matched compression ratios, the Lean implementation:
 - has **caught JS's [`fflate`](https://github.com/101arrowz/fflate)**: at any
   ratio fflate reaches, native is within a few percent of its speed, pulling
   ahead — and compressing further — at fflate's densest settings;
-- runs **within ~20% of Rust's miniz_oxide and C's zlib around their default
-  levels**, widening to ~1.4–1.7× at their fast and dense extremes; the
-  optimal-parse levels 9/10 reach ratios that zlib, zlib-rs, zlib-ng,
-  miniz_oxide, Go, Zig, and fflate cannot produce at any setting;
+- on the dashboard's equal-file-geomean Silesia view, puts every Rust
+  **miniz_oxide level L2–L9 inside native's convex achievable frontier**: at
+  each miniz_oxide ratio, native is faster at a same-or-better ratio under
+  reciprocal-throughput mixing. Independent median-of-5 reruns put the
+  narrow L3/L4 leads at about 1.2%; miniz_oxide's L1 fast corner remains
+  1.44× faster. Adaptive L9 and the exact-DP L10 reach still denser ratios;
 - trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 3.5–11×, as
   expected for the format.
 
