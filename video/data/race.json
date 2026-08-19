@@ -1,0 +1,14 @@
+{
+ "tar": "silesia.tar",
+ "tar_bytes": 211957760,
+ "lean": {
+  "cmd": "time deflate-lean silesia.tar",
+  "wall_ms": 5410,
+  "size": 67943831
+ },
+ "rust": {
+  "cmd": "time deflate-rust silesia.tar",
+  "wall_ms": 5749,
+  "size": 68110828
+ }
+}

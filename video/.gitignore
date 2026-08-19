@@ -1,0 +1,6 @@
+# regenerable build products (video/build.sh) and machine-local font symlinks;
+# out/mockup.mp4 is force-added as a snapshot of the last rendered state
+out/
+media/
+__pycache__/
+.fonts/
