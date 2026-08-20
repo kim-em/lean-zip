@@ -122,8 +122,7 @@ theorem crc32_pair (b₁ b₂ : UInt8) :
     updateBytes_eq_updateList, hdata]
   exact Spec.checksum_pair b₁ b₂
 
-/-- Compositionality of incremental CRC-32 computation (native level,
-see `PLAN.md:27-28`). Associativity of `crc32` over `ByteArray` append
+/-- Compositionality of incremental CRC-32 computation (native level). Associativity of `crc32` over `ByteArray` append
 — an incremental streaming pipeline over concatenated chunks yields
 the same result as a whole-buffer computation. -/
 theorem crc32_append (init : UInt32) (a b : ByteArray) :

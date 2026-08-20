@@ -196,7 +196,7 @@ set_option maxHeartbeats 1000000 in
 set_option maxRecDepth 8000 in
 /-- Unified DEFLATE roundtrip against the **reference** decoder:
     `inflateReference ∘ deflateRaw = identity`.
-    This is the Phase B4 capstone theorem from PLAN.md. Generalized to any
+    This is the project's capstone roundtrip theorem. Generalized to any
     `maxOutputSize` large enough to hold the input. The incompressible pre-scan
     and the level-0 path both dispatch to `deflateStoredPure` directly; the
     cost-model stored fallback is covered by `deflateRawBase`; every adaptive

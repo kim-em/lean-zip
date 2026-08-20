@@ -19,7 +19,7 @@ namespace Zip.Native
 namespace GzipDecode
 
 /-- Absolute ceiling on the exact-size fastloop's speculative presize allocation,
-    mirroring `Zip.Archive.nativePresizeCap`. A member whose declared decompressed
+    mirroring lean-archive's `Archive.nativePresizeCap`. A member whose declared decompressed
     size (gzip trailer `ISIZE`) exceeds this keeps the push decoder rather than
     pre-extending a large buffer up front. -/
 def presizeCap : Nat := 64 * 1024 * 1024
@@ -43,8 +43,7 @@ termination_by data.size - pos
     `output.size + len > maxOutputSize`). The outer-loop guard raises an
     `Except` error containing `"Gzip: total output exceeds maximum size"`;
     the inner per-member `Inflate.inflateRaw` call also enforces the
-    bound and may surface `"Inflate: output exceeds maximum size"` first.
-    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
+    bound and may surface `"Inflate: output exceeds maximum size"` first. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do
   if data.size < 10 then throw "Gzip: input too short for gzip header"
@@ -178,8 +177,7 @@ namespace ZlibDecode
     FFI path, where `maxDecompressedSize := 0` means unlimited, here `0`
     rejects any non-empty output (the inflate guards compare
     `output.size + len > maxOutputSize`). Overflow raises an `Except`
-    error containing `"Inflate: output exceeds maximum size"`.
-    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
+    error containing `"Inflate: output exceeds maximum size"`. -/
 def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray := do
   if hSz : data.size < 6 then throw "Zlib: input too short"
@@ -278,8 +276,7 @@ def detectFormat (data : ByteArray) : CompressFormat :=
     maximum size"` (gzip outer guard), or `"Inflate: output exceeds
     maximum size"` (zlib, raw deflate, or any inner inflate guard).
     Unlike the FFI path, where `maxDecompressedSize := 0` means unlimited,
-    here `0` rejects any non-empty output.
-    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*. -/
+    here `0` rejects any non-empty output. -/
 def decompressAuto (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
     Except String ByteArray :=
   match detectFormat data with

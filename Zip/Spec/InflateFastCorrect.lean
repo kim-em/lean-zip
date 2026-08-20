@@ -86,8 +86,8 @@ block cursor by the final one). Composed with `inflateLoopCur_size` and
 Inflate.inflate` for every `USize`-representable input (under
 `data.size, maxOut < USize.size` — the addressability regime, always true for
 in-memory `ByteArray`s on a 64-bit target, that every native decode proof here
-assumes). So the fastloop is a true ratchet, and wiring it into ZIP extraction
-(`Zip.Archive`, size from the central-directory `uncompressedSize`, dispatch
+assumes). So the fastloop is a true ratchet, and wiring it into lean-archive's ZIP
+extraction (`Archive.Zip`, size from the central-directory `uncompressedSize`, dispatch
 guarded to stay in that regime) needs no checksum backstop for soundness. As
 everywhere in this library, this is verified against the Lean reference bodies
 of the `@[extern]` primitives (`presize`, `copyWithinAt`), which the C

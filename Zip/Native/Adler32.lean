@@ -88,8 +88,7 @@ theorem adler32_replicate (n : Nat) (b : UInt8)
   simp only [adler32, updateBytes_eq_updateList, hunpack]
   exact Spec.checksum_replicate n b hA hB
 
-/-- Compositionality of incremental Adler-32 computation (native level,
-see `PLAN.md:27-28`). Associativity of `adler32` over `ByteArray`
+/-- Compositionality of incremental Adler-32 computation (native level). Associativity of `adler32` over `ByteArray`
 append — an incremental streaming pipeline over concatenated chunks
 yields the same result as a whole-buffer computation. -/
 theorem adler32_append (init : UInt32) (a b : ByteArray) :

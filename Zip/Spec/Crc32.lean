@@ -14,8 +14,7 @@ The algorithm:
    XOR with the polynomial; otherwise just shift right.
 3. Final XOR with 0xFFFFFFFF (complement).
 
-Characterizing property: compositionality of incremental computation
-(see `PLAN.md:27-28`) — `checksum (xs ++ ys)` can be recovered from
+Characterizing property: compositionality of incremental computation — `checksum (xs ++ ys)` can be recovered from
 `checksum xs` by decoding its running state, feeding more bytes, then
 re-applying the final XOR. See `checksum_append` below.
 -/

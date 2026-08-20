@@ -1,3 +1,0 @@
-(executable
- (name bench)
- (libraries decompress.de unix))

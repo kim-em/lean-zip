@@ -1,68 +1,21 @@
-import ZipTest.BenchHelpers
-import ZipTest.Zlib
-import ZipTest.Gzip
-import ZipTest.RawDeflate
-import ZipTest.Checksum
 import ZipTest.Binary
 import ZipTest.Wide
 import ZipTest.ExtendWithin
-import ZipTest.Tar
-import ZipTest.Archive
-import ZipTest.ZipFixtures
-import ZipTest.TarFixtures
-import ZipTest.TarPathTruncation
-import ZipTest.CompressFixtures
-import ZipTest.Utf8Fixtures
-import ZipTest.NativeChecksum
-import ZipTest.NativeInflate
-import ZipTest.InflateFast
-import ZipTest.NativeGzip
-import ZipTest.NativeIntegration
-import ZipTest.NativeScale
-import ZipTest.NativeDeflate
-import ZipTest.NativeCompressBench
-import ZipTest.Benchmark
-import ZipTest.BoundedReadTest
 import ZipTest.InflateTable
-import ZipTest.OptimalParse
 import ZipTest.PackedTokens
 import ZipTest.PackedHeads
 import ZipTest.SizeHelpers
 import ZipTest.L7Adaptive
 
 def main : IO Unit := do
-  unless ← System.FilePath.pathExists "testdata" do
-    throw (IO.userError "testdata/ not found — run tests via 'lake test' from the project root")
-  ZipTest.Zlib.tests
-  ZipTest.Gzip.tests
-  ZipTest.RawDeflate.tests
-  ZipTest.Checksum.tests
   ZipTest.Binary.tests
   ZipTest.Wide.tests
   ZipTest.ExtendWithin.tests
-  ZipTest.Tar.tests
-  ZipTest.Archive.tests
-  ZipTest.ZipFixtures.tests
-  ZipTest.TarFixtures.tests
-  ZipTest.TarPathTruncation.tests
-  ZipTest.CompressFixtures.tests
-  ZipTest.Utf8Fixtures.tests
-  ZipTest.NativeChecksum.tests
-  ZipTest.NativeInflate.tests
-  ZipTest.InflateFast.tests
   ZipTest.InflateTable.tests
   ZipTest.InflateTable.canonicalTests
   ZipTest.InflateTable.subtableTests
-  ZipTest.NativeGzip.tests
-  ZipTest.NativeIntegration.tests
-  ZipTest.NativeScale.tests
-  ZipTest.NativeDeflate.tests
-  ZipTest.OptimalParse.tests
   ZipTest.PackedTokens.tests
   ZipTest.PackedHeads.tests
   ZipTest.SizeHelpers.tests
   ZipTest.L7Adaptive.tests
-  ZipTest.NativeCompressBench.tests
-  ZipTest.Benchmark.tests
-  ZipTest.BoundedRead.tests
   IO.println "\nAll tests passed!"

@@ -30,8 +30,8 @@ are `Zip.Spec.InflateFastCorrect.inflateFast_eq` / `inflateFastU_eq`, so on a
 valid stream at the exact size they return exactly `Inflate.inflate`'s bytes.
 The production dispatch `inflateSized` (below) uses the verified `uset` fastloop
 when the caller supplies an exact, bounded size and falls back to `inflate`
-otherwise; it is now wired into ZIP extraction (`Zip.Archive`, size from the
-central-directory `uncompressedSize`), so `import Zip` does surface it. The A/B
+otherwise; it is wired into lean-archive's ZIP extraction (`Archive.Zip`, size
+from the central-directory `uncompressedSize`). The A/B
 driver `inflate-profile decode-fast` and the `inflateFast = inflate` conformance
 test remain.
 
