@@ -33,6 +33,11 @@ agents worked from, is preserved at the
 
 Here is the interesting part.
 
+(The short version, including the headline `time` race where lean-zip
+compresses the 212 MB Silesia tar smaller *and* faster than miniz_oxide —
+4.57s vs 5.77s at level 6 — is in the blog post
+["Why Lean is faster than Rust"](https://kim-em.github.io/blog/2026-7-24-why-lean-is-faster-than-rust/).)
+
 ![Silesia compression: speed vs ratio, animated through the project's git history](graphs/silesia_compress_pareto_history.svg)
 
 *[Silesia](https://sun.aei.polsl.pl/~sdeor/index.php?page=silesia) corpus.
@@ -64,26 +69,37 @@ including essentially all of the performance work behind that graph, was
 written by coding agents working autonomously, and the PR could not merge
 unless the round-trip proof still went through. The proof is the ratchet.
 
-And it works. In the graph above, we see the performance of the pure-Lean
-codec (`native`). Note that the y-axis is a log scale, so a vertical gap is a
-*multiplicative* speed factor. Comparing at matched compression ratios, the
-Lean implementation:
+And it works. In the graph above, we see the performance of lean-zip (the
+red `native` curve). Note that the y-axis is a log scale, so a vertical gap
+is a *multiplicative* speed factor. Comparing at matched compression ratios
+(equal-file geomeans on Silesia), lean-zip:
 
-- **beats** the pure-OCaml [`decompress`](https://github.com/mirage/decompress)
-  library outright: 2–4× faster at any ratio it can reach, and it reaches
-  ratios OCaml's encoder can't;
-- has **caught JS's [`fflate`](https://github.com/101arrowz/fflate)**: at any
-  ratio fflate reaches, native is within a few percent of its speed, pulling
-  ahead — and compressing further — at fflate's densest settings;
-- on the dashboard's equal-file-geomean Silesia view, puts every Rust
-  **miniz_oxide level L1–L9 inside native's convex achievable frontier**: at
-  each miniz_oxide ratio, native is faster at a same-or-better ratio under
-  reciprocal-throughput mixing. On Silesia, an independent matched-session
-  median-of-5 rerun puts native L1 directly ahead of miniz_oxide L1 on the
-  equal-file-geomean aggregate: 273.7 vs 235.2 MB/s (+16.4%), with a ratio
-  8.8% smaller;
-- trails the hand-tuned **C + SIMD** ceiling (libdeflate) by 3.5–11×, as
-  expected for the format.
+- **beats every level Rust's miniz_oxide provides**: same-or-better ratio at
+  higher throughput across L1–L9 (with one asterisk: beating miniz L3 takes a
+  mix of lean-zip's L3 and L4 under the frontier rule above). At L6, the
+  common default, lean-zip is ~30% faster at equal ratio; at miniz's L9 it is
+  about 2× faster; at L1 it is directly ahead, 273.7 vs 235.2 MB/s (+16.4%),
+  with 8.8% smaller output;
+- **dominates JS's [`fflate`](https://github.com/101arrowz/fflate) outright**:
+  at every fflate level there is a single lean-zip level that is both denser
+  and 1.5–2× faster — and lean-zip *decompresses* more than 2× faster than
+  fflate too;
+- **dominates the zlib C reference implementation**: equal-or-better ratio at
+  higher throughput at every level;
+- **beats the pure-OCaml [`decompress`](https://github.com/mirage/decompress)
+  library** by 3–9× at any ratio it can reach, and reaches ratios OCaml's
+  encoder can't;
+- **splits the board with Go and Zig**: they win at the low and middle
+  levels, lean-zip wins the dense end;
+- is outrun across most of the range by the optimized zlib descendants
+  (**zlib-ng**, and the memory-safe Rust **zlib-rs**) — but not at the deep
+  end: their densest setting lands at exactly the ratio lean-zip reaches at
+  L7, where lean-zip is slightly ahead of zlib-rs and ~10% ahead of zlib-ng;
+- trails the hand-tuned **C + SIMD** ceiling (libdeflate) by roughly 2× at
+  mid ratios, growing to ~10× at the dense end — as expected for the format;
+- on the **decode** side, outruns every language-native peer (fflate by >2×,
+  OCaml by 5–7×, Go and Zig by 15–30%) while trailing the C-grade decoders
+  (miniz_oxide by ~1.45×, libdeflate by ~2.5×).
 
 This codec started out far slower than everything else on the chart — the
 animation above replays the climb, one dashboard refresh at a time. The gap
@@ -201,6 +217,9 @@ conformance/fuzz-inflate.sh # budgeted randomized fuzz run (default 30s)
 - `deflateRaw` at a given level is deterministic but its exact output is not
   part of the API: optimization work freely changes the emitted bitstream,
   and only the round-trip and interop guarantees are stable.
+- Memory consumption during compression is higher than miniz_oxide's.
+- Decompression trails the C-grade decoders (~1.45× behind miniz_oxide); it
+  leads the language-native ones.
 
 ## License
 
