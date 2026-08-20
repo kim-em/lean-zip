@@ -212,8 +212,13 @@ def tests : IO Unit := do
     ("silesia/x-ray", 8474240, .h3Fast, 1024, .split, 6033708),
     ("silesia/xml", 5345280, .deep, 512, .split, 660492)
   ]
+  -- The corpus files are optional: point LEAN_ZIP_CORPORA_DIR at a
+  -- lean-zip-benchmark checkout's corpora/ (after fetch_corpora.sh) to run
+  -- the golden-size checks on real data; without it only the size-derived
+  -- route assertions run.
+  let corporaDir := (← IO.getEnv "LEAN_ZIP_CORPORA_DIR").getD "corpora"
   for (file, size, profile, cadence, route, expectedSize) in files do
     assertRoute file (l7OutputRouteFor size profile) route
-    checkFileIfPresent ("bench/corpora/" ++ file) profile cadence route expectedSize
+    checkFileIfPresent (corporaDir ++ "/" ++ file) profile cadence route expectedSize
 
 end ZipTest.L7Adaptive

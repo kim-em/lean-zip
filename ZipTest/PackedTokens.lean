@@ -420,7 +420,14 @@ def lazySpecializationTests : IO Unit := do
 
 def tests : IO Unit := do
   IO.println "  PackedTokens tests..."
-  let alice ← IO.FS.readBinFile "bench/corpora/canterbury/alice29.txt"
+  -- Real-text coverage is optional: point LEAN_ZIP_CORPORA_DIR at a
+  -- lean-zip-benchmark checkout's corpora/ (after fetch_corpora.sh).
+  let corporaDir := (← IO.getEnv "LEAN_ZIP_CORPORA_DIR").getD "corpora"
+  let alicePath := corporaDir ++ "/canterbury/alice29.txt"
+  let alice ← if ← System.FilePath.pathExists alicePath then
+    IO.FS.readBinFile alicePath
+  else
+    pure (mkTextData 152089)  -- alice29.txt's size, synthetic stand-in
   checkView "alice29" alice
   checkView "text64k" (mkTextData 65536)
   checkView "cyclic64k" (mkCyclicData 65536)

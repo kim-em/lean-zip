@@ -9,8 +9,7 @@ modulo 65521 (the largest prime less than 2^16):
 
 The result is `(B <<< 16) ||| A`, packed into a `UInt32`.
 
-Characterizing property: compositionality of incremental computation
-(see `PLAN.md:27-28`) — `checksum (xs ++ ys)` can be recovered from
+Characterizing property: compositionality of incremental computation — `checksum (xs ++ ys)` can be recovered from
 `checksum xs` by unpacking its running state, feeding more bytes, then
 re-packing. See `checksum_append` below.
 -/

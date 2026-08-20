@@ -1615,7 +1615,6 @@ def inflateRawReference (data : ByteArray) (startPos : Nat := 0)
     `output.size + len > maxOutputSize`, so even a single produced byte
     exceeds the bound). Overflow raises an `Except` error containing
     `"Inflate: output exceeds maximum size"`.
-    See `SECURITY_INVENTORY.md` *Decompression Limit Inventory*.
 
     `sizeHint` pre-reserves output capacity when the decompressed size is known;
     `0` (the default) reserves nothing. See `inflateRaw`. -/

@@ -1,9 +1,3 @@
-import Zip.Basic
-import Zip.Gzip
-import Zip.Checksum
-import Zip.RawDeflate
-import Zip.Tar
-import Zip.Archive
 import Zip.Spec.Adler32
 import Zip.Spec.Crc32
 import Zip.Spec.Huffman

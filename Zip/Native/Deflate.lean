@@ -1659,7 +1659,7 @@ theorem lazyAcceptCost_lt {len1 dist1 len2 dist2 : Nat}
     lazyAcceptCost len1 dist1 len2 dist2
 
 /-- Chain depth for a rolling-lazy2 follow-up probe (`rollDefer`). Mirrors the
-    certified spike's mode-0 ladder (`bench/ZipLazyRollSweep.lean`, #2837): a
+    certified spike's mode-0 ladder (swept in the pre-split bench harness, #2837): a
     constant `maxChain / 4` after the main loop's own full-depth `pos+1` probe,
     floored at 1 so a probe never runs at zero fuel. A pure heuristic — depth
     never enters a validity proof (`chainWalk_spec` holds for any fuel). -/
