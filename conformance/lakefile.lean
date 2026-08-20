@@ -113,7 +113,7 @@ require «lean-zlib» from git "https://github.com/kim-em/lean-zlib" @ "1a79d2d7
 lean_lib Conformance where
   globs := #[.submodules `Conformance]
 
-@[test_driver]
+@[default_target, test_driver]
 lean_exe conformance_test where
   root := `Conformance
 
