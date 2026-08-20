@@ -181,7 +181,7 @@ private def chunksReadStream (chunks : Array ByteArray) : IO IO.FS.Stream := do
 /-- Drive the high-level `Gzip.decompressStream` path with the
     fuzz-generated `chunks` feeding an in-memory input stream and a
     PRNG-picked `maxDecompressedSize`. Exercises the Lean-side
-    `IO.Ref UInt64` counter at `Zip/Gzip.lean:89-97` that the
+    `IO.Ref UInt64` counter in lean-zlib's `Zlib/Gzip.lean` (`decompressStream`) that the
     low-level `InflateState.push/finish` surface does not see.
     Catch is narrowed to `.userError` (matches `tryFFI`); other
     `IO.Error` variants propagate to fail the fuzz run loudly. -/
@@ -199,7 +199,7 @@ private def tryStreamingGzip (chunks : Array ByteArray)
 /-- Drive the high-level `RawDeflate.decompressStream` path with the
     fuzz-generated `chunks` and a PRNG-picked `maxDecompressedSize`.
     Same counter pattern as `tryStreamingGzip`, on the raw-deflate
-    wrapper at `Zip/RawDeflate.lean:59-69`. Same `.userError`-only
+    wrapper in lean-zlib’s `Zlib/RawDeflate.lean` (`decompressStream`). Same `.userError`-only
     narrowing for symmetry with `tryFFI`. -/
 private def tryStreamingRawDeflate (chunks : Array ByteArray)
     (maxCap : UInt64) : IO Unit := do

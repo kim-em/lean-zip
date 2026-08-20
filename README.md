@@ -19,7 +19,7 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
 This theorem rests on lower level theorems about the DEFLATE algorithm,
 `inflate (deflateRaw data level) = .ok data`, and on more than 1,100 theorems
 across ~32k lines of proof in [`Zip/Spec/`](Zip/Spec). There are no `sorry`s,
-and the proofs are re-checked from scratch on every commit.
+and CI re-checks the proofs on every change.
 
 Astonishingly, both the implementation, and the verification, are written
 entirely by loosely supervised AIs: coding agents claimed issues, worked in
@@ -125,10 +125,11 @@ let deflated := Zip.Native.deflateRaw data (level := 6)
 let original ← IO.ofExcept (Zip.Native.InflateBuf.inflate deflated)
 ```
 
-Levels run from 1 (fastest) to 10 (an exact dynamic-programming optimal
-parse). Every decoder takes a `maxOutputSize` bound (default 1 GiB) as a
-zip-bomb guard; unlike typical C APIs there is no unlimited mode — `0` means
-zero bytes.
+Level 0 emits stored (uncompressed) blocks; levels 1 (fastest) through 10
+(an exact dynamic-programming optimal parse) compress, with levels above 10
+behaving as 10. Every decoder takes a `maxOutputSize` bound (default 1 GiB)
+as a zip-bomb guard; unlike typical C APIs there is no unlimited mode — `0`
+means zero bytes.
 
 CRC-32 and Adler-32 have verified implementations too
 ([`Zip.Native.Crc32`](Zip/Native/Crc32.lean),
@@ -153,8 +154,11 @@ Sibling libraries:
   codec against system zlib (via lean-zlib) — translation validation plus RFC
   interop in both directions, and a deterministic fuzz harness
 - [`c/`](c): four small stopgap primitives (word-sized reads, in-place
-  copies) that Lean core doesn't expose yet; each has a pure-Lean reference
-  body and a correspondence proof
+  copies) that Lean core doesn't expose yet. Each has a pure-Lean reference
+  body; the proofs are about the reference bodies, and the C is trusted to
+  match them (cross-checked at runtime by the conformance sweeps). Together
+  with the Lean runtime these are the codec's entire trusted computing base —
+  no external library is involved
 - [`references/`](references): RFCs 1950/1951/1952 and related papers
 
 Every source file opens with a module docstring describing its purpose. Shared

@@ -19,7 +19,7 @@ namespace Zip.Native
 namespace GzipDecode
 
 /-- Absolute ceiling on the exact-size fastloop's speculative presize allocation,
-    mirroring `Zip.Archive.nativePresizeCap`. A member whose declared decompressed
+    mirroring lean-archive's `Archive.nativePresizeCap`. A member whose declared decompressed
     size (gzip trailer `ISIZE`) exceeds this keeps the push decoder rather than
     pre-extending a large buffer up front. -/
 def presizeCap : Nat := 64 * 1024 * 1024
