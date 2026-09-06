@@ -1,5 +1,9 @@
-import Zip.Spec.InflateTable
-import Zip.Spec.HuffmanCorrectLoop
+module
+
+public import Zip.Spec.InflateTable
+public import Zip.Spec.HuffmanCorrectLoop
+
+@[expose] public section
 
 /-!
 # Canonical O(n) decode-table build: equivalence to the tree-built table

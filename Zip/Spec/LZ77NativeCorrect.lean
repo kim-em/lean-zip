@@ -1,6 +1,10 @@
-import Zip.Native.Deflate
-import Zip.Spec.LZ77
-import ZipForStd.ByteArray
+module
+
+public import Zip.Native.Deflate
+public import Zip.Spec.LZ77
+public import ZipForStd.ByteArray
+
+public section
 
 /-! Correctness of native LZ77 matchers (`lz77Greedy` and `lz77Lazy`): proves `ValidDecomp`,
     token encodability, and length bounds against the spec-level LZ77 definitions. -/
@@ -8,12 +12,12 @@ import ZipForStd.ByteArray
 namespace Zip.Native.Deflate
 
 /-- Convert a native LZ77Token to a spec LZ77Symbol. -/
-def LZ77Token.toLZ77Symbol : LZ77Token → Deflate.Spec.LZ77Symbol
+@[expose] def LZ77Token.toLZ77Symbol : LZ77Token → Deflate.Spec.LZ77Symbol
   | .literal b => .literal b
   | .reference len dist => .reference len dist
 
 /-- Convert native LZ77 token array to spec symbol list with end-of-block. -/
-def tokensToSymbols (tokens : Array LZ77Token) : List Deflate.Spec.LZ77Symbol :=
+@[expose] def tokensToSymbols (tokens : Array LZ77Token) : List Deflate.Spec.LZ77Symbol :=
   tokens.toList.map LZ77Token.toLZ77Symbol ++ [.endOfBlock]
 
 /-- `toLZ77Symbol` never produces an `endOfBlock` symbol (it maps literals to
@@ -982,7 +986,10 @@ private def Encodable (t : LZ77Token) : Prop :=
   | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768
 
 theorem trailing_encodable (data : ByteArray) (pos : Nat) :
-    ∀ t ∈ lz77Greedy.trailing data pos, Encodable t := by
+    ∀ t ∈ lz77Greedy.trailing data pos,
+      match t with
+      | .literal _ => True
+      | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768 := by
   unfold lz77Greedy.trailing
   split
   · intro t ht
@@ -992,7 +999,7 @@ theorem trailing_encodable (data : ByteArray) (pos : Nat) :
   · simp only [List.not_mem_nil, false_implies, implies_true]
 termination_by data.size - pos
 
-theorem mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
+private theorem mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
     (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∀ t ∈ lz77Greedy.mainLoop data windowSize hashSize hashTable hashValid pos,
@@ -1155,7 +1162,7 @@ theorem lz77Lazy.trailing_valid (data : ByteArray) (pos : Nat) :
   · exact .done (by omega)
 termination_by data.size - pos
 
-theorem lz77Lazy.trailing_encodable (data : ByteArray) (pos : Nat) :
+private theorem lz77Lazy.trailing_encodable (data : ByteArray) (pos : Nat) :
     ∀ t ∈ lz77Lazy.trailing data pos, Encodable t := by
   unfold lz77Lazy.trailing
   split
@@ -1309,7 +1316,7 @@ theorem lz77Lazy_resolves (data : ByteArray)
 /-! ### Lazy mainLoop encodability -/
 
 set_option backward.split false in
-theorem lz77Lazy.mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
+private theorem lz77Lazy.mainLoop_encodable (data : ByteArray) (windowSize hashSize : Nat)
     (hashTable : Array Nat) (hashValid : Array Bool) (pos : Nat)
     (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∀ t ∈ lz77Lazy.mainLoop data windowSize hashSize hashTable hashValid pos,

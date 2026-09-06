@@ -1,11 +1,15 @@
-import ZipTest.Binary
-import ZipTest.Wide
-import ZipTest.ExtendWithin
-import ZipTest.InflateTable
-import ZipTest.PackedTokens
-import ZipTest.PackedHeads
-import ZipTest.SizeHelpers
-import ZipTest.L7Adaptive
+module
+
+public import ZipTest.Binary
+public import ZipTest.Wide
+public import ZipTest.ExtendWithin
+public import ZipTest.InflateTable
+public import ZipTest.PackedTokens
+public import ZipTest.PackedHeads
+public import ZipTest.SizeHelpers
+public import ZipTest.L7Adaptive
+
+public section
 
 def main : IO Unit := do
   ZipTest.Binary.tests

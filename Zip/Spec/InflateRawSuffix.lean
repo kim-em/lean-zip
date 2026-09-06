@@ -1,6 +1,10 @@
-import Zip.Native.Inflate
-import ZipCommon.Spec.BinaryCorrect
-import Zip.Spec.InflateComplete
+module
+
+public import Zip.Native.Inflate
+public import ZipCommon.Spec.BinaryCorrect
+public import Zip.Spec.InflateComplete
+
+@[expose] public section
 
 /-!
 # inflateRaw suffix invariance

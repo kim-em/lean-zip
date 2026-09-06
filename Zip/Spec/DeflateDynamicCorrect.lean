@@ -1,6 +1,10 @@
-import Zip.Spec.DeflateDynamicEmit
-import Zip.Spec.DeflateDynamicHeader
-import Zip.Spec.DeflateDynamicFreqs
+module
+
+public import Zip.Spec.DeflateDynamicEmit
+public import Zip.Spec.DeflateDynamicHeader
+public import Zip.Spec.DeflateDynamicFreqs
+
+@[expose] public section
 
 /-!
 # Native DEFLATE Dynamic Huffman Correctness

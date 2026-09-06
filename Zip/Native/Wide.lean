@@ -1,4 +1,11 @@
-import Std.Tactic.BVDecide
+module
+
+public import Std.Tactic.BVDecide
+public meta import Std.Tactic.BVDecide.Reflect
+import all Init.Data.UInt.Log2
+import all Init.Data.Fin.Log2
+
+@[expose] public section
 
 /-!
   Word-sized little-endian `ByteArray` loads and stores for the DEFLATE
@@ -149,7 +156,9 @@ def UInt32.log2Clz (x : UInt32) : UInt32 := x.log2
 
 /-- Unboxing the result exposes exactly `Nat.log2` of the input word. -/
 @[simp] theorem UInt32.toNat_log2Clz (x : UInt32) :
-    x.log2Clz.toNat = x.toNat.log2 := rfl
+    x.log2Clz.toNat = x.toNat.log2 := by
+  unfold UInt32.log2Clz UInt32.log2 Fin.log2
+  rfl
 
 /-- Count trailing zero bits of a `UInt64` (zero case defined as 64). This is the
     pure logical *specification* — its body is `BitVec.ctz`, kept for the

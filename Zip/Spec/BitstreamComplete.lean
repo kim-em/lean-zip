@@ -1,4 +1,8 @@
-import Zip.Spec.BitstreamCorrect
+module
+
+public import Zip.Spec.BitstreamCorrect
+
+@[expose] public section
 
 /-!
 # Bitstream Completeness (Reverse Direction)

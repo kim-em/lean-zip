@@ -1,3 +1,7 @@
+module
+
+@[expose] public section
+
 /-!
   Single-pass, allocation-free overlapping-match copy for the DEFLATE
   back-reference.

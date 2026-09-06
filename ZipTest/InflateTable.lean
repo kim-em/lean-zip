@@ -1,5 +1,9 @@
-import Zip
-import ZipTest.Helpers
+module
+
+public import Zip
+public import ZipTest.Helpers
+
+public section
 
 /-! Differential conformance for the table-driven Huffman decoder.
 

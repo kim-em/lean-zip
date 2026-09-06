@@ -1,6 +1,10 @@
-import Zip.Spec.DynamicTreesComplete
-import Zip.Spec.InflateTable
-import Zip.Spec.InflateBufCorrect
+module
+
+public import Zip.Spec.DynamicTreesComplete
+public import Zip.Spec.InflateTable
+public import Zip.Spec.InflateBufCorrect
+
+@[expose] public section
 
 /-!
 # DEFLATE Stream-Level Correctness

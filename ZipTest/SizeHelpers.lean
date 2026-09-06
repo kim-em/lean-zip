@@ -1,4 +1,8 @@
-import ZipTest.Helpers
+module
+
+public import ZipTest.Helpers
+
+public section
 
 /-! Conformance tests for the size-then-emit dispatch (`deflateRaw`/`deflateCompressed`).
 

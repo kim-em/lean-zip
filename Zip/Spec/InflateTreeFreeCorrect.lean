@@ -1,7 +1,11 @@
-import Zip.Spec.InflateCanonical
-import Zip.Spec.InflateBufCorrect
-import Zip.Spec.DynamicTreesCorrect
-import Zip.Native.InflateTreeFree
+module
+
+public import Zip.Spec.InflateCanonical
+public import Zip.Spec.InflateBufCorrect
+public import Zip.Spec.DynamicTreesCorrect
+public import Zip.Native.InflateTreeFree
+
+@[expose] public section
 
 /-!
 # Tree-free canonical decode: correctness

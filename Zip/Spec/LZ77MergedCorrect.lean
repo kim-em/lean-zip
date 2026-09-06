@@ -1,4 +1,8 @@
-import Zip.Spec.LZ77ChainCorrect
+module
+
+public import Zip.Spec.LZ77ChainCorrect
+
+@[expose] public section
 
 /-!
 # Correctness of the merged-array matchers (#2767, greedy port)

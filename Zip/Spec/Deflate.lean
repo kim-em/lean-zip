@@ -1,6 +1,10 @@
-import Zip.Spec.HuffmanTheorems
-import Zip.Spec.LZ77
-import Zip.Spec.DeflateStoredCorrect
+module
+
+public import Zip.Spec.HuffmanTheorems
+public import Zip.Spec.LZ77
+public import Zip.Spec.DeflateStoredCorrect
+
+@[expose] public section
 
 /-!
 # DEFLATE Bitstream Specification (RFC 1951)
@@ -273,7 +277,7 @@ private def encodeStoredBlock (data : List UInt8) : List Bool :=
 /-- Encode data as a sequence of stored DEFLATE blocks (spec level).
     Produces the complete bit-list representation including BFINAL/BTYPE
     for each block. Splits data into blocks of at most 65535 bytes. -/
-def encodeStored (data : List UInt8) : List Bool :=
+@[no_expose] def encodeStored (data : List UInt8) : List Bool :=
   if data.length ≤ 65535 then
     -- Single final block: BFINAL=1, BTYPE=00, 5 padding bits to byte-align
     [true, false, false] ++ List.replicate 5 false ++ encodeStoredBlock data

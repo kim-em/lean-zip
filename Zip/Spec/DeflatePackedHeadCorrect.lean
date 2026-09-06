@@ -1,4 +1,8 @@
-import Zip.Spec.DeflateFreqsFusedCorrect
+module
+
+public import Zip.Spec.DeflateFreqsFusedCorrect
+
+@[expose] public section
 
 namespace Zip.Native.Deflate
 

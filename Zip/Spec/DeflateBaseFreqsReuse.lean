@@ -1,5 +1,9 @@
-import Zip.Spec.LZ77PackedCorrect
-import Zip.Spec.DeflateFreqsAdditive
+module
+
+public import Zip.Spec.LZ77PackedCorrect
+public import Zip.Spec.DeflateFreqsAdditive
+
+@[expose] public section
 
 /-!
 # Reusing the split-sizing frequencies for the base candidate (#2772)

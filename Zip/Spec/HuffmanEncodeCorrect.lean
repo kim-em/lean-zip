@@ -1,5 +1,9 @@
-import Zip.Spec.HuffmanCorrectLoop
-import Zip.Native.Deflate
+module
+
+public import Zip.Spec.HuffmanCorrectLoop
+public import Zip.Native.Deflate
+
+@[expose] public section
 
 /-!
 # Canonical Codes Encode Correctness

@@ -1,7 +1,11 @@
-import Zip.Native.Deflate
-import Zip.Spec.EmitTokensCorrect
-import Zip.Spec.HuffmanEncode
-import Zip.Native.HuffmanEncode
+module
+
+public import Zip.Native.Deflate
+public import Zip.Spec.EmitTokensCorrect
+public import Zip.Spec.HuffmanEncode
+public import Zip.Native.HuffmanEncode
+
+@[expose] public section
 
 /-!
   Token-stream frequency analysis and dynamic-Huffman code-length selection,

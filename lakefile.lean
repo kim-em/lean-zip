@@ -52,9 +52,10 @@ package «lean-zip» where
   moreLinkArgs := run_io ltoLinkFlags
   testDriver := "test"
 
-require zipCommon from git "https://github.com/kim-em/lean-zip-common" @ "4425bab1f9522307d77e8d485bc536149ba31c36"
+require zipCommon from git "https://github.com/kim-em/lean-zip-common" @ "eaddfb8f2d7f0fc458c203e1b7917b8667f45f5e"
 
-lean_lib Zip
+lean_lib Zip where
+  precompileModules := true
 
 -- ByteArray.copyWithin primitive (project-local stopgap for lean#14158);
 -- no external library, always compiled.
@@ -69,7 +70,8 @@ target copy_within_ffi.o pkg : FilePath := do
   -- clang -O0 object carries `optnone`, which would block the LTO inlining).
   -- `buildLeanO` compiles with the toolchain clang so the -flto bitcode
   -- matches the Lean-emitted objects' LLVM version (see `ltoFlags`).
-  let hardArgs := #["-O2", "-DNDEBUG"] ++ (← ltoFlags) ++
+  -- Enable LEAN_EXPORT despite buildLeanO's default hidden visibility.
+  let hardArgs := #["-O2", "-DNDEBUG", "-DLEAN_EXPORTING"] ++ (← ltoFlags) ++
     if Platform.isWindows then #[] else #["-fPIC"]
   buildLeanO oFile srcJob #[] hardArgs
 
@@ -91,7 +93,7 @@ target extend_within_ffi.o pkg : FilePath := do
   -- loop whose lean.h helpers only inline away under optimization, and its
   -- bounds are carried by the Lean-side reference body (+ conformance sweeps).
   -- `buildLeanO` + `ltoFlags`: see `copy_within_ffi.o`.
-  let hardArgs := #["-O2", "-DNDEBUG"] ++ (← ltoFlags) ++
+  let hardArgs := #["-O2", "-DNDEBUG", "-DLEAN_EXPORTING"] ++ (← ltoFlags) ++
     if Platform.isWindows then #[] else #["-fPIC"]
   buildLeanO oFile srcJob #[] hardArgs
 
@@ -118,7 +120,7 @@ target bytearray_wide_ffi.o pkg : FilePath := do
   -- carried by Lean-side proofs (+ the ZipTest/Wide conformance sweeps).
   -- `buildLeanO` + `ltoFlags`: see `copy_within_ffi.o` — with LTO these
   -- single-instruction externs inline into `countMatch`/`hash3` themselves.
-  let hardArgs := #["-O2", "-DNDEBUG"] ++ (← ltoFlags) ++
+  let hardArgs := #["-O2", "-DNDEBUG", "-DLEAN_EXPORTING"] ++ (← ltoFlags) ++
     if Platform.isWindows then #[] else #["-fPIC"]
   buildLeanO oFile srcJob #[] hardArgs
 
@@ -140,7 +142,7 @@ target inflate_fast_ffi.o pkg : FilePath := do
   -- -O2/-DNDEBUG + LTO for the same reason as extend_within_ffi: hot in-place
   -- fill/store whose lean.h helpers only inline away under optimization, bounds
   -- carried by the Lean-side reference body (+ conformance sweeps).
-  let hardArgs := #["-O2", "-DNDEBUG"] ++ (← ltoFlags) ++
+  let hardArgs := #["-O2", "-DNDEBUG", "-DLEAN_EXPORTING"] ++ (← ltoFlags) ++
     if Platform.isWindows then #[] else #["-fPIC"]
   buildLeanO oFile srcJob #[] hardArgs
 

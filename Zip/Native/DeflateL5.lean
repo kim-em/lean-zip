@@ -1,4 +1,8 @@
-import Zip.Native.Deflate
+module
+
+public import Zip.Native.Deflate
+
+@[expose] public section
 
 /-!
 Large-input level-5 matcher specializations.

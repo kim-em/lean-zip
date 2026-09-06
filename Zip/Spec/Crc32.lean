@@ -1,4 +1,9 @@
-import Std.Tactic.BVDecide
+module
+
+public import Std.Tactic.BVDecide
+public meta import Std.Tactic.BVDecide.Reflect
+
+@[expose] public section
 
 /-!
 # CRC-32 Specification

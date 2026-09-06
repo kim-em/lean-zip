@@ -1,4 +1,8 @@
-import Zip.Spec.Adler32
+module
+
+public import Zip.Spec.Adler32
+
+@[expose] public section
 
 /-!
 # Native Lean Adler-32 Implementation

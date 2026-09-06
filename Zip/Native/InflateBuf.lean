@@ -1,4 +1,8 @@
-import Zip.Native.Inflate
+module
+
+public import Zip.Native.Inflate
+
+@[expose] public section
 
 /-!
   Wide-buffer DEFLATE block/entry points (Track D, #2501 approach 1).

@@ -1,4 +1,8 @@
-import Zip.Spec.HuffmanKraft
+module
+
+public import Zip.Spec.HuffmanKraft
+
+@[expose] public section
 
 /-!
 # Huffman Code Property Theorems

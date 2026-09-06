@@ -1,6 +1,10 @@
-import Zip.Spec.BitReaderInvariant
-import Zip.Spec.DeflateRoundtrip
-import Zip.Spec.InflateComplete
+module
+
+public import Zip.Spec.BitReaderInvariant
+public import Zip.Spec.DeflateRoundtrip
+public import Zip.Spec.InflateComplete
+
+@[expose] public section
 
 /-!
 # inflateLoop endPos bounds and completeness

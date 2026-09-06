@@ -1,6 +1,10 @@
-import Zip.Spec.Deflate
-import Zip.Spec.DeflateSuffix
-import Zip.Spec.HuffmanEncode
+module
+
+public import Zip.Spec.Deflate
+public import Zip.Spec.DeflateSuffix
+public import Zip.Spec.HuffmanEncode
+
+@[expose] public section
 
 /-!
 # DEFLATE Encoding Specification

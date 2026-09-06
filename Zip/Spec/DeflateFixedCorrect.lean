@@ -1,8 +1,12 @@
-import Zip.Spec.EmitTokensCorrect
-import Zip.Spec.DeflateStoredCorrect
-import Zip.Spec.LZ77NativeCorrect
-import Zip.Spec.InflateComplete
-import Zip.Native.DeflateDynamic
+module
+
+public import Zip.Spec.EmitTokensCorrect
+public import Zip.Spec.DeflateStoredCorrect
+public import Zip.Spec.LZ77NativeCorrect
+public import Zip.Spec.InflateComplete
+public import Zip.Native.DeflateDynamic
+
+@[expose] public section
 
 /-!
 # Native DEFLATE Fixed Huffman Correctness

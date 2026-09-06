@@ -1,5 +1,9 @@
-import Zip.Spec.InflateBufCorrect
-import Zip.Native.InflateFast
+module
+
+public import Zip.Spec.InflateBufCorrect
+public import Zip.Native.InflateFast
+
+public section
 
 /-!
 # Correctness infrastructure for the speculative wide decoder refill
@@ -559,7 +563,7 @@ theorem trimBitBufU_eq_trimBits (bitBuf : UInt64) (cnt : USize) (hcnt : cnt.toNa
       trimBits_toNat (by omega)]
 
 /-- Canonicalize only the returned buffer of a symbol-decode result. -/
-private def trimDecodeResult (r : UInt16 × UInt64 × Nat × Nat) :
+@[expose] def trimDecodeResult (r : UInt16 × UInt64 × Nat × Nat) :
     UInt16 × UInt64 × Nat × Nat :=
   (r.1, trimBits r.2.1 r.2.2.1, r.2.2.1, r.2.2.2)
 
@@ -671,7 +675,8 @@ theorem WideBufCorr.decodeSymCanon_trim_ok
     congr 2
     exact trimBits_shiftRight bitBuf (Nat.le_trans h.cntLe h.availLe) hu hused64
 
-private def trimTakeResult (r : Nat × UInt64 × Nat) : Nat × UInt64 × Nat :=
+/-- Canonicalize only the returned buffer of a bit-read result. -/
+@[expose] def trimTakeResult (r : Nat × UInt64 × Nat) : Nat × UInt64 × Nat :=
   (r.1, trimBits r.2.1 r.2.2, r.2.2)
 
 /-- Speculative bits above the count cannot affect a bounded `takeBits`. -/

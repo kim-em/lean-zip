@@ -1,6 +1,10 @@
-import Zip.Spec.SplitWalkerCorrect
-import Zip.Spec.LZ77PackedCorrect
-import Zip.Spec.DeflateBlockSplit
+module
+
+public import Zip.Spec.SplitWalkerCorrect
+public import Zip.Spec.LZ77PackedCorrect
+public import Zip.Spec.DeflateBlockSplit
+
+@[expose] public section
 
 /-!
 # Packed split-walker correctness

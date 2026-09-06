@@ -1,6 +1,10 @@
-import Zip.Native.DeflateL5
-import Zip.Spec.LZ77ChainCorrect
-import Zip.Spec.LZ77MergedCorrect
+module
+
+public import Zip.Native.DeflateL5
+public import Zip.Spec.LZ77ChainCorrect
+public import Zip.Spec.LZ77MergedCorrect
+
+@[expose] public section
 
 /-!
 Correctness of the isolated large-input level-5 matcher.

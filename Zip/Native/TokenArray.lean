@@ -1,6 +1,11 @@
-import ZipCommon.Binary
-import Zip.Native.Wide
-import Std.Tactic.BVDecide
+module
+
+public import ZipCommon.Binary
+public import Zip.Native.Wide
+public import Std.Tactic.BVDecide
+public meta import Std.Tactic.BVDecide.Reflect
+
+@[expose] public section
 
 /-! # Packed token container for the LZ77 stream
 
@@ -214,7 +219,7 @@ private theorem toUSize_toNat_of_lt {n : Nat} (h : n < USize.size) : n.toUSize.t
     hot token-consumer loops (emit, freq histogram, block-split sizing).  This
     mirrors the input-reader guard used by `lz77Greedy.hash3` (#2706). -/
 @[inline] def getImpl (ta : TokenArray) (i : Nat) (h : i < ta.size) : UInt32 :=
-  have hb := ta.byte_bound h
+  have hb : 4 * i + 3 < ta.bytes.size := by exact byte_bound ta h
   if hsz : ta.bytes.size.toUSize.toNat = ta.bytes.size then
     ta.bytes.ugetUInt32LE (4 * i).toUSize (by
       have hds : ta.bytes.size < USize.size := by
@@ -228,7 +233,7 @@ private theorem toUSize_toNat_of_lt {n : Nat} (h : n < USize.size) : n.toUSize.t
 
 /-- Read the `i`-th token as a little-endian `UInt32` (proven-in-bounds). -/
 def get (ta : TokenArray) (i : Nat) (h : i < ta.size) : UInt32 :=
-  have hb := ta.byte_bound h
+  have hb : 4 * i + 3 < ta.bytes.size := by exact byte_bound ta h
   (ta.bytes[4 * i]'(by omega)).toUInt32
     ||| ((ta.bytes[4 * i + 1]'(by omega)).toUInt32 <<< 8)
     ||| ((ta.bytes[4 * i + 2]'(by omega)).toUInt32 <<< 16)
@@ -241,7 +246,7 @@ def get (ta : TokenArray) (i : Nat) (h : i < ta.size) : UInt32 :=
     `@[extern]` on `ugetUInt32LE`. -/
 @[csimp] theorem get_eq_impl : @get = @getImpl := by
   funext ta i h
-  have hb := ta.byte_bound h
+  have hb := byte_bound ta h
   rw [getImpl]
   split
   · rename_i hsz
@@ -282,7 +287,7 @@ theorem get_toArray (ta : TokenArray) (i : Nat) (h : i < ta.size) :
 private theorem get_push_lt (ta : TokenArray) (w : UInt32) {i : Nat} (h : i < ta.size)
     (h' : i < (ta.push w).size) :
     (ta.push w).get i h' = ta.get i h := by
-  have hb := ta.byte_bound h
+  have hb := byte_bound ta h
   simp only [get, push]
   rw [ByteArray.getElem_pushUInt32LE_lt ta.bytes w (by omega),
       ByteArray.getElem_pushUInt32LE_lt ta.bytes w (by omega),

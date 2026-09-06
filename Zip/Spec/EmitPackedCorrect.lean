@@ -1,4 +1,8 @@
-import Zip.Native.DeflateDynamic
+module
+
+public import Zip.Native.DeflateDynamic
+
+@[expose] public section
 
 /-!
 # Correctness of the packed-token emitters (Wave 3b stage C)

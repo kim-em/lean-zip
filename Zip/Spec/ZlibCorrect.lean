@@ -1,9 +1,13 @@
-import Zip.Native.Gzip
-import Zip.Spec.DeflateRoundtrip
-import ZipCommon.Spec.BinaryCorrect
-import Zip.Spec.DeflateSuffix
-import Zip.Spec.InflateComplete
-import Zip.Spec.GzipCorrect
+module
+
+public import Zip.Native.Gzip
+public import Zip.Spec.DeflateRoundtrip
+public import ZipCommon.Spec.BinaryCorrect
+public import Zip.Spec.DeflateSuffix
+public import Zip.Spec.InflateComplete
+public import Zip.Spec.GzipCorrect
+
+@[expose] public section
 
 /-!
 # Zlib framing roundtrip (RFC 1950)

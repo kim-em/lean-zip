@@ -1,3 +1,7 @@
+module
+
+@[expose] public section
+
 /-!
 # LZ77 Symbol Algebra and Greedy Matching
 

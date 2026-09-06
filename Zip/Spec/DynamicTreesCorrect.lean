@@ -1,4 +1,8 @@
-import Zip.Spec.DecodeCorrect
+module
+
+public import Zip.Spec.DecodeCorrect
+
+@[expose] public section
 
 /-!
 # Dynamic Huffman Tree Decode Correctness

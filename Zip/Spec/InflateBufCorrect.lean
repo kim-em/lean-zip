@@ -1,6 +1,10 @@
-import Zip.Spec.InflateTable
-import Zip.Spec.BitReaderInvariant
-import Zip.Native.InflateBuf
+module
+
+public import Zip.Spec.InflateTable
+public import Zip.Spec.BitReaderInvariant
+public import Zip.Native.InflateBuf
+
+@[expose] public section
 
 /-!
 # Wide-buffer Huffman decoder: equivalence to the reference

@@ -1,5 +1,9 @@
-import Zip.Native.InflateTreeFree
-import Zip.Native.Wide
+module
+
+public import Zip.Native.InflateTreeFree
+public import Zip.Native.Wide
+
+@[expose] public section
 
 /-!
 # Write-once cursor decode (fastloop spike — issue #2799)
@@ -343,10 +347,11 @@ def goCurU (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
             else
               let out := if hshort : 8 ≤ distance ∧ length ≤ 8 then
                 output.copyWithinAtShort outPos distance length hshort.1
-                  (uint16_add_usize_pos base extraBits
-                    (lengthBase_pos idx.toNat (by
-                      rw [Inflate.lengthBase_size]
-                      simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))))
+                  (by
+                    exact uint16_add_usize_pos base extraBits
+                      (lengthBase_pos idx.toNat (by
+                        rw [Inflate.lengthBase_size]
+                        simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))))
                   hshort.2
                   (USize.not_lt.mp hds) (by omega)
                 else
@@ -523,10 +528,11 @@ def goCurUW (litTable distTable : DecodeTable) (litLD distLD : LongDecode)
               else
                 let out := if hshort : 8 ≤ distance ∧ length ≤ 8 then
                   output.copyWithinAtShort outPos distance length hshort.1
-                    (uint16_add_usize_pos base extraBits
-                      (lengthBase_pos idx.toNat (by
-                        rw [Inflate.lengthBase_size]
-                        simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))))
+                    (by
+                      exact uint16_add_usize_pos base extraBits
+                        (lengthBase_pos idx.toNat (by
+                          rw [Inflate.lengthBase_size]
+                          simpa using USize.lt_iff_toNat_lt.mp (USize.not_le.mp h))))
                     hshort.2
                     (USize.not_lt.mp hds) (by omega)
                   else

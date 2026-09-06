@@ -1,5 +1,9 @@
-import Zip.Spec.InflateCorrect
-import Zip.Spec.DynamicTreesComplete
+module
+
+public import Zip.Spec.InflateCorrect
+public import Zip.Spec.DynamicTreesComplete
+
+@[expose] public section
 
 /-!
 # DEFLATE Stream-Level Completeness

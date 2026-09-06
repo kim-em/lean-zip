@@ -1,4 +1,8 @@
-import Zip.Spec.LZ77NativeCorrect
+module
+
+public import Zip.Spec.LZ77NativeCorrect
+
+public section
 
 /-!
 # Correctness of the hash-chain LZ77 matcher (`lz77Chain`)
@@ -326,7 +330,7 @@ private def Enc (t : LZ77Token) : Prop :=
   | .literal _ => True
   | .reference len dist => 3 ≤ len ∧ len ≤ 258 ∧ 1 ≤ dist ∧ dist ≤ 32768
 
-theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain niceLen : Nat)
+private theorem lz77Chain_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain niceLen : Nat)
     (hashTable : Array Nat) (prev : Array Nat) (pos insertCap : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∀ t ∈ lz77Chain.mainLoop data windowSize hashSize maxChain niceLen hashTable prev pos insertCap, Enc t := by
   unfold lz77Chain.mainLoop

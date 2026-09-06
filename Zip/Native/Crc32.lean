@@ -1,5 +1,10 @@
-import Zip.Spec.Crc32
-import Std.Tactic.BVDecide
+module
+
+public import Zip.Spec.Crc32
+public import Std.Tactic.BVDecide
+public meta import Std.Tactic.BVDecide.Reflect
+
+@[expose] public section
 
 /-!
 # Native Lean CRC-32 Implementation

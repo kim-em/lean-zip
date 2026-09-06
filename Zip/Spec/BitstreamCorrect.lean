@@ -1,7 +1,11 @@
-import Zip.Spec.Deflate
-import Zip.Native.Inflate
-import ZipForStd.List
-import ZipForStd.Nat
+module
+
+public import Zip.Spec.Deflate
+public import Zip.Native.Inflate
+public import ZipForStd.List
+public import ZipForStd.Nat
+
+@[expose] public section
 
 /-!
 # Bitstream Correspondence

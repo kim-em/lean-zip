@@ -1,4 +1,8 @@
-import Zip.Spec.HuffmanEncode
+module
+
+public import Zip.Spec.HuffmanEncode
+
+@[expose] public section
 
 /-!
 # Native array-based Huffman code-length construction

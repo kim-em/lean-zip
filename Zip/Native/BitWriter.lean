@@ -1,5 +1,10 @@
-import Std.Tactic.BVDecide
-import Zip.Native.Wide
+module
+
+public import Std.Tactic.BVDecide
+public meta import Std.Tactic.BVDecide.Reflect
+public import Zip.Native.Wide
+
+@[expose] public section
 
 /-!
   LSB-first bit packer for DEFLATE streams.

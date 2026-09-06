@@ -1,5 +1,9 @@
-import Zip.Spec.HuffmanCorrect
-import ZipForStd.Array
+module
+
+public import Zip.Spec.HuffmanCorrect
+public import ZipForStd.Array
+
+@[expose] public section
 
 /-!
 # Huffman fromLengths Loop Invariants

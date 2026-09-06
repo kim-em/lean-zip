@@ -1,5 +1,9 @@
-import ZipTest.Helpers
-import Zip.Native.DeflateDynamic
+module
+
+public import ZipTest.Helpers
+public import Zip.Native.DeflateDynamic
+
+public section
 
 /-! Golden tests for the level-7 content-profile and split-cadence selectors.
 

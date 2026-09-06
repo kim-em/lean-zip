@@ -1,7 +1,11 @@
-import ZipCommon.Spec.BitReaderInvariant
-import Zip.Spec.Huffman
-import Zip.Native.CopyWithin
-import Zip.Native.ExtendWithin
+module
+
+public import ZipCommon.Spec.BitReaderInvariant
+public import Zip.Spec.Huffman
+public import Zip.Native.CopyWithin
+public import Zip.Native.ExtendWithin
+
+@[expose] public section
 
 /-!
   Pure Lean DEFLATE decompressor (RFC 1951).

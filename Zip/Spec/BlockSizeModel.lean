@@ -1,5 +1,9 @@
-import Zip.Spec.BitWriterCorrect
-import Zip.Spec.BitstreamWriteCorrect
+module
+
+public import Zip.Spec.BitWriterCorrect
+public import Zip.Spec.BitstreamWriteCorrect
+
+@[expose] public section
 
 /-!
 # BitWriter `bitLength` accounting — foundation for the block-size model
