@@ -1,4 +1,8 @@
-import Zip.Spec.DeflateDynamicEmit
+module
+
+public import Zip.Spec.DeflateDynamicEmit
+
+@[expose] public section
 
 /-!
 # writeDynamicHeader ↔ encodeDynamicTrees correspondence

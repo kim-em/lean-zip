@@ -1,4 +1,8 @@
-import Zip.Native.Inflate
+module
+
+public import Zip.Native.Inflate
+
+@[expose] public section
 
 /-!
 # Tree-free canonical decode — the production DEFLATE decoder

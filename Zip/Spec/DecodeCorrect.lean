@@ -1,6 +1,10 @@
-import Zip.Spec.HuffmanCorrectLoop
-import Zip.Spec.BitstreamComplete
-import ZipForStd.ByteArray
+module
+
+public import Zip.Spec.HuffmanCorrectLoop
+public import Zip.Spec.BitstreamComplete
+public import ZipForStd.ByteArray
+
+@[expose] public section
 
 /-!
 # Block-Level Decode Correctness

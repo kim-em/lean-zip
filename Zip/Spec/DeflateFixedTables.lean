@@ -1,6 +1,10 @@
-import Zip.Spec.DeflateEncodeProps
-import Zip.Spec.HuffmanEncodeCorrect
-import Zip.Native.Deflate
+module
+
+public import Zip.Spec.DeflateEncodeProps
+public import Zip.Spec.HuffmanEncodeCorrect
+public import Zip.Native.Deflate
+
+@[expose] public section
 
 /-!
 # Fixed Huffman Table Bridge Proofs

@@ -1,5 +1,9 @@
-import Zip.Spec.DeflateEncode
-import Zip.Spec.BitstreamWriteCorrect
+module
+
+public import Zip.Spec.DeflateEncode
+public import Zip.Spec.BitstreamWriteCorrect
+
+@[expose] public section
 
 /-!
 # DEFLATE Dynamic Block Header Encoding (RFC 1951 §3.2.7)

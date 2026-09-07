@@ -1,71 +1,73 @@
-import Zip.Spec.Adler32
-import Zip.Spec.Crc32
-import Zip.Spec.Huffman
-import Zip.Spec.HuffmanTheorems
-import Zip.Spec.HuffmanEncode
-import Zip.Spec.LZ77
-import Zip.Spec.Deflate
-import Zip.Spec.DeflateSuffix
-import Zip.Spec.DeflateEncode
-import Zip.Spec.DeflateEncodeProps
-import Zip.Spec.DeflateEncodeDynamic
-import Zip.Spec.DeflateEncodeDynamicProps
-import Zip.Spec.LZ77Lazy
-import Zip.Spec.BitstreamCorrect
-import Zip.Spec.BitstreamComplete
-import Zip.Spec.BitstreamWriteCorrect
-import Zip.Spec.BitWriterCorrect
-import Zip.Spec.BlockSizeModel
-import Zip.Spec.HuffmanCorrect
-import Zip.Spec.HuffmanCorrectLoop
-import Zip.Spec.InflateTable
-import Zip.Spec.InflateCanonical
-import Zip.Spec.HuffmanEncodeCorrect
-import Zip.Spec.DecodeCorrect
-import Zip.Spec.DecodeComplete
-import Zip.Spec.DynamicTreesCorrect
-import Zip.Spec.DynamicTreesComplete
-import Zip.Spec.InflateCorrect
-import Zip.Spec.InflateComplete
-import Zip.Native.Wide
-import Zip.Native.TokenArray
-import Zip.Native.Adler32
-import Zip.Native.Crc32
-import Zip.Native.Inflate
-import Zip.Native.InflateTreeFree
-import Zip.Native.Gzip
-import Zip.Native.BitWriter
-import Zip.Native.Deflate
-import Zip.Native.DeflateDynamic
-import Zip.Spec.SplitWalkerCorrect
-import Zip.Spec.SplitWalkerPackedCorrect
-import Zip.Native.DeflateFreqs
-import Zip.Native.DeflateFreqsFused
-import Zip.Spec.DeflateFreqsFusedCorrect
-import Zip.Spec.DeflatePackedHeadCorrect
-import Zip.Native.DeflateParse
-import Zip.Spec.LZ77NativeCorrect
-import Zip.Spec.LZ77OptimalCorrect
-import Zip.Spec.DeflateFixedTables
-import Zip.Spec.EmitTokensCorrect
-import Zip.Spec.EmitPackedCorrect
-import Zip.Spec.EmitFlatCorrect
-import Zip.Spec.DeflateFixedCorrect
-import Zip.Spec.InflateBufCorrect
-import Zip.Spec.InflateTreeFreeCorrect
-import Zip.Spec.InflateFastCorrect
-import Zip.Spec.InflateBufRoundtrip
-import Zip.Spec.DeflateStoredCorrect
-import Zip.Spec.DeflateDynamicEmit
-import Zip.Spec.DeflateDynamicHeader
-import Zip.Spec.DeflateDynamicFreqs
-import Zip.Spec.DeflateDynamicCorrect
-import Zip.Spec.DeflateRoundtrip
-import Zip.Spec.InflateProductionCorrect
-import Zip.Spec.DeflateRoundtripProduction
-import Zip.Spec.LZ77PackedCorrect
-import Zip.Spec.BitReaderInvariant
-import Zip.Spec.InflateLoopBounds
-import Zip.Spec.InflateRawSuffix
-import Zip.Spec.GzipCorrect
-import Zip.Spec.ZlibCorrect
+module
+
+public import Zip.Spec.Adler32
+public import Zip.Spec.Crc32
+public import Zip.Spec.Huffman
+public import Zip.Spec.HuffmanTheorems
+public import Zip.Spec.HuffmanEncode
+public import Zip.Spec.LZ77
+public import Zip.Spec.Deflate
+public import Zip.Spec.DeflateSuffix
+public import Zip.Spec.DeflateEncode
+public import Zip.Spec.DeflateEncodeProps
+public import Zip.Spec.DeflateEncodeDynamic
+public import Zip.Spec.DeflateEncodeDynamicProps
+public import Zip.Spec.LZ77Lazy
+public import Zip.Spec.BitstreamCorrect
+public import Zip.Spec.BitstreamComplete
+public import Zip.Spec.BitstreamWriteCorrect
+public import Zip.Spec.BitWriterCorrect
+public import Zip.Spec.BlockSizeModel
+public import Zip.Spec.HuffmanCorrect
+public import Zip.Spec.HuffmanCorrectLoop
+public import Zip.Spec.InflateTable
+public import Zip.Spec.InflateCanonical
+public import Zip.Spec.HuffmanEncodeCorrect
+public import Zip.Spec.DecodeCorrect
+public import Zip.Spec.DecodeComplete
+public import Zip.Spec.DynamicTreesCorrect
+public import Zip.Spec.DynamicTreesComplete
+public import Zip.Spec.InflateCorrect
+public import Zip.Spec.InflateComplete
+public import Zip.Native.Wide
+public import Zip.Native.TokenArray
+public import Zip.Native.Adler32
+public import Zip.Native.Crc32
+public import Zip.Native.Inflate
+public import Zip.Native.InflateTreeFree
+public import Zip.Native.Gzip
+public import Zip.Native.BitWriter
+public import Zip.Native.Deflate
+public import Zip.Native.DeflateDynamic
+public import Zip.Spec.SplitWalkerCorrect
+public import Zip.Spec.SplitWalkerPackedCorrect
+public import Zip.Native.DeflateFreqs
+public import Zip.Native.DeflateFreqsFused
+public import Zip.Spec.DeflateFreqsFusedCorrect
+public import Zip.Spec.DeflatePackedHeadCorrect
+public import Zip.Native.DeflateParse
+public import Zip.Spec.LZ77NativeCorrect
+public import Zip.Spec.LZ77OptimalCorrect
+public import Zip.Spec.DeflateFixedTables
+public import Zip.Spec.EmitTokensCorrect
+public import Zip.Spec.EmitPackedCorrect
+public import Zip.Spec.EmitFlatCorrect
+public import Zip.Spec.DeflateFixedCorrect
+public import Zip.Spec.InflateBufCorrect
+public import Zip.Spec.InflateTreeFreeCorrect
+public import Zip.Spec.InflateFastCorrect
+public import Zip.Spec.InflateBufRoundtrip
+public import Zip.Spec.DeflateStoredCorrect
+public import Zip.Spec.DeflateDynamicEmit
+public import Zip.Spec.DeflateDynamicHeader
+public import Zip.Spec.DeflateDynamicFreqs
+public import Zip.Spec.DeflateDynamicCorrect
+public import Zip.Spec.DeflateRoundtrip
+public import Zip.Spec.InflateProductionCorrect
+public import Zip.Spec.DeflateRoundtripProduction
+public import Zip.Spec.LZ77PackedCorrect
+public import Zip.Spec.BitReaderInvariant
+public import Zip.Spec.InflateLoopBounds
+public import Zip.Spec.InflateRawSuffix
+public import Zip.Spec.GzipCorrect
+public import Zip.Spec.ZlibCorrect

@@ -1,5 +1,9 @@
-import Zip.Spec.DecodeCorrect
-import Zip.Spec.BitReaderInvariant
+module
+
+public import Zip.Spec.DecodeCorrect
+public import Zip.Spec.BitReaderInvariant
+
+@[expose] public section
 
 /-!
 # Block-Level Decode Completeness (reverse direction)

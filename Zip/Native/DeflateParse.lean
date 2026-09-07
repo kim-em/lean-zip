@@ -1,5 +1,10 @@
-import Zip.Native.Deflate
-import Zip.Native.DeflateFreqs
+module
+
+public import Zip.Native.Deflate
+public import Zip.Native.DeflateFreqs
+
+-- Keep heuristic bodies opaque to importers; expose only the verified emitters below.
+public section
 
 /-!
   Near-optimal LZ parsing support (#2496), part 1: the per-position
@@ -824,7 +829,7 @@ and encodability proofs in `Zip.Spec.LZ77OptimalCorrect` are stated for
 /-- Emit tokens for `data[pos ..]` from the choice arrays, re-verifying every
     match. List-cons version for proofs; `optimalEmitIter` is the runtime
     twin (proven equal in `LZ77OptimalCorrect`). -/
-def optimalEmit (data : ByteArray) (chLen chDist : Array Nat) (pos : Nat) :
+@[expose] def optimalEmit (data : ByteArray) (chLen chDist : Array Nat) (pos : Nat) :
     List LZ77Token :=
   if hpos : pos < data.size then
     -- `chLen`/`chDist` are *arbitrary* choice arrays here (the correctness
@@ -849,7 +854,7 @@ decreasing_by all_goals omega
 /-- Iterative (tail-recursive, `Array`-accumulating) twin of `optimalEmit`.
     Same output (`optimalEmitIter_eq` in `LZ77OptimalCorrect`); does not
     overflow the stack on large inputs. -/
-def optimalEmitIter (data : ByteArray) (chLen chDist : Array Nat) (pos : Nat)
+@[expose] def optimalEmitIter (data : ByteArray) (chLen chDist : Array Nat) (pos : Nat)
     (acc : Array LZ77Token) : Array LZ77Token :=
   if hpos : pos < data.size then
     -- As in `optimalEmit`: arbitrary choice arrays, so these reads stay
@@ -872,13 +877,13 @@ decreasing_by all_goals omega
 /-- Near-optimal LZ77 parse: cost-model backward DP over the candidate
     cache, then re-verified emission. List-backed reference version (the
     proofs' subject); `lz77OptimalIter` is the runtime entry point. -/
-def lz77Optimal (data : ByteArray) : Array LZ77Token :=
+@[expose] def lz77Optimal (data : ByteArray) : Array LZ77Token :=
   let (chLen, chDist) := computeChoices data
   (optimalEmit data chLen chDist 0).toArray
 
 /-- Runtime entry point: same tokens as `lz77Optimal` (proven in
     `LZ77OptimalCorrect`), tail-recursive emission. -/
-def lz77OptimalIter (data : ByteArray) : Array LZ77Token :=
+@[expose] def lz77OptimalIter (data : ByteArray) : Array LZ77Token :=
   let (chLen, chDist) := computeChoices data
   optimalEmitIter data chLen chDist 0 #[]
 
@@ -1028,13 +1033,13 @@ def computeChoicesFast (data : ByteArray) : Array Nat × Array Nat :=
 /-- L9-fast parse (list-backed reference version, the proofs' subject); same
     re-verifying emission as `lz77Optimal`. `lz77OptimalFastIter` is the runtime
     entry point. -/
-def lz77OptimalFast (data : ByteArray) : Array LZ77Token :=
+@[expose] def lz77OptimalFast (data : ByteArray) : Array LZ77Token :=
   let (chLen, chDist) := computeChoicesFast data
   (optimalEmit data chLen chDist 0).toArray
 
 /-- L9-fast runtime entry point: cheaper approximate-optimal parse, then the
     same re-verifying tail-recursive emission as `lz77OptimalIter`. -/
-def lz77OptimalFastIter (data : ByteArray) : Array LZ77Token :=
+@[expose] def lz77OptimalFastIter (data : ByteArray) : Array LZ77Token :=
   let (chLen, chDist) := computeChoicesFast data
   optimalEmitIter data chLen chDist 0 #[]
 
@@ -1193,7 +1198,7 @@ abbrev WindowFill : Type :=
     refills the next window `[base + r, ..)` via `fill` (threading the finder
     state) and continues. `fill`'s output is never inspected by the correctness
     proofs — validity comes solely from the re-verification, as for `optimalEmit`. -/
-def windowedEmit (data : ByteArray) (fill : WindowFill) (regionSize : Nat)
+@[expose] def windowedEmit (data : ByteArray) (fill : WindowFill) (regionSize : Nat)
     (base : Nat) (cLen cDist : Array Nat) (hashTable prev h3tab : Array Nat)
     (r pos : Nat) (hrs : 1 ≤ regionSize) (hr1 : 1 ≤ r) : List LZ77Token :=
   if hpos : pos < data.size then
@@ -1225,7 +1230,7 @@ decreasing_by all_goals omega
 
 /-- Iterative (`Array`-accumulating) twin of `windowedEmit`; the runtime entry
     point (proven equal to `windowedEmit` in `LZ77OptimalCorrect`). -/
-def windowedEmitIter (data : ByteArray) (fill : WindowFill) (regionSize : Nat)
+@[expose] def windowedEmitIter (data : ByteArray) (fill : WindowFill) (regionSize : Nat)
     (base : Nat) (cLen cDist : Array Nat) (hashTable prev h3tab : Array Nat)
     (r pos : Nat) (acc : Array LZ77Token) (hrs : 1 ≤ regionSize) (hr1 : 1 ≤ r) :
     Array LZ77Token :=
@@ -1258,7 +1263,7 @@ decreasing_by all_goals omega
 
 /-- Shared driver for both windowed parsers: set up the first window and run the
     interleaved emitter with the given region-fill closure. -/
-def lz77OptimalWindowedWith (data : ByteArray) (fill : WindowFill) : Array LZ77Token :=
+@[expose] def lz77OptimalWindowedWith (data : ByteArray) (fill : WindowFill) : Array LZ77Token :=
   if h : data.size = 0 then #[]
   else
     let r0 := min optRegionSize data.size
@@ -1275,7 +1280,7 @@ def lz77OptimalWindowedWith (data : ByteArray) (fill : WindowFill) : Array LZ77T
 /-- Windowed exact-DP parse (#2787): bit-for-bit the tokens of `lz77OptimalIter`,
     but with the choice storage capped to one region. Deployed at level ≥ 10
     above the memory gate. -/
-def lz77OptimalWindowedIter (data : ByteArray) : Array LZ77Token :=
+@[expose] def lz77OptimalWindowedIter (data : ByteArray) : Array LZ77Token :=
   let st := staticCostTables
   lz77OptimalWindowedWith data
     (fun base r ht prev h3 =>
@@ -1285,7 +1290,7 @@ def lz77OptimalWindowedIter (data : ByteArray) : Array LZ77Token :=
 /-- Windowed L9-fast parse (#2787): the region-capped twin of
     `lz77OptimalFastIter`. Public level 9 selects this byte-identical,
     memory-bounded implementation above its DP memory-policy threshold. -/
-def lz77OptimalWindowedFastIter (data : ByteArray) : Array LZ77Token :=
+@[expose] def lz77OptimalWindowedFastIter (data : ByteArray) : Array LZ77Token :=
   let st := staticCostTables
   lz77OptimalWindowedWith data
     (fun base r ht prev h3 =>

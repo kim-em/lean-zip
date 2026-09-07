@@ -1,5 +1,9 @@
-import Zip.Spec.InflateBufCorrect
-import Zip.Spec.DeflateFixedCorrect
+module
+
+public import Zip.Spec.InflateBufCorrect
+public import Zip.Spec.DeflateFixedCorrect
+
+@[expose] public section
 
 /-!
 # Roundtrip for the wide-buffer decoder

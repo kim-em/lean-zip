@@ -1,6 +1,10 @@
-import Zip.Spec.DeflateRoundtrip
-import Zip.Spec.InflateProductionCorrect
-import Zip.Spec.InflateTreeFreeCorrect
+module
+
+public import Zip.Spec.DeflateRoundtrip
+public import Zip.Spec.InflateProductionCorrect
+public import Zip.Spec.InflateTreeFreeCorrect
+
+@[expose] public section
 
 /-!
 # Roundtrip through the production decoder

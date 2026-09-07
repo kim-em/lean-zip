@@ -1,6 +1,10 @@
-import Zip.Spec.Huffman
-import ZipForStd.List
-import ZipForStd.Array
+module
+
+public import Zip.Spec.Huffman
+public import ZipForStd.List
+public import ZipForStd.Array
+
+@[expose] public section
 
 /-!
 # Huffman Code Length Computation from Symbol Frequencies

@@ -1,5 +1,9 @@
-import ZipTest.Helpers
-import Zip.Native.DeflateDynamic
+module
+
+public import ZipTest.Helpers
+public import Zip.Native.DeflateDynamic
+
+public section
 
 /-! Element-wise identity between the packed token stream and the boxed one
     (Wave 3b stage A): `(lzMatchP data level).map unpackTok` must equal

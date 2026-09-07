@@ -1,5 +1,9 @@
-import Zip.Native.DeflateDynamic
-import Zip.Spec.EmitTokensCorrect
+module
+
+public import Zip.Native.DeflateDynamic
+public import Zip.Spec.EmitTokensCorrect
+
+@[expose] public section
 
 /-!
 # tokenFreqs properties for dynamic Huffman correctness

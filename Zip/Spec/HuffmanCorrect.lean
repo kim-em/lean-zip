@@ -1,5 +1,9 @@
-import Zip.Spec.BitstreamCorrect
-import Zip.Spec.BitstreamComplete
+module
+
+public import Zip.Spec.BitstreamCorrect
+public import Zip.Spec.BitstreamComplete
+
+@[expose] public section
 
 /-!
 # Huffman Tree Primitives

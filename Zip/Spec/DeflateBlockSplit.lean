@@ -1,8 +1,12 @@
-import Zip.Spec.DeflateFixedCorrect
-import Zip.Spec.DeflateDynamicCorrect
-import Zip.Spec.LZ77ChainCorrect
-import Zip.Spec.LZ77ChainLazyCorrect
-import Zip.Spec.LZ77OptimalCorrect
+module
+
+public import Zip.Spec.DeflateFixedCorrect
+public import Zip.Spec.DeflateDynamicCorrect
+public import Zip.Spec.LZ77ChainCorrect
+public import Zip.Spec.LZ77ChainLazyCorrect
+public import Zip.Spec.LZ77OptimalCorrect
+
+@[expose] public section
 
 /-!
 # Self-contained block-splitting roundtrip

@@ -1,5 +1,9 @@
-import Zip.Spec.Huffman
-import ZipForStd.Array
+module
+
+public import Zip.Spec.Huffman
+public import ZipForStd.Array
+
+@[expose] public section
 
 /-!
 # Kraft Inequality Analysis for Canonical Huffman Codes

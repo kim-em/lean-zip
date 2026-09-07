@@ -1,3 +1,7 @@
+module
+
+@[expose] public section
+
 /-!
   Single-pass self-append primitive for the DEFLATE back-reference copy.
 

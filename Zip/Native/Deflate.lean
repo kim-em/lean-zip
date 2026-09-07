@@ -1,8 +1,13 @@
-import Zip.Native.BitWriter
-import Zip.Native.Inflate
-import Zip.Native.Wide
-import Zip.Native.TokenArray
-import Std.Tactic.BVDecide
+module
+
+public import Zip.Native.BitWriter
+public import Zip.Native.Inflate
+public import Zip.Native.Wide
+public import Zip.Native.TokenArray
+public import Std.Tactic.BVDecide
+public meta import Std.Tactic.BVDecide.Reflect
+
+@[expose] public section
 
 /-!
   Pure Lean DEFLATE compressor.
@@ -25,7 +30,7 @@ private def maxBlockSize : Nat := 65535
     - LEN bytes: raw data
 
     Empty input produces one final stored block with LEN=0. -/
-def deflateStored (data : ByteArray) : ByteArray := Id.run do
+@[no_expose] def deflateStored (data : ByteArray) : ByteArray := Id.run do
   let mut result := ByteArray.empty
   if data.size == 0 then
     -- Empty: one final stored block with LEN=0

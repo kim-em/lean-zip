@@ -1,10 +1,14 @@
-import Zip.Native.Inflate
-import Zip.Native.InflateTreeFree
-import Zip.Native.InflateFast
-import Zip.Native.DeflateDynamic
-import Zip.Native.Crc32
-import Zip.Native.Adler32
-import ZipCommon.Binary
+module
+
+public import Zip.Native.Inflate
+public import Zip.Native.InflateTreeFree
+public import Zip.Native.InflateFast
+public import Zip.Native.DeflateDynamic
+public import Zip.Native.Crc32
+public import Zip.Native.Adler32
+public import ZipCommon.Binary
+
+@[expose] public section
 
 /-!
   Pure Lean gzip (RFC 1952) and zlib (RFC 1950) compression and decompression.

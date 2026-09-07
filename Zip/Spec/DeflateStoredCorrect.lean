@@ -1,6 +1,11 @@
-import Zip.Native.Inflate
-import ZipForStd.ByteArray
-import Std.Tactic.BVDecide
+module
+
+public import Zip.Native.Inflate
+public import ZipForStd.ByteArray
+public import Std.Tactic.BVDecide
+public meta import Std.Tactic.BVDecide.Reflect
+
+public section
 
 /-!
   Native Level 0 roundtrip: inflate (deflateStoredPure data) = .ok data
@@ -26,7 +31,7 @@ open ZipCommon (BitReader)
     Encodes data as stored DEFLATE blocks starting from position `pos`.
     Each block has at most 65535 data bytes. The last block has BFINAL=1.
     When `pos ≥ data.size`, produces a single final empty block. -/
-def deflateStoredPure (data : ByteArray) (pos : Nat := 0) : ByteArray :=
+@[expose] def deflateStoredPure (data : ByteArray) (pos : Nat := 0) : ByteArray :=
   let blockSize := min (data.size - pos) 65535
   if _ : pos + blockSize ≥ data.size then
     let len := blockSize.toUInt16
@@ -51,7 +56,7 @@ decreasing_by omega
     and discarding the whole block. Used by the `deflateRaw` dispatch to size the
     stored candidate cheaply; `storedBlockBytes_eq` proves it agrees with the
     materialized `.size`, so the fixed/dynamic/stored selection is byte-identical. -/
-def storedBlockBytes (data : ByteArray) (pos : Nat := 0) : Nat :=
+@[expose] def storedBlockBytes (data : ByteArray) (pos : Nat := 0) : Nat :=
   if pos + min (data.size - pos) 65535 ≥ data.size then 5 + min (data.size - pos) 65535
   else (5 + min (data.size - pos) 65535) +
     storedBlockBytes data (pos + min (data.size - pos) 65535)
@@ -376,7 +381,7 @@ private theorem getElem_pfx_hdr_zero (pfx hdr rest : ByteArray)
 /-! ## Stored block header abstraction -/
 
 /-- 5-byte stored block header: BFINAL flag, LEN (LE), NLEN (LE). -/
-def storedBlockHdr (blockLen : Nat) (isFinal : Bool) : ByteArray :=
+@[expose] def storedBlockHdr (blockLen : Nat) (isFinal : Bool) : ByteArray :=
   ByteArray.mk #[if isFinal then 0x01 else 0x00,
     (blockLen.toUInt16 &&& 0xFF).toUInt8,
     ((blockLen.toUInt16 >>> 8) &&& 0xFF).toUInt8,
@@ -740,7 +745,7 @@ decreasing_by omega
     The number of blocks is (n-1)/65535 + 1 in Nat arithmetic. -/
 theorem deflateStoredPure_size (data : ByteArray) :
     (deflateStoredPure data 0).size =
-    data.size + 5 * numStoredBlocks data.size := by
+    data.size + 5 * ((data.size - 1) / 65535 + 1) := by
   have := deflateStoredPure_size_aux data 0 (by omega)
   simp only [Nat.sub_zero] at this; exact this
 

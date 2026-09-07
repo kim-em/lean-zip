@@ -1,4 +1,8 @@
-import Zip.Spec.LZ77ChainCorrect
+module
+
+public import Zip.Spec.LZ77ChainCorrect
+
+public section
 
 /-!
 # Correctness of the lazy hash-chain LZ77 matcher (`lz77ChainLazy`)
@@ -27,7 +31,7 @@ open Zip.Native.Deflate (lz77ChainLazy lz77Chain lz77Greedy)
     re-establishes validity/encodability without ever inspecting the chain state.
     Shared by `rollDefer_valid` and `rollDefer_encodable`; reused unchanged by
     rungs 2-4 as the rolling arm is threaded up the tower. -/
-def RollPending (data : ByteArray) (windowSize mp pLen pMatchPos : Nat) : Prop :=
+@[expose] def RollPending (data : ByteArray) (windowSize mp pLen pMatchPos : Nat) : Prop :=
   pMatchPos < mp ∧ mp - pMatchPos ≤ windowSize ∧
     pMatchPos + min 258 (data.size - mp) ≤ data.size ∧
     (∀ i, i < pLen → data[mp + i]! = data[pMatchPos + i]!) ∧ pLen ≤ min 258 (data.size - mp)
@@ -166,7 +170,6 @@ theorem lz77ChainLazy_resolves (data : ByteArray) (maxChain windowSize insertCap
 
 /-! ## Encodability -/
 
-/-- The bounds the dynamic/fixed encoders require of every token. -/
 private def Enc (t : LZ77Token) : Prop :=
   match t with
   | .literal _ => True
@@ -178,7 +181,7 @@ private def Enc (t : LZ77Token) : Prop :=
     `windowSize ≤ 32768`. -/
 set_option backward.split false in
 mutual
-theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
+private theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
     (hashTable : Array Nat) (prev h3tab : Array Nat) (pos insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat) (hw : windowSize > 0) (hws : windowSize ≤ 32768) :
     ∀ t ∈ lz77ChainLazy.mainLoop data windowSize hashSize maxChain useH3 hashTable prev h3tab pos insertCap goodMatch niceLen lazyDepth lazy2Steps, Enc t := by
   unfold lz77ChainLazy.mainLoop
@@ -264,7 +267,7 @@ theorem lz77ChainLazy_mainLoop_encodable (data : ByteArray) (windowSize hashSize
 termination_by data.size - pos
 decreasing_by all_goals omega
 
-theorem rollDefer_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
+private theorem rollDefer_encodable (data : ByteArray) (windowSize hashSize maxChain : Nat) (useH3 : Bool)
     (hashTable : Array Nat) (prev h3tab : Array Nat)
     (mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
     (hpl : 3 ≤ pLen)

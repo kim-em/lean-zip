@@ -1,4 +1,8 @@
-import Zip
+module
+
+public import Zip
+
+public section
 
 /-! Test utilities: byte array comparison, fixture loading, assertion helpers, and test data generation. -/
 

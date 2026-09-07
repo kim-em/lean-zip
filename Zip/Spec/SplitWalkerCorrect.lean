@@ -1,4 +1,8 @@
-import Zip.Native.DeflateDynamic
+module
+
+public import Zip.Native.DeflateDynamic
+
+public section
 
 namespace Zip.Native.Deflate
 
@@ -99,11 +103,13 @@ theorem chooseSplitsHeuristicP_go_no_remaining (toks : TokenArray)
       simp [hnrem, hstep]
     · rw [dif_neg hi]
 
-private def splitSum10
+/-- Total of the ten token-class counters used in the split-walker specification. -/
+@[expose] def splitSum10
     (a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 : Nat) : Nat :=
   a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9
 
-private def splitBumpToNat
+/-- Interpret the native counter tuple as the corresponding specification-level naturals. -/
+@[expose] def splitBumpToNat
     (p : USize × USize × USize × USize × USize × USize × USize × USize × USize × USize) :
     Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat × Nat :=
   match p with
@@ -226,7 +232,7 @@ theorem splitBumpU_toNat (c : USize)
   simp [hcu, splitBumpToNat, splitBumpU, splitBumpN, h9, ← USize.toNat_inj]
 
 set_option maxHeartbeats 1000000 in
-theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
+private theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
     (hend : endU.toNat = toks.size) (hbytes : toks.bytes.size < USize.size)
     (checkU : USize) (checkTokens : Nat)
     (hcheck : checkU.toNat = checkTokens) :

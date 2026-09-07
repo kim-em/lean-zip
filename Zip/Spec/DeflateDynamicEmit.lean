@@ -1,5 +1,9 @@
-import Zip.Spec.DeflateFixedCorrect
-import Zip.Spec.DeflateEncodeDynamicProps
+module
+
+public import Zip.Spec.DeflateFixedCorrect
+public import Zip.Spec.DeflateEncodeDynamicProps
+
+@[expose] public section
 
 /-!
 # emitTokensWithCodes ↔ encodeSymbols correspondence

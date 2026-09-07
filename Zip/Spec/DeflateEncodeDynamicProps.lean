@@ -1,5 +1,9 @@
-import Zip.Spec.DeflateEncodeDynamic
-import Zip.Spec.DeflateEncodeProps
+module
+
+public import Zip.Spec.DeflateEncodeDynamic
+public import Zip.Spec.DeflateEncodeProps
+
+@[expose] public section
 
 /-!
 # Dynamic Block Header Correspondence Proofs (RFC 1951 §3.2.7)

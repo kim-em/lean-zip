@@ -1,12 +1,16 @@
-import Zip.Spec.DeflateFixedCorrect
-import Zip.Spec.DeflateDynamicCorrect
-import Zip.Spec.LZ77ChainCorrect
-import Zip.Spec.LZ77PackedCorrect
-import Zip.Spec.DeflateFreqsFusedCorrect
-import Zip.Spec.DeflatePackedHeadCorrect
-import Zip.Spec.DeflateBaseFreqsReuse
-import Zip.Spec.DeflateBlockSplit
-import Zip.Spec.SplitWalkerPackedCorrect
+module
+
+public import Zip.Spec.DeflateFixedCorrect
+public import Zip.Spec.DeflateDynamicCorrect
+public import Zip.Spec.LZ77ChainCorrect
+public import Zip.Spec.LZ77PackedCorrect
+public import Zip.Spec.DeflateFreqsFusedCorrect
+public import Zip.Spec.DeflatePackedHeadCorrect
+public import Zip.Spec.DeflateBaseFreqsReuse
+public import Zip.Spec.DeflateBlockSplit
+public import Zip.Spec.SplitWalkerPackedCorrect
+
+@[expose] public section
 
 /-!
 # Unified DEFLATE Roundtrip (Phase B4 Capstone)

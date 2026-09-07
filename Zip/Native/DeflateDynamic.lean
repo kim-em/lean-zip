@@ -1,13 +1,17 @@
-import Zip.Native.Deflate
-import Zip.Native.DeflateFreqs
-import Zip.Native.DeflateFreqsFused
-import Zip.Spec.DeflateFreqsFusedCorrect
-import Zip.Native.DeflateParse
-import Zip.Native.DeflateL5
-import Zip.Spec.DeflateEncodeDynamic
-import Zip.Spec.DeflateStoredCorrect
-import Zip.Spec.EmitTokensCorrect
-import Zip.Spec.HuffmanEncode
+module
+
+public import Zip.Native.Deflate
+public import Zip.Native.DeflateFreqs
+public import Zip.Native.DeflateFreqsFused
+public import Zip.Spec.DeflateFreqsFusedCorrect
+public import Zip.Native.DeflateParse
+public import Zip.Native.DeflateL5
+public import Zip.Spec.DeflateEncodeDynamic
+public import Zip.Spec.DeflateStoredCorrect
+public import Zip.Spec.EmitTokensCorrect
+public import Zip.Spec.HuffmanEncode
+
+@[expose] public section
 
 /-!
   Native DEFLATE compressor — dynamic Huffman blocks (Level 5).
@@ -3271,7 +3275,7 @@ def deflateRawBaseP (data : ByteArray) (ptokens : TokenArray) : ByteArray :=
     `deflateRawBasePPrepF`. Used by `deflateRawBaseF` to consume the frequencies
     the fused matcher already produced. At `f = tokenFreqsP ptokens` this is
     definitionally `deflateRawBaseP` (`deflateRawBasePF_tokenFreqsP`). -/
-def deflateRawBasePF (data : ByteArray) (ptokens : TokenArray)
+@[no_expose] def deflateRawBasePF (data : ByteArray) (ptokens : TokenArray)
     (f : Array Nat × Array Nat) : ByteArray :=
   let lens := dynamicCodeLengths f.1 f.2
   let plan := dynHeaderCodes lens.1 lens.2
@@ -3289,7 +3293,8 @@ def deflateRawBasePF (data : ByteArray) (ptokens : TokenArray)
 /-- `deflateRawBasePF` at the whole-stream frequencies is `deflateRawBaseP`. -/
 theorem deflateRawBasePF_tokenFreqsP (data : ByteArray) (ptokens : TokenArray) :
     deflateRawBasePF data ptokens (tokenFreqsPTA ptokens) = deflateRawBaseP data ptokens :=
-  rfl
+  -- Ordinary equality bridge: do not infer @[defeq] for the hidden implementation.
+  (rfl)
 
 /-- The base candidate *sized and prepared* from one shared token pass: the
     winner's flushed byte size (the same stored / fixed / dynamic comparison
@@ -3365,7 +3370,7 @@ theorem deflateRawBasePPrep_fst_toArray (data : ByteArray) (ptokens : TokenArray
     `deflateRawBasePPrep` (`deflateRawBasePPrepF_tokenFreqsP`), keeping the emit
     theorem clean. Only the frequency-derived sizing/tree work uses `f`; the emit
     branches consume `ptokens` directly, exactly as `deflateRawBasePPrep`. -/
-def deflateRawBasePPrepF (data : ByteArray) (ptokens : TokenArray)
+@[no_expose] def deflateRawBasePPrepF (data : ByteArray) (ptokens : TokenArray)
     (f : Array Nat × Array Nat) : Nat × (Unit → ByteArray) :=
   let lens := dynamicCodeLengths f.1 f.2
   let plan := dynHeaderCodes lens.1 lens.2
@@ -3386,7 +3391,7 @@ def deflateRawBasePPrepF (data : ByteArray) (ptokens : TokenArray)
 /-- `deflateRawBasePPrepF` at the whole-stream frequencies is `deflateRawBasePPrep`. -/
 theorem deflateRawBasePPrepF_tokenFreqsP (data : ByteArray) (ptokens : TokenArray) :
     deflateRawBasePPrepF data ptokens (tokenFreqsPTA ptokens) = deflateRawBasePPrep data ptokens :=
-  rfl
+  (rfl)
 
 /-- `deflateRawBaseP` over this level's *packed* `lzMatchP` stream
     (definitional wrapper, `deflateRawBaseP_def`). Equal to the boxed

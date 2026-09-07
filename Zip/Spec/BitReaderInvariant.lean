@@ -1,5 +1,9 @@
-import ZipCommon.Spec.BitReaderInvariant
-import Zip.Native.Inflate
+module
+
+public import ZipCommon.Spec.BitReaderInvariant
+public import Zip.Native.Inflate
+
+@[expose] public section
 
 /-!
 # DEFLATE-specific BitReader invariant preservation

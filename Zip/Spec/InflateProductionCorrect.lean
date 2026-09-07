@@ -1,7 +1,11 @@
-import Zip.Spec.DeflateSuffix
-import Zip.Spec.InflateCorrect
-import Zip.Spec.InflateLoopBounds
-import Zip.Spec.InflateTreeFreeCorrect
+module
+
+public import Zip.Spec.DeflateSuffix
+public import Zip.Spec.InflateCorrect
+public import Zip.Spec.InflateLoopBounds
+public import Zip.Spec.InflateTreeFreeCorrect
+
+@[expose] public section
 
 /-!
 # Production inflater correctness against the formal DEFLATE specification

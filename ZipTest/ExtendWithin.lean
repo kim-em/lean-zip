@@ -1,5 +1,9 @@
-import ZipTest.Helpers
-import Zip.Native.ExtendWithin
+module
+
+public import ZipTest.Helpers
+public import Zip.Native.ExtendWithin
+
+public section
 
 /-! Conformance tests for the overlapping-match copy `@[extern]`
     `ByteArray.extendWithin` (which runs the C in `c/extend_within_ffi.c`).

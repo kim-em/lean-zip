@@ -1,4 +1,8 @@
-import Zip.Native.DeflateFreqs
+module
+
+public import Zip.Native.DeflateFreqs
+
+@[expose] public section
 
 /-!
 # `tokenFreqsP` additivity over concatenation

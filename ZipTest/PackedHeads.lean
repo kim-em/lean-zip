@@ -1,4 +1,8 @@
-import Zip.Native.DeflateFreqsFused
+module
+
+public import Zip.Native.DeflateFreqsFused
+
+public section
 
 /-! Focused compiled-path checks for the level-one packed `UInt32` head table.
     The proof in `Zip.Spec.DeflatePackedHeadCorrect` covers every input; these

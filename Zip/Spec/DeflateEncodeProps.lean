@@ -1,4 +1,8 @@
-import Zip.Spec.DeflateEncode
+module
+
+public import Zip.Spec.DeflateEncode
+
+@[expose] public section
 
 /-!
 # DEFLATE Encoding Success Properties

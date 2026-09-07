@@ -1,9 +1,13 @@
-import Zip.Spec.LZ77ChainCorrect
-import Zip.Spec.LZ77ChainLazyCorrect
-import Zip.Spec.LZ77MergedCorrect
-import Zip.Spec.EmitFlatCorrect
-import Zip.Native.DeflateDynamic
-import Zip.Spec.LZ77L5Correct
+module
+
+public import Zip.Spec.LZ77ChainCorrect
+public import Zip.Spec.LZ77ChainLazyCorrect
+public import Zip.Spec.LZ77MergedCorrect
+public import Zip.Spec.EmitFlatCorrect
+public import Zip.Native.DeflateDynamic
+public import Zip.Spec.LZ77L5Correct
+
+@[expose] public section
 
 /-!
 # Correctness of the packed-token matcher twins (Wave 3b stage A)

@@ -1,5 +1,9 @@
-import Zip.Spec.LZ77NativeCorrect
-import Zip.Native.DeflateParse
+module
+
+public import Zip.Spec.LZ77NativeCorrect
+public import Zip.Native.DeflateParse
+
+@[expose] public section
 
 /-!
 # Correctness of the near-optimal LZ parser (`lz77Optimal`)

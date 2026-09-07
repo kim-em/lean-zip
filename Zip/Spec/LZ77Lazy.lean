@@ -1,5 +1,9 @@
-import Zip.Spec.DeflateEncodeProps
-import Zip.Spec.LZ77
+module
+
+public import Zip.Spec.DeflateEncodeProps
+public import Zip.Spec.LZ77
+
+@[expose] public section
 
 /-!
 # LZ77→Encode Bridge Proofs

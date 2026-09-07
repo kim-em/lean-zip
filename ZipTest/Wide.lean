@@ -1,4 +1,8 @@
-import ZipTest.Helpers
+module
+
+public import ZipTest.Helpers
+
+public section
 
 /-! Conformance tests for the word-sized `@[extern]` ByteArray readers
     (`ByteArray.ugetUInt32LE`, `ByteArray.ugetUInt64LE`), writers

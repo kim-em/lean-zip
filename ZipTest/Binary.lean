@@ -1,4 +1,8 @@
-import ZipTest.Helpers
+module
+
+public import ZipTest.Helpers
+
+public section
 
 /-! Tests for binary encoding/decoding: octal, little-endian integers, strings, and path safety. -/
 

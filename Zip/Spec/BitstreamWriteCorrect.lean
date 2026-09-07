@@ -1,4 +1,8 @@
-import Zip.Spec.Deflate
+module
+
+public import Zip.Spec.Deflate
+
+@[expose] public section
 
 /-!
 # Bitstream Write Correspondence
