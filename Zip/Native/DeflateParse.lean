@@ -357,19 +357,25 @@ decreasing_by
 /-- `buildCache` only feeds the cache arrays through `chainWalkAllGuarded`
     (size-preserving), so the returned `lens`/`dists` keep their input sizes.
     This is the chain that lets `fillRegion`/`scanCands` read the cache slots
-    with proven bounds. -/
+    with proven bounds.
+
+    The two proofs below restrict the simp set with `only`. An unrestricted
+    `simp_all` with `zetaDelta := true` still closes both goals, but as of
+    v4.34.0 the proof term it builds is deep enough that the kernel rejects it
+    with "deep recursion detected" (a limit `maxRecDepth` does not raise).
+    Naming the two size lemmas keeps the term small. -/
 private theorem buildCache_fst_size (data : ByteArray) (hashTable prev h3tab : Array Nat)
     (depth slots niceSkip base r j : Nat) (lens dists : Array Nat) :
     (buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists).1.size = lens.size := by
   fun_induction buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists <;>
-    simp_all (config := { zetaDelta := true }) [chainWalkAllGuarded_fst_size]
+    simp_all +zetaDelta only [chainWalkAllGuarded_fst_size, Array.size_set!]
 
 private theorem buildCache_snd_fst_size (data : ByteArray) (hashTable prev h3tab : Array Nat)
     (depth slots niceSkip base r j : Nat) (lens dists : Array Nat) :
     (buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists).2.1.size =
       dists.size := by
   fun_induction buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists <;>
-    simp_all (config := { zetaDelta := true }) [chainWalkAllGuarded_snd_size]
+    simp_all +zetaDelta only [chainWalkAllGuarded_snd_size, Array.size_set!]
 
 /-! ## Cost model
 
