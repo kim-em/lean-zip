@@ -291,6 +291,10 @@ private theorem packCodeEntry_write (bw : BitWriter) (e : UInt16 × UInt8) :
   have hcode : (packCodeEntry (c, l)).toUInt16 =
       ((BitWriter.reverse16 c).toUInt64 >>> (16 - l.toUInt64)).toUInt16 := by
     unfold packCodeEntry
+    -- Reduce the `(c, l).snd` the unfolding leaves behind: `bv_decide` no
+    -- longer does that projection itself, and abstracts it as an atom
+    -- distinct from the `l` on the right-hand side.
+    dsimp only
     generalize BitWriter.reverse16 c = r
     bv_decide
   rw [packCodeEntry_len, hcode, BitWriter.writeRevCode_eq]
