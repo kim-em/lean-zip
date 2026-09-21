@@ -19,7 +19,14 @@ zlib's. It also carries the deterministic inflate fuzz harness
 
 Building this package needs system zlib + pkg-config (or
 `ZLIB_CFLAGS`/`ZLIB_LDFLAGS`). Run it from the repo root with
-`lake -d conformance build && lake -d conformance test`. -/
+`lake -d conformance build && lake -d conformance test`.
+
+This directory deliberately has no `lean-toolchain`. It requires the parent
+by path, so it could never correctly build on a different toolchain, and
+elan resolves the root's file from here anyway. A second copy could only
+ever be redundant or wrong: when it was wrong, `cd conformance && lake -R
+build` silently built the whole library on the stale toolchain and CI
+reported a pass for a configuration nobody was asking about. -/
 
 /-- Split a shell-style flag string on spaces and drop empties. -/
 def splitFlags (s : String) : Array String :=
