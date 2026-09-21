@@ -66,12 +66,12 @@ theorem kraftSumFast_go_eq (count : Array Nat) (maxBits b acc : Nat) :
     kraftSumFast.go count maxBits b acc = acc + Huffman.Spec.kraftSumFrom count maxBits b := by
   rw [kraftSumFast.go]
   if h : b ≤ maxBits then
-    rw [dif_pos h, kraftSumFast_go_eq count maxBits (b + 1) _,
+    rw [dite_eq_left h, kraftSumFast_go_eq count maxBits (b + 1) _,
         Huffman.Spec.kraftSumFrom_unfold count maxBits b h]
     simp only [Nat.shiftLeft_eq, Nat.one_mul]
     omega
   else
-    rw [dif_neg h, Huffman.Spec.kraftSumFrom_gt count maxBits b (by omega), Nat.add_zero]
+    rw [dite_eq_right h, Huffman.Spec.kraftSumFrom_gt count maxBits b (by omega), Nat.add_zero]
 termination_by maxBits + 1 - b
 
 /-- `kraftSumFast` equals the spec backward Kraft recurrence from index `0`. -/
@@ -107,12 +107,12 @@ theorem fromLengths_eq_validate (lengths : Array UInt8) (maxBits : Nat) :
   unfold fromLengths validateLengths
   simp only [Nat.shiftLeft_eq, Nat.one_mul]
   by_cases h1 : lengths.any (fun l => l.toNat > maxBits) = true
-  · rw [if_pos h1, if_pos h1]; rfl
-  · rw [if_neg h1, if_neg h1, validate_kraft_eq lengths maxBits h1]
+  · rw [ite_eq_left h1, ite_eq_left h1]; rfl
+  · rw [ite_eq_right h1, ite_eq_right h1, validate_kraft_eq lengths maxBits h1]
     by_cases h2 : ((lengths.toList.map UInt8.toNat).filter (· != 0)).foldl
         (fun acc l => acc + 2 ^ (maxBits - l)) 0 > 2 ^ maxBits
-    · rw [if_pos h2, if_pos h2]; rfl
-    · rw [if_neg h2, if_neg h2]; rfl
+    · rw [ite_eq_left h2, ite_eq_left h2]; rfl
+    · rw [ite_eq_right h2, ite_eq_right h2]; rfl
 
 /-- `validateLengths` succeeds iff `fromLengths` succeeds (with the canonical tree). -/
 theorem validateLengths_ok_iff_fromLengths (lengths : Array UInt8) (maxBits : Nat) :
@@ -165,14 +165,14 @@ theorem buildFirstIndex_go_spec (count : Array Nat) (maxBits : Nat) :
   induction n with
   | zero =>
     intro len idx fi hn hlen1 hsz hidx hfi L hL1 hLmax
-    rw [buildFirstIndex.go, if_pos (by omega)]
+    rw [buildFirstIndex.go, ite_eq_left (by omega)]
     exact hfi L hL1 (by omega)
   | succ n ih =>
     intro len idx fi hn hlen1 hsz hidx hfi L hL1 hLmax
     rw [buildFirstIndex.go]
     by_cases hgt : len > maxBits
-    · rw [if_pos hgt]; exact hfi L hL1 (by omega)
-    · rw [if_neg hgt]
+    · rw [ite_eq_left hgt]; exact hfi L hL1 (by omega)
+    · rw [ite_eq_right hgt]
       refine ih (len + 1) (idx + count[len]!) (fi.set! len idx) (by omega) (by omega)
         (by rw [Array.size_set!]; exact hsz) ?_ ?_ L hL1 hLmax
       · -- idx + count[len]! = psumCount count len
@@ -203,13 +203,13 @@ theorem buildFirstIndex_go_size (count : Array Nat) (maxBits : Nat) :
       (buildFirstIndex.go count maxBits len idx fi).size = fi.size := by
   intro n
   induction n with
-  | zero => intro len idx fi hn; rw [buildFirstIndex.go, if_pos (by omega)]
+  | zero => intro len idx fi hn; rw [buildFirstIndex.go, ite_eq_left (by omega)]
   | succ n ih =>
     intro len idx fi hn
     rw [buildFirstIndex.go]
     by_cases hgt : len > maxBits
-    · rw [if_pos hgt]
-    · rw [if_neg hgt, ih (len + 1) (idx + count[len]!) (fi.set! len idx) (by omega),
+    · rw [ite_eq_left hgt]
+    · rw [ite_eq_right hgt, ih (len + 1) (idx + count[len]!) (fi.set! len idx) (by omega),
           Array.size_set!]
 
 /-- `buildFirstIndex count maxBits` has size `maxBits + 2`. -/
@@ -394,18 +394,18 @@ theorem buildSymbols_go_spec
   induction n with
   | zero =>
     intro s offset symbols hn hosz hssz hA hB s' hs' h0' hm'
-    rw [buildSymbols.go, if_pos (by omega)]
+    rw [buildSymbols.go, ite_eq_left (by omega)]
     exact hB s' (by omega) h0' hm'
   | succ n ih =>
     intro s offset symbols hn hosz hssz hA hB s' hs' h0' hm'
     rw [buildSymbols.go]
     by_cases hge : s ≥ lengths.size
-    · rw [if_pos hge]; exact hB s' (by omega) h0' hm'
-    · rw [if_neg hge]
+    · rw [ite_eq_left hge]; exact hB s' (by omega) h0' hm'
+    · rw [ite_eq_right hge]
       have hslt : s < lengths.size := by omega
       simp only []
       by_cases hcond : 0 < lengths[s]!.toNat ∧ lengths[s]!.toNat ≤ maxBits
-      · rw [if_pos hcond]
+      · rw [ite_eq_left hcond]
         obtain ⟨h0, hm⟩ := hcond
         -- the new offset still tracks (A) at s+1
         have hA' : ∀ L, 1 ≤ L → L ≤ maxBits →
@@ -417,9 +417,9 @@ theorem buildSymbols_go_spec
           by_cases hLl : L = lengths[s]!.toNat
           · subst hLl
             rw [Array.getElem!_set!_self _ _ _ (by rw [hosz]; omega), hA _ hL1 hLmax,
-                if_pos rfl]; omega
+                ite_eq_left rfl]; omega
           · rw [Array.getElem!_set!_ne _ _ _ _ (by omega), hA L hL1 hLmax,
-                if_neg (by omega), Nat.add_zero]
+                ite_eq_right (by omega), Nat.add_zero]
         -- the placement position of s itself
         have hpos_s : offset[lengths[s]!.toNat]!
             = firstIndex[lengths[s]!.toNat]! +
@@ -448,14 +448,14 @@ theorem buildSymbols_go_spec
                 hB s'' hs''lt h0'' hm'']
         exact ih (s + 1) _ _ (by omega) (by rw [Array.size_set!]; exact hosz)
           (by rw [Array.size_set!]; exact hssz) hA' hB' s' hs' h0' hm'
-      · rw [if_neg hcond]
+      · rw [ite_eq_right hcond]
         -- skipped length: offset and symbols unchanged; (A)/(B) carry to s+1
         have hA' : ∀ L, 1 ≤ L → L ≤ maxBits →
             offset[L]! = firstIndex[L]! +
               numEarlier (lengths.toList.map UInt8.toNat) L (s + 1) := by
           intro L hL1 hLmax
           rw [numEarlier_succ_arr lengths L s hslt, hA L hL1 hLmax,
-              if_neg (by omega), Nat.add_zero]
+              ite_eq_right (by omega), Nat.add_zero]
         have hB' : ∀ s'', s'' < s + 1 → 0 < lengths[s'']!.toNat → lengths[s'']!.toNat ≤ maxBits →
             symbols[firstIndex[lengths[s'']!.toNat]! +
               numEarlier (lengths.toList.map UInt8.toNat) lengths[s'']!.toNat s'']!
@@ -577,12 +577,12 @@ theorem numEarlier_surj (xs : List Nat) (len : Nat) :
     have hk : k < xs.length := by omega
     rw [numEarlier_succ xs len k hk] at hj
     by_cases hxk : xs[k] = len
-    · rw [if_pos hxk] at hj
+    · rw [ite_eq_left hxk] at hj
       by_cases hjk : j < numEarlier xs len k
       · obtain ⟨s, hs, hsk, hxs, hns⟩ := ih (by omega) j hjk
         exact ⟨s, hs, by omega, hxs, hns⟩
       · exact ⟨k, hk, by omega, hxk, by omega⟩
-    · rw [if_neg hxk, Nat.add_zero] at hj
+    · rw [ite_eq_right hxk, Nat.add_zero] at hj
       obtain ⟨s, hs, hsk, hxs, hns⟩ := ih (by omega) j hj
       exact ⟨s, hs, by omega, hxs, hns⟩
 
@@ -724,17 +724,17 @@ theorem walkCanonical_go_ok (lengths : Array UInt8) (maxBits : Nat) (hmb : 1 ≤
   induction fuel with
   | zero =>
     intro len code buf cnt sym bb c used hfuel hlen1 h
-    rw [walkCanonical.go, dif_pos (by omega : len > maxBits)] at h
+    rw [walkCanonical.go, dite_eq_left (by omega : len > maxBits)] at h
     exact absurd h (by simp)
   | succ fuel ih =>
     intro len code buf cnt sym bb c used hfuel hlen1 h
     rw [walkCanonical.go] at h
     by_cases hlen : len > maxBits
-    · rw [dif_pos hlen] at h; exact absurd h (by simp)
-    · rw [dif_neg hlen] at h
+    · rw [dite_eq_left hlen] at h; exact absurd h (by simp)
+    · rw [dite_eq_right hlen] at h
       by_cases hcnt0 : cnt = 0
-      · rw [if_pos hcnt0] at h; exact absurd h (by simp)
-      · rw [if_neg hcnt0] at h
+      · rw [ite_eq_left hcnt0] at h; exact absurd h (by simp)
+      · rw [ite_eq_right hcnt0] at h
         have h1u : (1 : Nat).toUInt64 = (1 : UInt64) := rfl
         simp only [] at h
         split at h
@@ -836,7 +836,7 @@ theorem walkCanonical_go_complete (lengths : Array UInt8) (maxBits : Nat) (hmb :
           + bitReverse (buf.toNat / 2) (L - len) 0 := by
       rw [hlow, show L - (len - 1) = (L - len) + 1 from by omega]
       exact accum_step code buf.toNat (L - len)
-    rw [walkCanonical.go, dif_neg (by omega : ¬ len > maxBits), if_neg (by omega : ¬ cnt = 0)]
+    rw [walkCanonical.go, dite_eq_right (by omega : ¬ len > maxBits), ite_eq_right (by omega : ¬ cnt = 0)]
     simp only []
     have hc'_lt : code * 2 + (buf &&& 1).toNat < 2 ^ len := by
       have hbit : (buf &&& 1).toNat < 2 := by rw [hlow]; omega
@@ -885,7 +885,7 @@ theorem walkCanonical_go_complete (lengths : Array UInt8) (maxBits : Nat) (hmb :
       have hcond : (buildLongDecode lengths maxBits).firstCode[len]! ≤ code * 2 + (buf &&& 1).toNat ∧
           code * 2 + (buf &&& 1).toNat < (buildLongDecode lengths maxBits).firstCode[len]!
             + (buildLongDecode lengths maxBits).count[len]! := by omega
-      rw [if_pos hcond]
+      rw [ite_eq_left hcond]
       have hsymlk : (buildLongDecode lengths maxBits).symbols[
           (buildLongDecode lengths maxBits).firstIndex[len]! +
           (code * 2 + (buf &&& 1).toNat - (buildLongDecode lengths maxBits).firstCode[len]!)]!
@@ -927,7 +927,7 @@ theorem walkCanonical_go_complete (lengths : Array UInt8) (maxBits : Nat) (hmb :
           exact e.symm
         exact Huffman.Spec.canonical_prefix_free (lengths.toList.map UInt8.toNat) maxBits hv
           s' s _ _ hcf_s' hcf hne ⟨_, happ⟩
-      rw [if_neg hnomatch]
+      rw [ite_eq_right hnomatch]
       have hexp : L - ((len + 1) - 1) = L - len := by omega
       have hrec := ih (len + 1) (code * 2 + (buf &&& 1).toNat) (buf >>> 1) (cnt - 1)
         (by omega) (by omega) (by omega) (by omega)
@@ -999,13 +999,13 @@ theorem walkTree_ok_spec (t : HuffTree) :
     intro buf cnt depth sym bb c used hd h
     rw [walkTree] at h
     by_cases hdg : depth > 20
-    · rw [if_pos hdg] at h; exact absurd h (by simp)
-    · rw [if_neg hdg] at h
+    · rw [ite_eq_left hdg] at h; exact absurd h (by simp)
+    · rw [ite_eq_right hdg] at h
       by_cases hcnt : cnt = 0
-      · rw [if_pos hcnt] at h; exact absurd h (by simp)
-      · rw [if_neg hcnt] at h
+      · rw [ite_eq_left hcnt] at h; exact absurd h (by simp)
+      · rw [ite_eq_right hcnt] at h
         by_cases hb : (buf &&& 1 == 0) = true
-        · rw [if_pos hb] at h
+        · rw [ite_eq_left hb] at h
           cases hrec : walkTree z (buf >>> 1) (cnt - 1) (depth + 1) with
           | error e => rw [hrec] at h; exact absurd h (by simp)
           | ok r =>
@@ -1020,7 +1020,7 @@ theorem walkTree_ok_spec (t : HuffTree) :
                   rw [cwOf, ← shr_one_toNat, cwOf_head_branch]; simp [hb]]
               exact Deflate.Correctness.TreeHasLeaf.left hleaf
             · rw [hbb, ushr_succ buf u' (by omega)]
-        · rw [if_neg hb] at h
+        · rw [ite_eq_right hb] at h
           cases hrec : walkTree o (buf >>> 1) (cnt - 1) (depth + 1) with
           | error e => rw [hrec] at h; exact absurd h (by simp)
           | ok r =>
@@ -1060,7 +1060,7 @@ theorem walkTree_complete (t : HuffTree) (cw : List Bool) (sym : UInt16)
       have := (List.cons.injEq _ _ _ _).mp hcweq; rw [shr_one_toNat]; exact this.2
     have hb : (buf &&& 1 == 0) = true := by
       have := cwOf_head_branch buf; rw [hhead] at this; simpa using this.symm
-    rw [walkTree, if_neg (by omega : ¬ depth > 20), if_neg (by omega : ¬ cnt = 0), if_pos hb,
+    rw [walkTree, ite_eq_right (by omega : ¬ depth > 20), ite_eq_right (by omega : ¬ cnt = 0), ite_eq_left hb,
         ih (buf >>> 1) (cnt - 1) (depth + 1) htail (by omega) (by omega),
         ushr_succ buf cw'.length (by omega),
         show cnt - 1 - cw'.length = cnt - (cw'.length + 1) from by omega]
@@ -1074,7 +1074,7 @@ theorem walkTree_complete (t : HuffTree) (cw : List Bool) (sym : UInt16)
       have := (List.cons.injEq _ _ _ _).mp hcweq; rw [shr_one_toNat]; exact this.2
     have hb : (buf &&& 1 == 0) = false := by
       have := cwOf_head_branch buf; rw [hhead] at this; simpa using this.symm
-    rw [walkTree, if_neg (by omega : ¬ depth > 20), if_neg (by omega : ¬ cnt = 0), if_neg (by simp [hb]),
+    rw [walkTree, ite_eq_right (by omega : ¬ depth > 20), ite_eq_right (by omega : ¬ cnt = 0), ite_eq_right (by simp [hb]),
         ih (buf >>> 1) (cnt - 1) (depth + 1) htail (by omega) (by omega),
         ushr_succ buf cw'.length (by omega),
         show cnt - 1 - cw'.length = cnt - (cw'.length + 1) from by omega]
@@ -1263,8 +1263,8 @@ theorem rangeSum_congr (f g : Nat → Nat) (maxBits lo : Nat)
     rangeSum f maxBits lo = rangeSum g maxBits lo := by
   rw [rangeSum_unfold f maxBits lo, rangeSum_unfold g maxBits lo]
   by_cases hlt : lo > maxBits
-  · rw [if_pos hlt, if_pos hlt]
-  · rw [if_neg hlt, if_neg hlt, h lo (Nat.le_refl _) (by omega),
+  · rw [ite_eq_left hlt, ite_eq_left hlt]
+  · rw [ite_eq_right hlt, ite_eq_right hlt, h lo (Nat.le_refl _) (by omega),
         rangeSum_congr f g maxBits (lo + 1) (fun j hj hjm => h j (by omega) hjm)]
   termination_by maxBits + 1 - lo
 
@@ -1275,8 +1275,8 @@ theorem rangeSum_add (f g : Nat → Nat) (maxBits lo : Nat) :
   rw [rangeSum_unfold (fun j => f j + g j) maxBits lo, rangeSum_unfold f maxBits lo,
       rangeSum_unfold g maxBits lo]
   by_cases hlt : lo > maxBits
-  · rw [if_pos hlt, if_pos hlt, if_pos hlt]
-  · rw [if_neg hlt, if_neg hlt, if_neg hlt, rangeSum_add f g maxBits (lo + 1)]
+  · rw [ite_eq_left hlt, ite_eq_left hlt, ite_eq_left hlt]
+  · rw [ite_eq_right hlt, ite_eq_right hlt, ite_eq_right hlt, rangeSum_add f g maxBits (lo + 1)]
     omega
   termination_by maxBits + 1 - lo
 
@@ -1286,22 +1286,22 @@ theorem rangeSum_indicator (x maxBits lo : Nat) :
       = (if lo ≤ x ∧ x ≤ maxBits then 1 else 0) := by
   rw [rangeSum_unfold]
   by_cases hlt : lo > maxBits
-  · rw [if_pos hlt, if_neg (by omega)]
-  · rw [if_neg hlt, rangeSum_indicator x maxBits (lo + 1)]
+  · rw [ite_eq_left hlt, ite_eq_right (by omega)]
+  · rw [ite_eq_right hlt, rangeSum_indicator x maxBits (lo + 1)]
     by_cases hx : x = lo
-    · subst hx; rw [if_pos rfl, if_neg (by omega), if_pos (by omega)]
-    · rw [if_neg hx]
+    · subst hx; rw [ite_eq_left rfl, ite_eq_right (by omega), ite_eq_left (by omega)]
+    · rw [ite_eq_right hx]
       by_cases hmem : lo ≤ x ∧ x ≤ maxBits
-      · rw [if_pos (by omega), if_pos (by omega)]
-      · rw [if_neg (by omega), if_neg (by omega)]
+      · rw [ite_eq_left (by omega), ite_eq_left (by omega)]
+      · rw [ite_eq_right (by omega), ite_eq_right (by omega)]
   termination_by maxBits + 1 - lo
 
 /-- `rangeSum` of the constant `0` is `0`. -/
 theorem rangeSum_zero (maxBits lo : Nat) : rangeSum (fun _ => 0) maxBits lo = 0 := by
   rw [rangeSum_unfold]
   by_cases h : lo > maxBits
-  · rw [if_pos h]
-  · rw [if_neg h, rangeSum_zero maxBits (lo + 1), Nat.add_zero]
+  · rw [ite_eq_left h]
+  · rw [ite_eq_right h, rangeSum_zero maxBits (lo + 1), Nat.add_zero]
   termination_by maxBits + 1 - lo
 
 /-- `countLongCodes.go` accumulates `acc + ∑_{len ≤ j ≤ maxBits} count[j]`. -/
@@ -1309,8 +1309,8 @@ theorem countLongCodes_go_eq (count : Array Nat) (maxBits len acc : Nat) :
     countLongCodes.go count maxBits len acc = acc + rangeSum (fun j => count[j]!) maxBits len := by
   rw [countLongCodes.go, rangeSum_unfold]
   by_cases hlt : len > maxBits
-  · rw [if_pos hlt, if_pos hlt, Nat.add_zero]
-  · rw [if_neg hlt, if_neg hlt, countLongCodes_go_eq count maxBits (len + 1) _]
+  · rw [ite_eq_left hlt, ite_eq_left hlt, Nat.add_zero]
+  · rw [ite_eq_right hlt, ite_eq_right hlt, countLongCodes_go_eq count maxBits (len + 1) _]
     omega
   termination_by maxBits + 1 - len
 
@@ -1368,7 +1368,7 @@ theorem Lcount_eq_rangeSum (lengths : Array UInt8) (maxBits : Nat) (start : Nat)
       have h0 : lengths[n]! = (0 : UInt8) := getElem!_neg lengths n (by omega)
       rw [h0]
       simp only [UInt8.toNat_ofNat, hstable]
-      rw [if_neg (by simp only [fastBits]; omega), Nat.add_zero]
+      rw [ite_eq_right (by simp only [fastBits]; omega), Nat.add_zero]
 
 /-- The number of blocks bound: `Lcount` never exceeds `countLongCodes`. -/
 theorem Lcount_le_countLongCodes (lengths : Array UInt8) (maxBits start : Nat)
@@ -1603,7 +1603,7 @@ theorem buildSubLoop_spec
   intro R S hRS
   rw [buildSubLoop] at hRS
   by_cases hstart : start < lengths.size
-  · rw [dif_pos hstart] at hRS
+  · rw [dite_eq_left hstart] at hRS
     have hls_len : start < (lengths.toList.map UInt8.toNat).length := by
       rw [List.length_map, Array.length_toList]; exact hstart
     have hls_start : (lengths.toList.map UInt8.toNat)[start]'hls_len = lengths[start].toNat := by
@@ -1612,7 +1612,7 @@ theorem buildSubLoop_spec
     have hlen_le : lengths[start].toNat ≤ maxBits := by
       rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
     by_cases hlen : 0 < lengths[start].toNat ∧ lengths[start].toNat < nextCode.size
-    · rw [dif_pos hlen] at hRS
+    · rw [dite_eq_left hlen] at hRS
       have hc! : (nextCode[lengths[start].toNat]'hlen.2) = nextCode[lengths[start].toNat]! :=
         (getElem!_pos nextCode _ hlen.2).symm
       have hnc' : ∀ b, 1 ≤ b → b ≤ maxBits →
@@ -1627,7 +1627,7 @@ theorem buildSubLoop_spec
           (nextCode[lengths[start].toNat]! + 1)).size = maxBits + 1 := by
         rw [Array.size_set!]; exact hncsz
       by_cases hfast : fastBits < lengths[start].toNat
-      · rw [if_pos hfast] at hRS
+      · rw [ite_eq_left hfast] at hRS
         simp only [hc!] at hRS
         have hL_lt256 : lengths[start].toNat < 256 := by omega
         have hrev_lt : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
@@ -1655,7 +1655,7 @@ theorem buildSubLoop_spec
                 % 2 ^ fastBits :=
           fun hm => ((match_decomp maxBits lengths[start].toNat hmb15 hfast hlen_le buf _ hrev_lt).mp hm).1
         have hstart_long_L : Lcount lengths maxBits (start + 1) = Lcount lengths maxBits start + 1 := by
-          rw [Lcount, if_pos (by rw [hget!]; exact ⟨hfast, hlen_le⟩)]
+          rw [Lcount, ite_eq_left (by rw [hget!]; exact ⟨hfast, hlen_le⟩)]
         have hnb_lt_num : nextBlock < countLongCodes (countLengthsFast lengths maxBits) maxBits := by
           have h1 : Lcount lengths maxBits (start + 1) ≤ countLongCodes (countLengthsFast lengths maxBits) maxBits :=
             Lcount_le_countLongCodes lengths maxBits (start + 1) (by omega)
@@ -1710,7 +1710,7 @@ theorem buildSubLoop_spec
         by_cases hseen : ((unpackSym root[bitReverse (nextCode[lengths[start].toNat]!).toNat
             lengths[start].toNat 0 % 2 ^ fastBits]!).toNat == 0) = true
         · -- allocation: `start`'s prefix gets a fresh block `nextBlock`
-          simp only [if_pos hseen] at hRS
+          simp only [ite_eq_left hseen] at hRS
           have hseen0 : unpackSym root[bitReverse (nextCode[lengths[start].toNat]!).toNat
               lengths[start].toNat 0 % 2 ^ fastBits]! = 0 := by
             have : (unpackSym root[bitReverse (nextCode[lengths[start].toNat]!).toNat
@@ -1923,7 +1923,7 @@ theorem buildSubLoop_spec
                       (Nat.le_trans (Nat.le_add_right _ _) (Nat.le_add_right _ _))))]
               exact hH (fun ⟨k, hk, rest⟩ => hno ⟨k, by omega, rest⟩) hne
         · -- existing block: `start`'s prefix already owns a block
-          simp only [if_neg hseen] at hRS
+          simp only [ite_eq_right hseen] at hRS
           have hseen_ne : unpackSym root[bitReverse (nextCode[lengths[start].toNat]!).toNat
               lengths[start].toNat 0 % 2 ^ fastBits]! ≠ 0 := by
             intro h0
@@ -2093,18 +2093,18 @@ theorem buildSubLoop_spec
               exact hno ⟨start, Nat.lt_succ_self start, hlong_start.1, hlong_start.2,
                 by rw [hget!]; exact hmatch_iff.mpr hstart_match⟩)]
             exact hH (fun ⟨k, hk, rest⟩ => hno ⟨k, by omega, rest⟩) hne
-      · rw [if_neg hfast] at hRS
+      · rw [ite_eq_right hfast] at hRS
         simp only [hc!] at hRS
         refine buildSubLoop_spec lengths maxBits hmb15 hv hbound buf _ root subs (start + 1)
           nextBlock (by omega) hncsz' hrootsz hsubsz hnc' ?_ hcnt hLEN hsp0 hE hINJ hF ?_ ?_ R S hRS
-        · rw [Lcount, if_neg (by rw [hget!]; omega)]; exact hblock
+        · rw [Lcount, ite_eq_right (by rw [hget!]; omega)]; exact hblock
         · intro k hk hlong hkm hcf
           rcases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp hk) with hlt | heq
           · exact hG k hlt hlong hkm hcf
           · subst heq; rw [hget!] at hlong; omega
         · intro hno hne
           exact hH (fun ⟨k, hk, rest⟩ => hno ⟨k, by omega, rest⟩) hne
-    · rw [dif_neg hlen] at hRS
+    · rw [dite_eq_right hlen] at hRS
       have hlen0 : lengths[start].toNat = 0 := by
         rcases Nat.eq_zero_or_pos lengths[start].toNat with h | h
         · exact h
@@ -2120,14 +2120,14 @@ theorem buildSubLoop_spec
           maxBits _ hls_len hls_val hnc b hb1 hb15
       refine buildSubLoop_spec lengths maxBits hmb15 hv hbound buf nextCode root subs (start + 1)
         nextBlock (by omega) hncsz hrootsz hsubsz hnc' ?_ hcnt hLEN hsp0 hE hINJ hF ?_ ?_ R S hRS
-      · rw [Lcount, if_neg (by rw [hget!, hlen0]; simp only [fastBits]; omega)]; exact hblock
+      · rw [Lcount, ite_eq_right (by rw [hget!, hlen0]; simp only [fastBits]; omega)]; exact hblock
       · intro k hk hlong hkm hcf
         rcases Nat.lt_or_eq_of_le (Nat.lt_succ_iff.mp hk) with hlt | heq
         · exact hG k hlt hlong hkm hcf
         · subst heq; rw [hget!, hlen0] at hlong; simp only [fastBits] at hlong; omega
       · intro hno hne
         exact hH (fun ⟨k, hk, rest⟩ => hno ⟨k, by omega, rest⟩) hne
-  · rw [dif_neg hstart] at hRS
+  · rw [dite_eq_right hstart] at hRS
     rw [Prod.mk.injEq] at hRS
     obtain ⟨hRe, hSe⟩ := hRS
     subst hRe; subst hSe
@@ -2173,7 +2173,7 @@ theorem buildSubLoop_lenAt
   intro R S hRS
   rw [buildSubLoop] at hRS
   by_cases hstart : start < lengths.size
-  · rw [dif_pos hstart] at hRS
+  · rw [dite_eq_left hstart] at hRS
     have hls_len : start < (lengths.toList.map UInt8.toNat).length := by
       rw [List.length_map, Array.length_toList]; exact hstart
     have hls_start : (lengths.toList.map UInt8.toNat)[start]'hls_len = lengths[start].toNat := by
@@ -2182,7 +2182,7 @@ theorem buildSubLoop_lenAt
     have hlen_le : lengths[start].toNat ≤ maxBits := by
       rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
     by_cases hlen : 0 < lengths[start].toNat ∧ lengths[start].toNat < nextCode.size
-    · rw [dif_pos hlen] at hRS
+    · rw [dite_eq_left hlen] at hRS
       have hc! : (nextCode[lengths[start].toNat]'hlen.2) = nextCode[lengths[start].toNat]! :=
         (getElem!_pos nextCode _ hlen.2).symm
       have hnc' : ∀ b, 1 ≤ b → b ≤ maxBits →
@@ -2197,7 +2197,7 @@ theorem buildSubLoop_lenAt
           (nextCode[lengths[start].toNat]! + 1)).size = maxBits + 1 := by
         rw [Array.size_set!]; exact hncsz
       by_cases hfast : fastBits < lengths[start].toNat
-      · rw [if_pos hfast] at hRS
+      · rw [ite_eq_left hfast] at hRS
         simp only [hc!] at hRS
         have hpl_lt : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
             % 2 ^ fastBits < 2 ^ fastBits := Nat.mod_lt _ (Nat.two_pow_pos _)
@@ -2215,7 +2215,7 @@ theorem buildSubLoop_lenAt
             hfast hlen_le hcf_start
         by_cases hseen : ((unpackSym root[bitReverse (nextCode[lengths[start].toNat]!).toNat
             lengths[start].toNat 0 % 2 ^ fastBits]!).toNat == 0) = true
-        · simp only [if_pos hseen] at hRS
+        · simp only [ite_eq_left hseen] at hRS
           refine buildSubLoop_lenAt lengths maxBits hmb15 hv hbound _ _ _ (start + 1) _
             (by omega) hncsz' (by rw [Array.size_set!]; exact hrootsz) hnc' ?_ R S hRS
           intro q hq
@@ -2225,14 +2225,14 @@ theorem buildSubLoop_lenAt
             rw [Array.getElem!_set!_self _ _ _ (by rw [hrootsz]; exact hpl_lt),
                 unpackLen_packEntry, hp_sentinel, unpackLen_packEntry]
           · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hqpl), hLEN _ hq]
-        · simp only [if_neg hseen] at hRS
+        · simp only [ite_eq_right hseen] at hRS
           exact buildSubLoop_lenAt lengths maxBits hmb15 hv hbound _ root _ (start + 1) _
             (by omega) hncsz' hrootsz hnc' hLEN R S hRS
-      · rw [if_neg hfast] at hRS
+      · rw [ite_eq_right hfast] at hRS
         simp only [hc!] at hRS
         exact buildSubLoop_lenAt lengths maxBits hmb15 hv hbound _ root subs (start + 1) _
           (by omega) hncsz' hrootsz hnc' hLEN R S hRS
-    · rw [dif_neg hlen] at hRS
+    · rw [dite_eq_right hlen] at hRS
       have hlen0 : lengths[start].toNat = 0 := by
         rcases Nat.eq_zero_or_pos lengths[start].toNat with h | h
         · exact h
@@ -2248,7 +2248,7 @@ theorem buildSubLoop_lenAt
           maxBits _ hls_len hls_val hnc b hb1 hb15
       exact buildSubLoop_lenAt lengths maxBits hmb15 hv hbound nextCode root subs (start + 1)
         nextBlock (by omega) hncsz hrootsz hnc' hLEN R S hRS
-  · rw [dif_neg hstart, Prod.mk.injEq] at hRS
+  · rw [dite_eq_right hstart, Prod.mk.injEq] at hRS
     obtain ⟨hRe, _⟩ := hRS
     subst hRe
     exact hLEN
@@ -2295,7 +2295,7 @@ theorem buildTreeFree_eq (lengths : Array UInt8) (maxBits : Nat)
       = ({ packed := (augmentSubTables (buildTableCanonicalFastWithCount lengths (countLengthsFast lengths maxBits) maxBits).packed lengths (countLengthsFast lengths maxBits) maxBits).1 },
          { count := (countLengthsFast lengths maxBits), firstCode := #[], firstIndex := #[], symbols := #[],
            subs := (augmentSubTables (buildTableCanonicalFastWithCount lengths (countLengthsFast lengths maxBits) maxBits).packed lengths (countLengthsFast lengths maxBits) maxBits).2 }) := by
-  unfold buildTreeFreeWithCount; rw [if_pos hlong]
+  unfold buildTreeFreeWithCount; rw [ite_eq_left hlong]
 
 /-- Initial `nextCode` invariant for the `start = 0` fill. -/
 theorem canon_nc0 (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBits ≤ 15)
@@ -2514,8 +2514,8 @@ theorem subLookup_eval (ld : LongDecode) (table : DecodeTable) (maxBits : Nat) (
   have hoff1 : (unpackSym (table.entryAt (subPrefix buf))).toNat ≠ 0 :=
     fun h => hne (UInt16.toNat_inj.mp h)
   simp only [subLookup, hsub, hslot, unpackLen_packEntry, unpackSym_packEntry, hlenNat]
-  rw [if_neg (fun h => h hlen_guard), if_neg (by simp only [beq_iff_eq]; exact hoff1),
-      if_neg (by simp only [beq_iff_eq]; omega), if_neg (by omega)]
+  rw [ite_eq_right (fun h => h hlen_guard), ite_eq_right (by simp only [beq_iff_eq]; exact hoff1),
+      ite_eq_right (by simp only [beq_iff_eq]; omega), ite_eq_right (by omega)]
 
 /-- **A matched codeword is long when the root table misses.** If `walkCanonical`
     matches at length `used` but the fast table reports the sentinel (`0`) or too
@@ -2649,12 +2649,12 @@ theorem hasLongCode_go_eq_true (count : Array Nat) (maxBits len : Nat)
   | zero =>
     have heq : start = len := by omega
     subst heq
-    rw [hasLongCode.go, if_neg (by omega), if_pos hpos]
+    rw [hasLongCode.go, ite_eq_right (by omega), ite_eq_left hpos]
   | succ k ih =>
-    rw [hasLongCode.go, if_neg (by omega : ¬ start > maxBits)]
+    rw [hasLongCode.go, ite_eq_right (by omega : ¬ start > maxBits)]
     by_cases hs : 0 < count[start]!
-    · rw [if_pos hs]
-    · rw [if_neg hs]; exact ih (start + 1) (by omega) (by omega)
+    · rw [ite_eq_left hs]
+    · rw [ite_eq_right hs]; exact ih (start + 1) (by omega) (by omega)
 
 /-- A positive count at a length beyond `fastBits` makes `hasLongCode` true. -/
 theorem hasLongCode_eq_true_of_pos (count : Array Nat) (maxBits len : Nat)
@@ -2749,7 +2749,7 @@ theorem buildSubLoop_entryAt
   intro R S hRS
   rw [buildSubLoop] at hRS
   by_cases hstart : start < lengths.size
-  · rw [dif_pos hstart] at hRS
+  · rw [dite_eq_left hstart] at hRS
     have hls_len : start < (lengths.toList.map UInt8.toNat).length := by
       rw [List.length_map, Array.length_toList]; exact hstart
     have hls_start : (lengths.toList.map UInt8.toNat)[start]'hls_len = lengths[start].toNat := by
@@ -2758,7 +2758,7 @@ theorem buildSubLoop_entryAt
     have hlen_le : lengths[start].toNat ≤ maxBits := by
       rw [← hls_start]; exact hv.1 _ (List.getElem_mem hls_len)
     by_cases hlen : 0 < lengths[start].toNat ∧ lengths[start].toNat < nextCode.size
-    · rw [dif_pos hlen] at hRS
+    · rw [dite_eq_left hlen] at hRS
       have hc! : (nextCode[lengths[start].toNat]'hlen.2) = nextCode[lengths[start].toNat]! :=
         (getElem!_pos nextCode _ hlen.2).symm
       have hnc' : ∀ b, 1 ≤ b → b ≤ maxBits →
@@ -2773,7 +2773,7 @@ theorem buildSubLoop_entryAt
           (nextCode[lengths[start].toNat]! + 1)).size = maxBits + 1 := by
         rw [Array.size_set!]; exact hncsz
       by_cases hfast : fastBits < lengths[start].toNat
-      · rw [if_pos hfast] at hRS
+      · rw [ite_eq_left hfast] at hRS
         simp only [hc!] at hRS
         have hpl_lt : bitReverse (nextCode[lengths[start].toNat]!).toNat lengths[start].toNat 0
             % 2 ^ fastBits < 2 ^ fastBits := Nat.mod_lt _ (Nat.two_pow_pos _)
@@ -2791,7 +2791,7 @@ theorem buildSubLoop_entryAt
             hfast hlen_le hcf_start
         by_cases hseen : ((unpackSym root[bitReverse (nextCode[lengths[start].toNat]!).toNat
             lengths[start].toNat 0 % 2 ^ fastBits]!).toNat == 0) = true
-        · simp only [if_pos hseen] at hRS
+        · simp only [ite_eq_left hseen] at hRS
           refine buildSubLoop_entryAt lengths maxBits hmb15 hv hbound _ _ _ (start + 1) _
             (by omega) hncsz' (by rw [Array.size_set!]; exact hrootsz) hnc' ?_ R S hRS
           intro q hq hlne
@@ -2799,14 +2799,14 @@ theorem buildSubLoop_entryAt
               lengths[start].toNat 0 % 2 ^ fastBits := by
             intro heq; rw [heq, hp_sentinel, unpackLen_packEntry] at hlne; exact hlne rfl
           rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hqp)]; exact hEQ q hq hlne
-        · simp only [if_neg hseen] at hRS
+        · simp only [ite_eq_right hseen] at hRS
           exact buildSubLoop_entryAt lengths maxBits hmb15 hv hbound _ root _ (start + 1) _
             (by omega) hncsz' hrootsz hnc' hEQ R S hRS
-      · rw [if_neg hfast] at hRS
+      · rw [ite_eq_right hfast] at hRS
         simp only [hc!] at hRS
         exact buildSubLoop_entryAt lengths maxBits hmb15 hv hbound _ root subs (start + 1) _
           (by omega) hncsz' hrootsz hnc' hEQ R S hRS
-    · rw [dif_neg hlen] at hRS
+    · rw [dite_eq_right hlen] at hRS
       have hlen0 : lengths[start].toNat = 0 := by
         rcases Nat.eq_zero_or_pos lengths[start].toNat with h | h
         · exact h
@@ -2822,7 +2822,7 @@ theorem buildSubLoop_entryAt
           maxBits _ hls_len hls_val hnc b hb1 hb15
       exact buildSubLoop_entryAt lengths maxBits hmb15 hv hbound nextCode root subs (start + 1)
         nextBlock (by omega) hncsz hrootsz hnc' hEQ R S hRS
-  · rw [dif_neg hstart, Prod.mk.injEq] at hRS
+  · rw [dite_eq_right hstart, Prod.mk.injEq] at hRS
     obtain ⟨hRe, _⟩ := hRS
     subst hRe
     exact hEQ
@@ -2841,7 +2841,7 @@ theorem treeFree_lenAt_eq (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBi
   · simp only [Bool.not_eq_true] at hlong
     have h1 : (buildTreeFreeWithCount lengths (countLengthsFast lengths maxBits) maxBits).1
         = (fromLengthsTree lengths maxBits).buildTable := by
-      unfold buildTreeFreeWithCount; rw [if_neg (by rw [hlong]; simp)]
+      unfold buildTreeFreeWithCount; rw [ite_eq_right (by rw [hlong]; simp)]
       exact (buildTableCanonicalFastWithCount_eq lengths maxBits).trans
         (buildTableCanonicalFast_eq_buildTable lengths maxBits (by omega) hv hbound)
     rw [h1]
@@ -2881,7 +2881,7 @@ theorem treeFree_symAt_eq (lengths : Array UInt8) (maxBits : Nat) (hmb15 : maxBi
   · simp only [Bool.not_eq_true] at hlong
     have h1 : (buildTreeFreeWithCount lengths (countLengthsFast lengths maxBits) maxBits).1
         = (fromLengthsTree lengths maxBits).buildTable := by
-      unfold buildTreeFreeWithCount; rw [if_neg (by rw [hlong]; simp)]
+      unfold buildTreeFreeWithCount; rw [ite_eq_right (by rw [hlong]; simp)]
       exact (buildTableCanonicalFastWithCount_eq lengths maxBits).trans
         (buildTableCanonicalFast_eq_buildTable lengths maxBits (by omega) hv hbound)
     rw [h1]
@@ -2916,7 +2916,7 @@ theorem decodeSymCanon_treeFree_ok_iff (lengths : Array UInt8)
           = (buildTableCanonicalFastWithCount lengths (countLengthsFast lengths 15) 15,
              { count := countLengthsFast lengths 15, firstCode := #[], firstIndex := #[],
                symbols := #[], subs := #[] }) := by
-        unfold buildTreeFreeWithCount; rw [if_neg (by rw [hlong]; simp)]
+        unfold buildTreeFreeWithCount; rw [ite_eq_right (by rw [hlong]; simp)]
       have htbl : buildTableCanonicalFastWithCount lengths (countLengthsFast lengths 15) 15
           = (fromLengthsTree lengths 15).buildTable :=
         (buildTableCanonicalFastWithCount_eq lengths 15).trans
@@ -2932,7 +2932,7 @@ theorem decodeSymCanon_treeFree_ok_iff (lengths : Array UInt8)
         split at h
         · exact absurd h (by simp)
         · rename_i hlenguard
-          rw [if_pos (by
+          rw [ite_eq_left (by
             have hsp : unpackLen (fromLengthsTree lengths 15).buildTable.packed[(buf &&& 0x7FF).toNat]! = 0 := by
               rw [← DecodeTable.entryAt_eq]; exact Decidable.of_not_not hlenguard
             have hs0 := tree_len0_sym0 lengths 15 ((buf &&& 0x7FF).toNat) (subPrefix_lt buf) hsp
@@ -2991,22 +2991,22 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
   by_cases hrc : cnt ≤ 56 ∧ pos < data.size
   · -- `goFusedP`'s refill now reads `data[pos]'hrc.2`; normalise to `!` to match
     -- `goTreeFree`'s (unchanged) `data[pos]!` refill read
-    rw [dif_pos hrc, dif_pos hrc, ← getElem!_pos data pos hrc.2]
+    rw [dite_eq_left hrc, dite_eq_left hrc, ← getElem!_pos data pos hrc.2]
     exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD hlit_iff hdist_iff
       data maxOut (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) output r
-  · rw [dif_neg hrc, dif_neg hrc]
+  · rw [dite_eq_right hrc, dite_eq_right hrc]
     by_cases hlit : (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≠ 0
         ∧ (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt
         ∧ litTable.symAt (bitBuf &&& 0x7FF).toNat < 256
-    · rw [dif_pos hlit, dif_pos hlit]
+    · rw [dite_eq_left hlit, dite_eq_left hlit]
       by_cases hout : output.size ≥ maxOut
       · simp [hout]
-      · rw [if_neg hout, if_neg hout]
+      · rw [ite_eq_right hout, ite_eq_right hout]
         exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD hlit_iff hdist_iff
           data maxOut pos (bitBuf >>> ((litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
           (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)
           (output.push (litTable.symAt (bitBuf &&& 0x7FF).toNat).toUInt8) r
-    · rw [dif_neg hlit, dif_neg hlit]
+    · rw [dite_eq_right hlit, dite_eq_right hlit]
       -- literal/length symbol decode
       cases hdec : decodeSymCanon litLD litTable 15 bitBuf cnt with
       | error e =>
@@ -3020,22 +3020,22 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
         obtain ⟨sym, bb, c, used⟩ := x
         simp only []
         by_cases hsym : sym < 256
-        · rw [if_pos hsym, if_pos hsym]
+        · rw [ite_eq_left hsym, ite_eq_left hsym]
           by_cases hout : output.size ≥ maxOut
           · simp [hout]
-          · rw [if_neg hout, if_neg hout]
+          · rw [ite_eq_right hout, ite_eq_right hout]
             by_cases hnp : cnt ≤ c
             · simp [hnp]
-            · rw [dif_neg hnp, dif_neg hnp]
+            · rw [dite_eq_right hnp, dite_eq_right hnp]
               exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD hlit_iff hdist_iff
                 data maxOut pos bb c (output.push sym.toUInt8) r
-        · rw [if_neg hsym, if_neg hsym]
+        · rw [ite_eq_right hsym, ite_eq_right hsym]
           by_cases h256 : sym == 256
-          · rw [if_pos h256, if_pos h256]
-          · rw [if_neg h256, if_neg h256]
+          · rw [ite_eq_left h256, ite_eq_left h256]
+          · rw [ite_eq_right h256, ite_eq_right h256]
             by_cases hidx : sym.toNat - 257 ≥ Inflate.lengthBase.size
-            · rw [dif_pos hidx, dif_pos hidx]
-            · rw [dif_neg hidx, dif_neg hidx]
+            · rw [dite_eq_left hidx, dite_eq_left hidx]
+            · rw [dite_eq_right hidx, dite_eq_right hidx]
               cases htb : takeBits bb c (Inflate.lengthExtra[sym.toNat - 257]'(by
                   simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at hidx ⊢; omega)).toNat with
               | error e => simp [bind, Except.bind]
@@ -3054,8 +3054,8 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
                   obtain ⟨distSym, bb3, c3, dused⟩ := z
                   simp only []
                   by_cases hdidx : distSym.toNat ≥ Inflate.distBase.size
-                  · rw [dif_pos hdidx, dif_pos hdidx]
-                  · rw [dif_neg hdidx, dif_neg hdidx]
+                  · rw [dite_eq_left hdidx, dite_eq_left hdidx]
+                  · rw [dite_eq_right hdidx, dite_eq_right hdidx]
                     cases htb2 : takeBits bb3 c3 (Inflate.distExtra[distSym.toNat]'(by
                         simp [Inflate.distExtra_size, Inflate.distBase_size] at hdidx ⊢; omega)).toNat with
                     | error e => simp [bind, Except.bind]
@@ -3063,17 +3063,17 @@ theorem goTreeFree_ok_iff_goFusedP (litTable distTable : HuffTree.DecodeTable)
                       obtain ⟨dExtraBits, bb4, c4⟩ := w
                       simp only [bind, Except.bind]
                       by_cases hz : Inflate.distBase[distSym.toNat].toNat + dExtraBits = 0
-                      · rw [dif_pos hz, dif_pos hz]
-                      · rw [dif_neg hz, dif_neg hz]
+                      · rw [dite_eq_left hz, dite_eq_left hz]
+                      · rw [dite_eq_right hz, dite_eq_right hz]
                         by_cases hds : Inflate.distBase[distSym.toNat].toNat + dExtraBits > output.size
-                        · rw [dif_pos hds, dif_pos hds]
-                        · rw [dif_neg hds, dif_neg hds]
+                        · rw [dite_eq_left hds, dite_eq_left hds]
+                        · rw [dite_eq_right hds, dite_eq_right hds]
                           by_cases hmo : output.size + (Inflate.lengthBase[sym.toNat - 257].toNat + extraBits) > maxOut
-                          · rw [if_pos hmo, if_pos hmo]
-                          · rw [if_neg hmo, if_neg hmo]
+                          · rw [ite_eq_left hmo, ite_eq_left hmo]
+                          · rw [ite_eq_right hmo, ite_eq_right hmo]
                             by_cases hnp : cnt ≤ c4
-                            · rw [dif_pos hnp, dif_pos hnp]
-                            · rw [dif_neg hnp, dif_neg hnp]
+                            · rw [dite_eq_left hnp, dite_eq_left hnp]
+                            · rw [dite_eq_right hnp, dite_eq_right hnp]
                               exact goTreeFree_ok_iff_goFusedP litTable distTable litLengths distLengths litLD distLD
                                 hlit_iff hdist_iff data maxOut pos bb4 c4 _ r
   termination_by (data.size - pos) * 9 + cnt
@@ -3113,10 +3113,10 @@ theorem goFusedP_table_congr (t1lit t1dist t2lit t2dist : HuffTree.DecodeTable)
   conv => lhs; rw [goFusedP]
   conv => rhs; rw [goFusedP]
   by_cases hrc : cnt ≤ 56 ∧ pos < data.size
-  · rw [dif_pos hrc, dif_pos hrc]
+  · rw [dite_eq_left hrc, dite_eq_left hrc]
     exact goFusedP_table_congr t1lit t1dist t2lit t2dist data litTree distTree maxOut hllen hlsym
       hdlen hdsym (pos + 1) (bitBuf ||| ((data[pos]'hrc.2).toUInt64 <<< cnt.toUInt64)) (cnt + 8) output
-  · rw [dif_neg hrc, dif_neg hrc]
+  · rw [dite_eq_right hrc, dite_eq_right hrc]
     have hidx : (bitBuf &&& 0x7FF).toNat < 2 ^ HuffTree.fastBits := buf_idx_lt bitBuf
     have hl := hllen _ hidx
     have hs := hlsym _ hidx
@@ -3127,10 +3127,10 @@ theorem goFusedP_table_congr (t1lit t1dist t2lit t2dist : HuffTree.DecodeTable)
           ∧ (t2lit.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt
           ∧ t2lit.symAt (bitBuf &&& 0x7FF).toNat < 256 := by
         rw [← hl, ← hs (by intro h; exact hlit.1 (by rw [h]; rfl))]; exact hlit
-      rw [dif_pos hlit, dif_pos hlit2, hl, hs (by intro h; exact hlit.1 (by rw [h]; rfl))]
+      rw [dite_eq_left hlit, dite_eq_left hlit2, hl, hs (by intro h; exact hlit.1 (by rw [h]; rfl))]
       by_cases hout : output.size ≥ maxOut
       · simp [hout]
-      · rw [if_neg hout, if_neg hout]
+      · rw [ite_eq_right hout, ite_eq_right hout]
         exact goFusedP_table_congr t1lit t1dist t2lit t2dist data litTree distTree maxOut hllen hlsym
           hdlen hdsym pos (bitBuf >>> ((t2lit.lenAt (bitBuf &&& 0x7FF).toNat).toNat).toUInt64)
           (cnt - (t2lit.lenAt (bitBuf &&& 0x7FF).toNat).toNat)
@@ -3139,7 +3139,7 @@ theorem goFusedP_table_congr (t1lit t1dist t2lit t2dist : HuffTree.DecodeTable)
           ∧ (t2lit.lenAt (bitBuf &&& 0x7FF).toNat).toNat ≤ cnt
           ∧ t2lit.symAt (bitBuf &&& 0x7FF).toNat < 256) := by
         intro hc; apply hlit; rw [hl, hs (by rw [hl]; exact (uint8_ne_zero_iff_toNat _).mpr hc.1)]; exact hc
-      rw [dif_neg hlit, dif_neg hlit2,
+      rw [dite_eq_right hlit, dite_eq_right hlit2,
           decodeSym_table_congr litTree t1lit t2lit bitBuf cnt hl hs]
       cases hd : decodeSym litTree t2lit bitBuf cnt with
       | error e => rfl
@@ -3147,22 +3147,22 @@ theorem goFusedP_table_congr (t1lit t1dist t2lit t2dist : HuffTree.DecodeTable)
         obtain ⟨sym, bb, c, used⟩ := x
         simp only []
         by_cases hsym : sym < 256
-        · rw [if_pos hsym, if_pos hsym]
+        · rw [ite_eq_left hsym, ite_eq_left hsym]
           by_cases hout : output.size ≥ maxOut
           · simp [hout]
-          · rw [if_neg hout, if_neg hout]
+          · rw [ite_eq_right hout, ite_eq_right hout]
             by_cases hnp : cnt ≤ c
             · simp [hnp]
-            · rw [dif_neg hnp, dif_neg hnp]
+            · rw [dite_eq_right hnp, dite_eq_right hnp]
               exact goFusedP_table_congr t1lit t1dist t2lit t2dist data litTree distTree maxOut hllen
                 hlsym hdlen hdsym pos bb c (output.push sym.toUInt8)
-        · rw [if_neg hsym, if_neg hsym]
+        · rw [ite_eq_right hsym, ite_eq_right hsym]
           by_cases h256 : sym == 256
-          · rw [if_pos h256, if_pos h256]
-          · rw [if_neg h256, if_neg h256]
+          · rw [ite_eq_left h256, ite_eq_left h256]
+          · rw [ite_eq_right h256, ite_eq_right h256]
             by_cases hidxl : sym.toNat - 257 ≥ Inflate.lengthBase.size
-            · rw [dif_pos hidxl, dif_pos hidxl]
-            · rw [dif_neg hidxl, dif_neg hidxl]
+            · rw [dite_eq_left hidxl, dite_eq_left hidxl]
+            · rw [dite_eq_right hidxl, dite_eq_right hidxl]
               cases htb : takeBits bb c (Inflate.lengthExtra[sym.toNat - 257]'(by
                   simp [Inflate.lengthExtra_size, Inflate.lengthBase_size] at hidxl ⊢; omega)).toNat with
               | error e => simp [bind, Except.bind]
@@ -3178,8 +3178,8 @@ theorem goFusedP_table_congr (t1lit t1dist t2lit t2dist : HuffTree.DecodeTable)
                   obtain ⟨distSym, bb3, c3, dused⟩ := z
                   simp only []
                   by_cases hdd : distSym.toNat ≥ Inflate.distBase.size
-                  · rw [dif_pos hdd, dif_pos hdd]
-                  · rw [dif_neg hdd, dif_neg hdd]
+                  · rw [dite_eq_left hdd, dite_eq_left hdd]
+                  · rw [dite_eq_right hdd, dite_eq_right hdd]
                     cases htb2 : takeBits bb3 c3 (Inflate.distExtra[distSym.toNat]'(by
                         simp [Inflate.distExtra_size, Inflate.distBase_size] at hdd ⊢; omega)).toNat with
                     | error e => simp [bind, Except.bind]
@@ -3187,17 +3187,17 @@ theorem goFusedP_table_congr (t1lit t1dist t2lit t2dist : HuffTree.DecodeTable)
                       obtain ⟨dExtraBits, bb4, c4⟩ := w
                       simp only [bind, Except.bind]
                       by_cases hz : Inflate.distBase[distSym.toNat].toNat + dExtraBits = 0
-                      · rw [dif_pos hz, dif_pos hz]
-                      · rw [dif_neg hz, dif_neg hz]
+                      · rw [dite_eq_left hz, dite_eq_left hz]
+                      · rw [dite_eq_right hz, dite_eq_right hz]
                         by_cases hds : Inflate.distBase[distSym.toNat].toNat + dExtraBits > output.size
-                        · rw [dif_pos hds, dif_pos hds]
-                        · rw [dif_neg hds, dif_neg hds]
+                        · rw [dite_eq_left hds, dite_eq_left hds]
+                        · rw [dite_eq_right hds, dite_eq_right hds]
                           by_cases hmo : output.size + (Inflate.lengthBase[sym.toNat - 257].toNat + extraBits) > maxOut
-                          · rw [if_pos hmo, if_pos hmo]
-                          · rw [if_neg hmo, if_neg hmo]
+                          · rw [ite_eq_left hmo, ite_eq_left hmo]
+                          · rw [ite_eq_right hmo, ite_eq_right hmo]
                             by_cases hnp : cnt ≤ c4
-                            · rw [dif_pos hnp, dif_pos hnp]
-                            · rw [dif_neg hnp, dif_neg hnp]
+                            · rw [dite_eq_left hnp, dite_eq_left hnp]
+                            · rw [dite_eq_right hnp, dite_eq_right hnp]
                               exact goFusedP_table_congr t1lit t1dist t2lit t2dist data litTree distTree
                                 maxOut hllen hlsym hdlen hdsym pos bb4 c4 _
   termination_by (data.size - pos) * 9 + cnt
@@ -3238,14 +3238,14 @@ theorem goTreeFreeU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteA
         exact USize.size_eq_two_pow ▸ (show pos.toNat + 1 < USize.size by omega)
       have e2 : (cnt + 8).toNat = cnt.toNat + 8 := by
         rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
-      rw [goTreeFreeU, dif_pos hrc, goTreeFree, dif_pos hgN,
+      rw [goTreeFreeU, dite_eq_left hrc, goTreeFree, dite_eq_left hgN,
           ih (by rw [e1]; omega), e1, e2,
           uget_eq_getElem! data pos hpn, usize_toUInt64_toNat]
   | case2 pos bitBuf cnt output hrc ent hlit hmax =>
       intro hpos
-      rw [goTreeFreeU, dif_neg hrc, dif_pos hlit, if_pos hmax,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_pos ((litGuardU_usize litTable bitBuf cnt _).mp hlit), if_pos hmax]
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_left hlit, ite_eq_left hmax,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_left ((litGuardU_usize litTable bitBuf cnt _).mp hlit), ite_eq_left hmax]
       rfl
   | case3 pos bitBuf cnt output hrc ent hlit hmax ih =>
       intro hpos
@@ -3259,30 +3259,30 @@ theorem goTreeFreeU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteA
       have hsub : (cnt - (HuffTree.unpackLen ent).toUSize).toNat
           = cnt.toNat - (HuffTree.unpackLen ent).toNat := by
         rw [USize.toNat_sub_of_le _ _ hl1, UInt8.toNat_toUSize]
-      rw [goTreeFreeU, dif_neg hrc, dif_pos ⟨hl0, hl1, hl2⟩, if_neg hmax,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_pos ((litGuardU_usize litTable bitBuf cnt _).mp ⟨hl0, hl1, hl2⟩), if_neg hmax,
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_left ⟨hl0, hl1, hl2⟩, ite_eq_right hmax,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_left ((litGuardU_usize litTable bitBuf cnt _).mp ⟨hl0, hl1, hl2⟩), ite_eq_right hmax,
           ih hpos, hsub, hle, hse, uint8_toUInt64_toNat]
   | case4 pos bitBuf cnt output hrc ent hlit e hde =>
       intro hpos
-      rw [goTreeFreeU, dif_neg hrc, dif_neg hlit,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_right hlit,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
       simp only [hde, Except.map]
   | case5 pos bitBuf cnt output hrc ent hlit sym bb c used hde hsym hmax =>
       intro hpos
-      rw [goTreeFreeU, dif_neg hrc, dif_neg hlit,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
-      simp only [hde, if_pos hsym, if_pos hmax]
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_right hlit,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, ite_eq_left hsym, ite_eq_left hmax]
       rfl
   | case6 pos bitBuf cnt output hrc ent hlit cnt0 sym bb c used hde hsym hmax hnp =>
       intro hpos
       have hnp' : cnt.toNat ≤ c := hnp
-      rw [goTreeFreeU, dif_neg hrc, dif_neg hlit,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
-      simp only [hde, if_pos hsym, if_neg hmax, dif_pos hnp']
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_right hlit,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax, dite_eq_left hnp']
       rfl
   | case7 pos bitBuf cnt output hrc ent hlit cnt0 sym bb c used hde hsym hmax hnp ih =>
       intro hpos
@@ -3290,35 +3290,35 @@ theorem goTreeFreeU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteA
       have hcle : c ≤ cnt.toNat := HuffTree.decodeSymCanon_cnt_le litLD litTable maxBits bitBuf cnt.toNat hde
       have hcrt : c.toUSize.toNat = c :=
         toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hcle cnt.toNat_lt_two_pow_numBits)
-      rw [goTreeFreeU, dif_neg hrc, dif_neg hlit,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
-      simp only [hde, if_pos hsym, if_neg hmax, dif_neg hnp']
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_right hlit,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax, dite_eq_right hnp']
       rw [ih hpos, hcrt]
   | case8 pos bitBuf cnt output hrc ent hlit sym bb c used hde hsym heob =>
       intro hpos
       have hcle : c ≤ cnt.toNat := HuffTree.decodeSymCanon_cnt_le litLD litTable maxBits bitBuf cnt.toNat hde
       have hcrt : c.toUSize.toNat = c :=
         toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hcle cnt.toNat_lt_two_pow_numBits)
-      rw [goTreeFreeU, dif_neg hrc, dif_neg hlit,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
-      simp only [hde, if_neg hsym, if_pos heob, Except.map, hcrt]
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_right hlit,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, ite_eq_right hsym, ite_eq_left heob, Except.map, hcrt]
   | case9 pos bitBuf cnt output hrc ent hlit sym bb c used hde hsym hneob idx hidx =>
       intro hpos
       have hidxc : sym.toNat - 257 ≥ Inflate.lengthBase.size := hidx
-      rw [goTreeFreeU, dif_neg hrc, dif_neg hlit,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
-      simp only [hde, if_neg hsym, if_neg hneob, dif_pos hidxc]
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_right hlit,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, ite_eq_right hsym, ite_eq_right hneob, dite_eq_left hidxc]
       rfl
   | case10 pos bitBuf cnt output hrc ent hlit cnt0 sym bb c used hde hsym hneob idx hh base ih =>
       intro hpos
       have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
-      rw [goTreeFreeU, dif_neg hrc, dif_neg hlit,
-          goTreeFree, dif_neg (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
-      simp only [hde, if_neg hsym, if_neg hneob, dif_neg hhc]
+      rw [goTreeFreeU, dite_eq_right hrc, dite_eq_right hlit,
+          goTreeFree, dite_eq_right (fun h => hrc ((refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((litGuardU_usize litTable bitBuf cnt _).mpr h))]
+      simp only [hde, ite_eq_right hsym, ite_eq_right hneob, dite_eq_right hhc]
       cases hex : takeBits bb c
           (Inflate.lengthExtra[sym.toNat - 257]'(by
             simp only [Inflate.lengthExtra_size]
@@ -3643,14 +3643,14 @@ theorem inflateLoopTreeFree_of_inflateLoop (data : ByteArray)
               else inflateLoopTreeFree br'' o' maxOut data.size) = .ok r := by
       intro o' br'' hp'' hl'' hd'' ht
       by_cases hbf : (bfinal == 1) = true
-      · rw [if_pos hbf] at ht ⊢; exact ht
-      · rw [if_neg hbf] at ht ⊢
+      · rw [ite_eq_left hbf] at ht ⊢; exact ht
+      · rw [ite_eq_right hbf] at ht ⊢
         by_cases hg1 : br''.bitPos ≤ br.bitPos
-        · rw [dif_pos hg1] at ht; exact absurd ht (by simp)
-        · rw [dif_neg hg1] at ht ⊢
+        · rw [dite_eq_left hg1] at ht; exact absurd ht (by simp)
+        · rw [dite_eq_right hg1] at ht ⊢
           by_cases hg2 : data.size * 8 < br''.bitPos
-          · rw [dif_pos hg2] at ht; exact absurd ht (by simp)
-          · rw [dif_neg hg2] at ht ⊢
+          · rw [dite_eq_left hg2] at ht; exact absurd ht (by simp)
+          · rw [dite_eq_right hg2] at ht ⊢
             exact ih o' br'' hg1 hg2 hp'' hl'' hd'' r ht
     rw [inflateLoopTreeFree]
     simp only [hrb1, hrb2, bind, Except.bind]
@@ -3758,14 +3758,14 @@ theorem inflateLoop_of_inflateLoopTreeFree (data : ByteArray)
                     (HuffTree.fromLengthsTree fixedDistLengths 15) maxOut data.size) = .ok r := by
       intro o' br'' hp'' hl'' hd'' ht
       by_cases hbf : (bfinal == 1) = true
-      · rw [if_pos hbf] at ht ⊢; exact ht
-      · rw [if_neg hbf] at ht ⊢
+      · rw [ite_eq_left hbf] at ht ⊢; exact ht
+      · rw [ite_eq_right hbf] at ht ⊢
         by_cases hg1 : br''.bitPos ≤ br.bitPos
-        · rw [dif_pos hg1] at ht; exact absurd ht (by simp)
-        · rw [dif_neg hg1] at ht ⊢
+        · rw [dite_eq_left hg1] at ht; exact absurd ht (by simp)
+        · rw [dite_eq_right hg1] at ht ⊢
           by_cases hg2 : data.size * 8 < br''.bitPos
-          · rw [dif_pos hg2] at ht; exact absurd ht (by simp)
-          · rw [dif_neg hg2] at ht ⊢
+          · rw [dite_eq_left hg2] at ht; exact absurd ht (by simp)
+          · rw [dite_eq_right hg2] at ht ⊢
             exact ih o' br'' hg1 hg2 hp'' hl'' hd'' r ht
     rw [inflateLoop]
     simp only [hrb1, hrb2, bind, Except.bind]

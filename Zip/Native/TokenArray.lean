@@ -362,6 +362,6 @@ theorem get_extract (ta : TokenArray) (i j k : Nat) (h : k < (ta.extract i j).si
     · rw [get_push_lt ta w hi hlt, get_toArray ta i hi,
           Array.getElem_push_lt (show i < ta.toArray.size by rw [← size_toArray]; exact hi)]
     · subst hi
-      rw [get_push_eq, Array.getElem_push, dif_neg (by rw [← size_toArray]; omega)]
+      rw [get_push_eq, Array.getElem_push, dite_eq_right (by rw [← size_toArray]; omega)]
 
 end TokenArray

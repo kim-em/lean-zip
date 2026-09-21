@@ -109,7 +109,7 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
     have htoList : tokens[i] = tokens.toList[i] := by simp only [Array.getElem_toList]
     -- Unfold emitTokensWithCodes one step
     unfold emitTokensWithCodes
-    simp only [dif_pos hlt]
+    simp only [dite_eq_left hlt]
     cases htok : tokens[i] with
     | literal b =>
       simp only []
@@ -196,7 +196,7 @@ private theorem emitTokensWithCodes_spec_go (bw : BitWriter) (tokens : Array LZ7
               rw [getElem!_pos litCodes (lidx + 257) hlit_bound] at hlcw hllen
               rw [getElem!_pos distCodes didx hdist_bound] at hdcw hdlen
               -- Reduce native findLengthCode/findDistCode matches and if-guards
-              simp only [hnflc, hnfdc, dif_pos hlit_bound, dif_pos hdist_bound]
+              simp only [hnflc, hnfdc, dite_eq_left hlit_bound, dite_eq_left hdist_bound]
               -- Chain BitWriter correspondence (explicit args for getInternal unification)
               have hwf1 := BitWriter.writeHuffCode_wf bw
                 (litCodes[lidx + 257]'hlit_bound).1 (litCodes[lidx + 257]'hlit_bound).2
@@ -290,7 +290,7 @@ private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77T
     intro heq
     have hlt : i < tokens.size := by omega
     unfold emitTokensWithCodes
-    simp only [dif_pos hlt]
+    simp only [dite_eq_left hlt]
     match htok : tokens[i] with
     | .literal b =>
       simp only []
@@ -309,7 +309,7 @@ private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77T
       | some (idx, extraCount, extraVal) =>
         have hidx := nativeFindLengthCode_idx_bound len idx extraCount extraVal hflc_pf
         have hlit_bound : idx + 257 < litCodes.size := by omega
-        simp only [dif_pos hlit_bound]
+        simp only [dite_eq_left hlit_bound]
         have hlen_code := hlit_le (idx + 257) hlit_bound
         rw [getElem!_pos litCodes (idx + 257) hlit_bound] at hlen_code
         have hextraN_le : extraCount ≤ 25 := by
@@ -324,7 +324,7 @@ private theorem emitTokensWithCodes_wf_go (bw : BitWriter) (tokens : Array LZ77T
         | some (dIdx, dExtraCount, dExtraVal) =>
           have hdidx := nativeFindDistCode_idx_bound dist dIdx dExtraCount dExtraVal hfdc_pf
           have hdist_bound : dIdx < distCodes.size := by omega
-          simp only [dif_pos hdist_bound]
+          simp only [dite_eq_left hdist_bound]
           have hdlen_code := hdist_le dIdx hdist_bound
           rw [getElem!_pos distCodes dIdx hdist_bound] at hdlen_code
           have hdextraN_le : dExtraCount ≤ 25 := by

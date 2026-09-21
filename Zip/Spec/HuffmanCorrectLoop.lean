@@ -73,7 +73,7 @@ theorem nc_invariant_step
              List.foldl_append, List.foldl_cons, List.foldl_nil, hls_start]
   by_cases hbeq : lengths[start].toNat = b
   · subst hbeq
-    simp only [if_pos (beq_self_eq_true lengths[start].toNat)]
+    simp only [ite_eq_left (beq_self_eq_true lengths[start].toNat)]
     rw [Array.getElem!_set!_self _ _ _ (by omega : lengths[start].toNat < nextCode.size)]
     have h_nc_val := hnc lengths[start].toNat (by omega) hlen_le
     have h_partial_le := count_foldl_take_le lsList lengths[start].toNat start
@@ -85,7 +85,7 @@ theorem nc_invariant_step
         Nat.mod_eq_of_lt (by omega), h_nc_val]
     omega
   · have hf : ¬((lengths[start].toNat == b) = true) := by rw [beq_iff_eq]; exact hbeq
-    simp only [if_neg hf]
+    simp only [ite_eq_right hf]
     rw [Array.getElem!_set!_ne _ _ _ _ hbeq]
     exact hnc b hb1 hb15
 

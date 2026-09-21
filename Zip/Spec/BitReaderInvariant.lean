@@ -128,7 +128,7 @@ theorem decodeStored_inv (br br' : BitReader)
             match h3 : br₂.readBytes len.toNat with
             | .error e => simp only [h3] at h; exact nomatch h
             | .ok (bytes, br₃) =>
-              simp only [h3, if_neg Bool.false_ne_true, Except.ok.injEq,
+              simp only [h3, ite_eq_right Bool.false_ne_true, Except.ok.injEq,
                 Prod.mk.injEq] at h
               exact ⟨bytes, by rw [h.2]⟩
       obtain ⟨bytes, h_rb⟩ := h_rb

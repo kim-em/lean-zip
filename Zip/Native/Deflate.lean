@@ -461,7 +461,7 @@ private theorem unpackTok_pack_reference (l d : UInt32) (hlu : l ≤ 258) (hdu :
   have hlen : ((((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) >>> 16) &&& 0x7FFF = l := by bv_decide
   have hdist : (((1 : UInt32) <<< 31) ||| l <<< 16 ||| d) &&& 0xFFFF = d := by bv_decide
   simp only [unpackTok]
-  rw [if_neg hcond, hlen, hdist]
+  rw [ite_eq_right hcond, hlen, hdist]
 
 /-- `unpackTok` recovers every token within the encoder bounds (literals
     unconditionally; references with `3 ≤ len ≤ 258`, `1 ≤ dist ≤ 32768` —

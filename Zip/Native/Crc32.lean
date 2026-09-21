@@ -69,7 +69,7 @@ theorem crcByteTable_eq_crcByte (crc : UInt32) (byte : UInt8) :
   simp only [Spec.crcByteTable]
   have hlt : ((crc ^^^ UInt32.ofNat byte.toNat) &&& 0xFF).toNat < table.size := by
     rw [table_size]; exact and_0xFF_toNat_lt _
-  rw [dif_pos hlt, table_getElem _ hlt, UInt32.ofNat_toNat]
+  rw [dite_eq_left hlt, table_getElem _ hlt, UInt32.ofNat_toNat]
   simp only [Spec.crcByte]
   rw [crcBits8_split (crc ^^^ UInt32.ofNat byte.toNat), xor_byte_shr8]
 
@@ -100,7 +100,7 @@ theorem crc32_singleton (b : UInt8) :
   have hdata : (ByteArray.mk #[b]).data.toList = [b] := rfl
   simp only [crc32]
   show _ ^^^ (0xFFFFFFFF : UInt32) = _
-  rw [show ((0 : UInt32) == 0) = true from rfl, if_pos rfl,
+  rw [show ((0 : UInt32) == 0) = true from rfl, ite_eq_left rfl,
     updateBytes_eq_updateList, hdata]
   exact Spec.checksum_singleton b
 
@@ -118,7 +118,7 @@ theorem crc32_pair (b₁ b₂ : UInt8) :
   have hdata : (ByteArray.mk #[b₁, b₂]).data.toList = [b₁, b₂] := rfl
   simp only [crc32]
   show _ ^^^ (0xFFFFFFFF : UInt32) = _
-  rw [show ((0 : UInt32) == 0) = true from rfl, if_pos rfl,
+  rw [show ((0 : UInt32) == 0) = true from rfl, ite_eq_left rfl,
     updateBytes_eq_updateList, hdata]
   exact Spec.checksum_pair b₁ b₂
 

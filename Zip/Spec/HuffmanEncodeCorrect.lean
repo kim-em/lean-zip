@@ -120,7 +120,7 @@ private theorem canonicalCodes_go_inv
           · -- b ≠ len: unchanged
             have hf : ¬((lengths[i].toNat == b) = true) := by
               rw [beq_iff_eq]; exact hbeq
-            simp only [if_neg hf]
+            simp only [ite_eq_right hf]
             rw [Array.getElem!_set!_ne _ _ _ _ hbeq]
             exact hnc b hb1 hb15)
         (by -- hprev': entries < i+1 are correct
@@ -162,7 +162,7 @@ private theorem canonicalCodes_go_inv
           simp only [List.getElem?_eq_getElem hls_len, Option.toList,
                      List.foldl_append, List.foldl_cons, List.foldl_nil, hls_val]
           have : ¬((0 == b) = true) := by rw [beq_iff_eq]; omega
-          simp only [if_neg this])
+          simp only [ite_eq_right this])
         (by -- hprev: extend to cover i (which has length 0)
           intro k hk hks
           by_cases hk_eq : k = i

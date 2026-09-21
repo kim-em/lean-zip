@@ -63,7 +63,7 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
     have htoList : tokens[i] = tokens.toList[i] := by simp only [Array.getElem_toList]
     -- Unfold emitTokens one step and take the positive branch
     unfold emitTokens
-    simp only [dif_pos hlt]
+    simp only [dite_eq_left hlt]
     -- Case split on token type, then reduce let-match pattern
     cases htok : tokens[i] with
     | literal b =>
@@ -143,7 +143,7 @@ private theorem emitTokens_spec_go (bw : BitWriter) (tokens : Array LZ77Token)
               rw [getElem!_pos fixedLitCodes (lidx + 257) hlit_bound] at hlcw hllen
               rw [getElem!_pos fixedDistCodes didx hdist_bound] at hdcw hdlen
               -- Reduce native findLengthCode/findDistCode matches and if-guards
-              simp only [hnflc, hnfdc, dif_pos hlit_bound, dif_pos hdist_bound]
+              simp only [hnflc, hnfdc, dite_eq_left hlit_bound, dite_eq_left hdist_bound]
               -- Chain BitWriter correspondence (explicit args for getInternal unification)
               have hwf1 := BitWriter.writeHuffCode_wf bw
                 (fixedLitCodes[lidx + 257]'hlit_bound).1 (fixedLitCodes[lidx + 257]'hlit_bound).2
@@ -545,7 +545,7 @@ private theorem emitTokens_wf_go (bw : BitWriter) (tokens : Array LZ77Token)
     intro heq
     have hlt : i < tokens.size := by omega
     unfold emitTokens
-    simp only [dif_pos hlt]
+    simp only [dite_eq_left hlt]
     match htok : tokens[i] with
     | .literal b =>
       simp only []
@@ -569,7 +569,7 @@ private theorem emitTokens_wf_go (bw : BitWriter) (tokens : Array LZ77Token)
         have hlit_bound : idx + 257 < fixedLitCodes.size := by
           have := Deflate.fixedLitCodes_size; omega
         -- Resolve the if-guard for lit code bounds
-        simp only [dif_pos hlit_bound]
+        simp only [dite_eq_left hlit_bound]
         have hlen_code := fixedLitCodes_snd_le (idx + 257) hlit_bound
         rw [getElem!_pos fixedLitCodes (idx + 257) hlit_bound] at hlen_code
         have hextraN_le : extraCount ≤ 25 := by
@@ -587,7 +587,7 @@ private theorem emitTokens_wf_go (bw : BitWriter) (tokens : Array LZ77Token)
           have hdist_bound : dIdx < fixedDistCodes.size := by
             have := Deflate.fixedDistCodes_size; omega
           -- Resolve the if-guard for dist code bounds
-          simp only [dif_pos hdist_bound]
+          simp only [dite_eq_left hdist_bound]
           have hdlen_code := fixedDistCodes_snd_le dIdx hdist_bound
           rw [getElem!_pos fixedDistCodes dIdx hdist_bound] at hdlen_code
           have hdextraN_le : dExtraCount ≤ 25 := by

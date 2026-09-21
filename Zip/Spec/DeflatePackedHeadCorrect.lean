@@ -33,7 +33,7 @@ private theorem usize_toUInt32_eq (x : USize) :
 private theorem directHeadEncode_lt (dataSize head : Nat)
     (hhead : head < dataSize) :
     directHeadEncode dataSize head = head.toUInt32 + 1 := by
-  simp only [directHeadEncode, if_neg (Nat.ne_of_lt hhead)]
+  simp only [directHeadEncode, ite_eq_right (Nat.ne_of_lt hhead)]
 
 private theorem directHeadEncode_ne_zero (dataSize head : Nat)
     (hdata : dataSize < UInt32.size) (hhead : head < dataSize) :
@@ -96,7 +96,7 @@ private theorem DirectHeadTableRep.set (dataSize : Nat)
           (packed.usetUInt32LE (4 * idx) (head.toUInt32 + 1) hoff).size := by
         rw [size_usetUInt32LE]
         exact hoff
-      rw [dif_pos hbound']
+      rw [dite_eq_left hbound']
       rw [ByteArray.ugetUInt32LE_usetUInt32LE_same]
       simp only [Array.uset, Array.getElem_set]
       exact directHeadEncode_lt dataSize head hhead |>.symm
@@ -113,10 +113,10 @@ private theorem DirectHeadTableRep.set (dataSize : Nat)
       have hrep := rep.get_eq read hreadOld
       unfold packedHeadAtU at hrep
       dsimp only at hrep
-      rw [dif_pos hreadBound] at hrep
+      rw [dite_eq_left hreadBound] at hrep
       rw [hrep]
       simp only [Array.uset, Array.getElem_set]
-      rw [if_neg (Ne.symm hne)]
+      rw [ite_eq_right (Ne.symm hne)]
 
 private theorem directHeadInitRep (dataSize : Nat) :
     DirectHeadTableRep dataSize
@@ -140,7 +140,7 @@ private theorem directHeadInitRep (dataSize : Nat) :
         (Array.replicate (65536 * 4) (0 : UInt8)).size
       rw [Array.size_replicate]
       exact hoff
-    rw [dif_pos hbound]
+    rw [dite_eq_left hbound]
     simp only [ByteArray.ugetUInt32LE]
     simp [ByteArray.getElem_eq_getElem_data, directHeadEncode]
 
@@ -205,7 +205,7 @@ private theorem lz77GreedyDirectHeadPackedFNU64_eq_array
         have hh := rep.get_eq hshU hb
         unfold packedHeadAtU at hh
         dsimp only at hh
-        rw [dif_pos hoff] at hh
+        rw [dite_eq_left hoff] at hh
         simpa only [headEnc, head, Array.uget] using hh
       dsimp only [headEnc, head, hshU, hashU] at henc
       simp only [henc]
@@ -225,7 +225,7 @@ private theorem lz77GreedyDirectHeadPackedFNU64_eq_array
           simpa only [anext, Array.size_uset] using hi
         have hset : heads.set! hshU.toNat posU.toNat = anext := by
           simp only [anext, Array.uset, Array.set!_eq_setIfInBounds,
-            Array.setIfInBounds, dif_pos hb]
+            Array.setIfInBounds, dite_eq_left hb]
         rw [← hset]
         by_cases heq : i = hshU.toNat
         · subst i
@@ -299,7 +299,7 @@ private theorem lz77GreedyDirectHeadPackedFNU64_eq_array
           intro hc
           apply hnotLt
           simpa only [hsentRaw] using hc.1
-        rw [dif_neg hpackedNo, dif_neg harrayNo]
+        rw [dite_eq_right hpackedNo, dite_eq_right harrayNo]
         simpa only [pnext, anext, w, hshU, hashU] using hlit
       · have hheadLt : head < data.size :=
           Nat.lt_of_le_of_ne hheadBound hsent
@@ -327,7 +327,7 @@ private theorem lz77GreedyDirectHeadPackedFNU64_eq_array
                   (heads.uget
                     (hash3L1U data dataSizeU posU hds hfit hltN &&& 0xFFFF) hb).toUSize ≤
                 32768
-        · simp only [dif_pos (And.intro hneRaw hc), dif_pos hc]
+        · simp only [dite_eq_left (And.intro hneRaw hc), dite_eq_left hc]
           have hposLe : posU ≤ dataSizeU := by
             rw [USize.le_iff_toNat_le, hds]
             exact hpos
@@ -364,9 +364,9 @@ private theorem lz77GreedyDirectHeadPackedFNU64_eq_array
           let matchLenU := directHeadMatchLenU data headRaw.toUSize posU maxLenU
             hsz hheadMax hpm
           by_cases hge : matchLenU ≥ 3
-          · simp only [matchLenU, headRaw, maxLenU, remU, dif_pos hge]
+          · simp only [matchLenU, headRaw, maxLenU, remU, dite_eq_left hge]
             by_cases hle : posU.toNat + matchLenU.toNat ≤ data.size
-            · simp only [matchLenU, headRaw, maxLenU, remU, dif_pos hle]
+            · simp only [matchLenU, headRaw, maxLenU, remU, dite_eq_left hle]
               have hsum : (posU + matchLenU).toNat =
                   posU.toNat + matchLenU.toNat := by
                 rw [USize.toNat_add]
@@ -406,9 +406,9 @@ private theorem lz77GreedyDirectHeadPackedFNU64_eq_array
                     (bumpDirectRefLitFreqU64 freqs wr) wr) rfl
               simpa only [matchLenU, headRaw, maxLenU, remU, pnext, anext, wr,
                 hshU, hashU] using hrec
-            · simp only [matchLenU, headRaw, maxLenU, remU, dif_neg hle]
+            · simp only [matchLenU, headRaw, maxLenU, remU, dite_eq_right hle]
               simpa only [pnext, anext, w, hshU, hashU] using hlit
-          · simp only [matchLenU, headRaw, maxLenU, remU, dif_neg hge]
+          · simp only [matchLenU, headRaw, maxLenU, remU, dite_eq_right hge]
             simpa only [pnext, anext, w, hshU, hashU] using hlit
         · have hpackedNo : ¬(
               directHeadEncode data.size
@@ -421,7 +421,7 @@ private theorem lz77GreedyDirectHeadPackedFNU64_eq_array
                     (heads.uget
                       (hash3L1U data dataSizeU posU hds hfit hltN &&& 0xFFFF) hb).toUSize ≤
                   32768) := fun hp => hc hp.2
-          simp only [dif_neg hpackedNo, dif_neg hc]
+          simp only [dite_eq_right hpackedNo, dite_eq_right hc]
           simpa only [pnext, anext, w, hshU, hashU] using hlit
     · simp [hlt]
 
@@ -433,16 +433,16 @@ theorem lz77ChainIterPMergedDirectHeadFNU64_eq_array (data : ByteArray) :
       lz77ChainIterPMergedDirectHeadArrayFNU64 data := by
   unfold lz77ChainIterPMergedDirectHeadFNU64
   by_cases hsmall : data.size < 3
-  · simp only [hsmall, if_pos]
-  · simp only [hsmall, if_false]
+  · simp only [hsmall, ite_eq_left]
+  · simp only [hsmall, ite_false]
     by_cases hg : data.size.toUSize.toNat = data.size ∧
         data.size * 512 + 511 < USize.size ∧ data.size < UInt32.size
-    · simp only [dif_pos hg]
+    · simp only [dite_eq_left hg]
       unfold lz77ChainIterPMergedDirectHeadArrayFNU64
-      simp only [hsmall, if_false]
+      simp only [hsmall, ite_false]
       have hgArray : data.size.toUSize.toNat = data.size ∧
           data.size * 512 + 511 < USize.size := ⟨hg.1, hg.2.1⟩
-      simp only [dif_pos hgArray]
+      simp only [dite_eq_left hgArray]
       have hsz : data.size < USize.size := by
         rw [← hg.1]
         exact USize.toNat_lt_two_pow_numBits _
@@ -470,7 +470,7 @@ theorem lz77ChainIterPMergedDirectHeadFNU64_eq_array (data : ByteArray) :
           (r.1, (fusedFreqBytesToNat r.2).1,
             (fusedFreqBytesToNat r.2).2)) hloop
       simpa only [packedHeads, arrayHeads] using hout
-    · simp only [dif_neg hg]
+    · simp only [dite_eq_right hg]
 
 /-- The packed production entry preserves the established depth-one matcher
     tokens and exact literal/distance histograms. -/

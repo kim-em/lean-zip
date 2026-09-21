@@ -283,7 +283,7 @@ theorem DecodeTable.symAt_eq_unpackSym_entryAt (t : DecodeTable) (idx : Nat) :
 theorem DecodeTable.entryAtU_eq_entryAt (t : DecodeTable) (i : USize)
     (h : i.toNat < t.packed.size) : t.entryAtU i h = t.entryAt i.toNat := by
   unfold DecodeTable.entryAtU DecodeTable.entryAt
-  rw [dif_pos h]; rfl
+  rw [dite_eq_left h]; rfl
 
 /-- The `fastBits`-bit window index, taken as a `USize`, indexes the `2^fastBits`
     packed slots. `bitBuf &&& 0x7FF ≤ 0x7FF = 2^fastBits − 1`, and the `USize`
@@ -471,7 +471,7 @@ termination_by lengths.size - start
 /-- A proof-carrying `Array.set` in bounds is the checked `set!`. -/
 private theorem set_eq_set! {α : Type _} {a : Array α} {i : Nat} {v : α} (h : i < a.size) :
     a.set i v h = a.set! i v := by
-  rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds_def, dif_pos h]
+  rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds_def, dite_eq_left h]
 
 /-- The unchecked fill `fillSlotsU` equals the checked `fillSlots`: each
     proof-carrying `Array.set` in bounds is the corresponding `set!`. -/
@@ -480,8 +480,8 @@ theorem fillSlotsU_eq (packed : Array UInt32) (base stride count : Nat) (entry :
     fillSlotsU packed base stride count entry hb = fillSlots packed base stride count entry := by
   rw [fillSlotsU, fillSlots]
   by_cases hc : count = 0
-  · rw [dif_pos hc, if_pos hc]
-  · rw [dif_neg hc, if_neg hc]
+  · rw [dite_eq_left hc, ite_eq_left hc]
+  · rw [dite_eq_right hc, ite_eq_right hc]
     simp only [set_eq_set!]
     exact fillSlotsU_eq (packed.set! base entry) (base + stride) stride (count - 1) entry _
 termination_by count

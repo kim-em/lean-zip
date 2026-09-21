@@ -75,12 +75,12 @@ termination_by maxBits + 1 - b
 protected theorem kraftSumFrom_unfold (blCount : Array Nat) (maxBits b : Nat) (hb : b ≤ maxBits) :
     Huffman.Spec.kraftSumFrom blCount maxBits b =
       blCount[b]! * 2 ^ (maxBits - b) + Huffman.Spec.kraftSumFrom blCount maxBits (b + 1) := by
-  rw [Huffman.Spec.kraftSumFrom.eq_1]; exact if_neg (by omega)
+  rw [Huffman.Spec.kraftSumFrom.eq_1]; exact ite_eq_right (by omega)
 
 /-- `kraftSumFrom` past `maxBits` is zero. -/
 protected theorem kraftSumFrom_gt (blCount : Array Nat) (maxBits b : Nat) (hb : b > maxBits) :
     Huffman.Spec.kraftSumFrom blCount maxBits b = 0 := by
-  rw [Huffman.Spec.kraftSumFrom.eq_1]; exact if_pos hb
+  rw [Huffman.Spec.kraftSumFrom.eq_1]; exact ite_eq_left hb
 
 /-- Conservation law: `ncRec b * 2^(maxBits-b) + kraftSumFrom b = kraftSumFrom 0`.
     The nextCodes recurrence preserves the total Kraft sum. -/

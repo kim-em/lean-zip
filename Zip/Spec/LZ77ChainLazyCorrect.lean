@@ -342,7 +342,7 @@ private theorem rollDefer_eq (data : ByteArray) (windowSize hashSize maxChain in
     acc ++ (lz77ChainLazy.rollDefer data windowSize hashSize maxChain useH3 hashTable prev h3tab mp pLen pMatchPos step insertCap goodMatch niceLen lazyDepth lazy2Steps).toArray := by
   unfold lz77ChainLazyIter.rollDefer lz77ChainLazy.rollDefer
   by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch
-  · rw [dif_pos hcan, dif_pos hcan]
+  · rw [dite_eq_left hcan, dite_eq_left hcan]
     simp (config := { maxSteps := 4000000 }) only [chainWalkGuardedPacked_mod', chainWalkGuardedPacked_div', min258_le_511,
       Nat.zero_le, updateHashesGuarded_eq]
     split
@@ -350,7 +350,7 @@ private theorem rollDefer_eq (data : ByteArray) (windowSize hashSize maxChain in
       rw [rollDefer_eq, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
     · -- no improvement: commit reference(pLen) at mp, then mainLoop at mp+pLen
       rw [mainLoop_eq_chainLazy, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
-  · rw [dif_neg hcan, dif_neg hcan]
+  · rw [dite_eq_right hcan, dite_eq_right hcan]
     simp only [updateHashesGuarded_eq]
     rw [mainLoop_eq_chainLazy, List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
 termination_by 2 * (data.size - mp) + 1
@@ -360,7 +360,7 @@ decreasing_by all_goals omega
     one — identical branch structure, push vs. cons at each emission (two pushes
     in the lookahead arm). Generalized to *all* `lazy2Steps` (rung 3 of #2837):
     the live rolling dispatch (`if 1 < lazy2Steps`) is threaded through the
-    walk-decode via the mutual `rollDefer_eq`, no `dif_neg hstep` pruning.
+    walk-decode via the mutual `rollDefer_eq`, no `dite_eq_right hstep` pruning.
 
     Rung 3 discoveries (the rung-2 obstruction was a `split` blow-up, not a
     genuine decode divergence):

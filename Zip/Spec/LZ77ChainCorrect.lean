@@ -30,7 +30,7 @@ theorem chainWalk_spec (data : ByteArray) (prev : Array Nat)
   induction fuel generalizing cand bestLen bestPos with
   | zero => rw [lz77Chain.chainWalk]; exact hb
   | succ k ih =>
-    rw [lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0))]
+    rw [lz77Chain.chainWalk, ite_eq_right (by omega : ¬ (k + 1 = 0))]
     split
     · rename_i hc
       have hcand : cand + maxLen ≤ data.size := by omega
@@ -61,15 +61,15 @@ theorem chainWalk_one (data : ByteArray) (prev : Array Nat)
         let ml := lz77Greedy.countMatch data cand pos maxLen (by omega) hpm
         if ml = 0 then (0, 0) else (ml, cand)
       else (0, 0) := by
-  rw [lz77Chain.chainWalk, if_neg (by omega : ¬(1 = 0))]
+  rw [lz77Chain.chainWalk, ite_eq_right (by omega : ¬(1 = 0))]
   by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
-  · rw [dif_pos hc, dif_pos hc]
+  · rw [dite_eq_left hc, dite_eq_left hc]
     let ml := lz77Greedy.countMatch data cand pos maxLen (by omega) hpm
     by_cases hz : ml = 0
     · simp [ml, hz, lz77Chain.chainWalk]
     · have hp : ml > 0 := Nat.pos_of_ne_zero hz
       simp [ml, hp, hz, lz77Chain.chainWalk]
-  · rw [dif_neg hc, dif_neg hc]
+  · rw [dite_eq_right hc, dite_eq_right hc]
 
 /-- The hash3-singleton probe's decoded seed is a real in-window match (or
     empty): exactly the initial-accumulator hypothesis `chainWalk_spec` takes at
@@ -154,10 +154,10 @@ theorem chainWalk_fst_mono (data : ByteArray) (prev : Array Nat)
   induction fuel generalizing cand bestLen bestPos with
   | zero => rw [lz77Chain.chainWalk]; simp only [↓reduceIte, Nat.le_refl]
   | succ k ih =>
-    rw [lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0))]
+    rw [lz77Chain.chainWalk, ite_eq_right (by omega : ¬ (k + 1 = 0))]
     by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
     · have hcand : cand + maxLen ≤ data.size := by omega
-      simp only [dif_pos hc, Nat.add_sub_cancel]
+      simp only [dite_eq_left hc, Nat.add_sub_cancel]
       by_cases hml : lz77Greedy.countMatch data cand pos maxLen hcand hpm > bestLen
       · simp only [hml, ↓reduceIte]
         split
@@ -167,7 +167,7 @@ theorem chainWalk_fst_mono (data : ByteArray) (prev : Array Nat)
         split
         · exact Nat.le_refl _
         · exact ih (prev[cand &&& 0x7FFF]!) _ _
-    · simp only [dif_neg hc]
+    · simp only [dite_eq_right hc]
       exact Nat.le_refl _
 
 /-- Seeding the best length with `m` (below the walk's own cutoff) is
@@ -190,11 +190,11 @@ theorem chainWalk_seed (data : ByteArray) (prev : Array Nat)
     simp only [↓reduceIte]
     exact ⟨fun h => absurd h (Nat.not_lt.mpr hbm), fun _ => trivial⟩
   | succ k ih =>
-    rw [lz77Chain.chainWalk, lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0)),
-      if_neg (by omega : ¬ (k + 1 = 0))]
+    rw [lz77Chain.chainWalk, lz77Chain.chainWalk, ite_eq_right (by omega : ¬ (k + 1 = 0)),
+      ite_eq_right (by omega : ¬ (k + 1 = 0))]
     by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
     · have hcand : cand + maxLen ≤ data.size := by omega
-      simp only [dif_pos hc, Nat.add_sub_cancel]
+      simp only [dite_eq_left hc, Nat.add_sub_cancel]
       by_cases hmlm : lz77Greedy.countMatch data cand pos maxLen hcand hpm > m
       · -- `ml > m ≥ b`: both sides update to `(ml, cand)`, then run in lockstep.
         have hmlb : lz77Greedy.countMatch data cand pos maxLen hcand hpm > b := by omega
@@ -222,7 +222,7 @@ theorem chainWalk_seed (data : ByteArray) (prev : Array Nat)
           have hstopU : ¬ (b ≥ min niceLen maxLen) := by omega
           simp only [hstopU, ↓reduceIte]
           exact ih (prev[cand &&& 0x7FFF]!) b p s hbm
-    · rw [dif_neg hc, dif_neg hc]
+    · rw [dite_eq_right hc, dite_eq_right hc]
       exact ⟨fun h => absurd h (Nat.not_lt.mpr hbm), fun _ => rfl⟩
 
 /-! ## Guarded per-position head insertion (Wave 3 Step 0.2, Wave 5 de-boxing)
@@ -246,7 +246,7 @@ theorem headInsertGuarded_eq (hashTable : Array Nat) (prev : Array Nat) (h pos :
   split
   · rename_i hg
     simp only [getElem!_pos hashTable h hg.1, Array.set!_eq_setIfInBounds,
-      Array.setIfInBounds_def, dif_pos hg.1, dif_pos hg.2]
+      Array.setIfInBounds_def, dite_eq_left hg.1, dite_eq_left hg.2]
   · rfl
 
 /-- The guarded head probe computes exactly the panic-checked read. -/
@@ -263,7 +263,7 @@ theorem guardedSet_eq {α : Type} (a : Array α) (i : Nat) (v : α) :
   unfold guardedSet
   split
   · rename_i hb
-    simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds_def, dif_pos hb]
+    simp only [Array.set!_eq_setIfInBounds, Array.setIfInBounds_def, dite_eq_left hb]
   · rfl
 
 /-- `lz77Chain.mainLoop` produces a valid decomposition from `pos`. Mirrors
@@ -397,12 +397,12 @@ theorem chainWalkFast_eq (data : ByteArray) (prev : Array Nat)
   induction fuel generalizing cand bestLen bestPos with
   | zero => rw [chainWalkFast, lz77Chain.chainWalk]; simp only [↓reduceIte]
   | succ k ih =>
-    rw [chainWalkFast, lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0)),
-      if_neg (by omega : ¬ (k + 1 = 0))]
+    rw [chainWalkFast, lz77Chain.chainWalk, ite_eq_right (by omega : ¬ (k + 1 = 0)),
+      ite_eq_right (by omega : ¬ (k + 1 = 0))]
     by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
-    · simp only [dif_pos hc, Nat.add_sub_cancel, ih]
+    · simp only [dite_eq_left hc, Nat.add_sub_cancel, ih]
       rw [getElem!_pos prev (cand &&& 0x7FFF) (by have := winMask_lt cand; have := Nat.and_le_left (n := cand) (m := 0x7FFF); omega)]
-    · simp only [dif_neg hc]
+    · simp only [dite_eq_right hc]
 
 /-- One runtime guard collapses to the reference walk. -/
 theorem chainWalkGuarded_eq (data : ByteArray) (prev : Array Nat)
@@ -452,18 +452,18 @@ theorem chainWalkPacked_eq (data : ByteArray) (prev : Array Nat)
   induction fuel generalizing cand bestLen bestPos with
   | zero => rw [chainWalkPacked, chainWalkFast]; simp only [↓reduceIte]
   | succ k ih =>
-    rw [chainWalkPacked, chainWalkFast, if_neg (by omega : ¬ (k + 1 = 0)),
-      if_neg (by omega : ¬ (k + 1 = 0))]
+    rw [chainWalkPacked, chainWalkFast, ite_eq_right (by omega : ¬ (k + 1 = 0)),
+      ite_eq_right (by omega : ¬ (k + 1 = 0))]
     by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
     · have hcand : cand + maxLen ≤ data.size := by omega
-      simp only [dif_pos hc, Nat.add_sub_cancel]
+      simp only [dite_eq_left hc, Nat.add_sub_cancel]
       -- The prefilter `skip` only fires when the byte at offset `bestLen`
       -- mismatches; then `countMatch ≤ bestLen` (contrapositive of
       -- `countMatch_matches`), so the un-prefiltered `chainWalkFast` does not
       -- update either and takes the same early-stop / recurse decision on
       -- `bestLen ≥ min niceLen maxLen` — matching the packed skip branch.
       by_cases hbl : bestLen < maxLen
-      · simp only [dif_pos hbl]
+      · simp only [dite_eq_left hbl]
         by_cases hbyte : data[cand + bestLen]'(by omega) = data[pos + bestLen]'(by omega)
         · -- bytes equal → skip = false → the full-compare path
           rw [hbyte]
@@ -486,14 +486,14 @@ theorem chainWalkPacked_eq (data : ByteArray) (prev : Array Nat)
           · simp only [bne_iff_ne.mpr hbyte, ↓reduceIte, Nat.not_lt.mpr hle, hb]
           · simp only [bne_iff_ne.mpr hbyte, ↓reduceIte, Nat.not_lt.mpr hle, hb, ih]
       · -- bestLen ≥ maxLen → skip = false; countMatch ≤ maxLen ≤ bestLen, no update, early stop
-        simp only [dif_neg hbl, Bool.false_eq_true, ↓reduceIte]
+        simp only [dite_eq_right hbl, Bool.false_eq_true, ↓reduceIte]
         have hle : lz77Greedy.countMatch data cand pos maxLen hcand hpm ≤ bestLen :=
           Nat.le_trans (lz77Greedy.countMatch_matches data cand pos maxLen hcand hpm).2
             (Nat.le_of_not_lt hbl)
         have hbmin : min niceLen maxLen ≤ bestLen :=
           Nat.le_trans (Nat.min_le_right _ _) (Nat.le_of_not_lt hbl)
         simp only [Nat.not_lt.mpr hle, ge_iff_le, hbmin, ↓reduceIte]
-    · simp only [dif_neg hc]
+    · simp only [dite_eq_right hc]
 
 /-- One runtime guard collapses the packed walk to the packed image of the
     reference walk. -/
@@ -537,7 +537,7 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
     rw [chainWalkPackedU, chainWalkPacked]
     have h0 : ((0 : Nat).toUSize) = 0 := by
       apply USize.toNat_inj.mp; rw [toUSize_toNat_of_lt (by omega), USize.toNat_zero]
-    rw [if_pos h0, if_pos rfl, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
+    rw [ite_eq_left h0, ite_eq_left rfl, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
   | succ k ih =>
     rw [chainWalkPackedU, chainWalkPacked]
     have hfk : (k + 1 : Nat).toUSize.toNat = k + 1 := toUSize_toNat_of_lt hfuel
@@ -549,9 +549,9 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
       apply USize.toNat_inj.mp
       rw [USize.toNat_sub_of_le _ _ h1le, USize.toNat_one, hfk, toUSize_toNat_of_lt (show k < USize.size by omega)]
       omega
-    rw [if_neg hfne, if_neg (by omega : ¬ (k + 1 = 0))]
+    rw [ite_eq_right hfne, ite_eq_right (by omega : ¬ (k + 1 = 0))]
     by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
-    · rw [dif_pos hc, dif_pos hc]
+    · rw [dite_eq_left hc, dite_eq_left hc]
       have hUS : USize.size = 2 ^ System.Platform.numBits := rfl
       have hcand : cand + maxLen ≤ data.size := by omega
       have hcandlt : cand < USize.size := by omega
@@ -616,7 +616,7 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
           · simp only [hge, ↓reduceIte]; rw [hsub]; exact ih _ _ _ (by omega) hbl hbp
       -- Reduce the shared `skip` prefilter Bool on both sides.
       by_cases hlt : bestLen < maxLen
-      · simp only [dif_pos (show bestLen.toUSize < maxLenU by rw [hcond]; exact hlt), dif_pos hlt,
+      · simp only [dite_eq_left (show bestLen.toUSize < maxLenU by rw [hcond]; exact hlt), dite_eq_left hlt,
           uget_eq_getElem]
         have e1 : (cand.toUSize + bestLen.toUSize).toNat = cand + bestLen := by
           rw [USize.toNat_add, hcU, hblU]; apply Nat.mod_eq_of_lt; omega
@@ -631,11 +631,11 @@ theorem chainWalkPackedU_eq (data : ByteArray) (prev : Array Nat)
           by_cases hge : bestLen ≥ min niceLen maxLen
           · simp only [hge, ↓reduceIte, hblU, hbpU]
           · simp only [hge, ↓reduceIte]; rw [hsub]; exact ih _ _ _ (by omega) hbl hbp
-      · simp only [dif_neg (show ¬ (bestLen.toUSize < maxLenU) by rw [hcond]; exact hlt), dif_neg hlt,
+      · simp only [dite_eq_right (show ¬ (bestLen.toUSize < maxLenU) by rw [hcond]; exact hlt), dite_eq_right hlt,
           Bool.false_eq_true, ↓reduceIte]
         rw [hcmU]
         exact hstep
-    · rw [dif_neg hc, dif_neg hc, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
+    · rw [dite_eq_right hc, dite_eq_right hc, toUSize_toNat_of_lt hbp, toUSize_toNat_of_lt hbl]
 
 /-- Packing a bounded position and length in `USize` agrees with the `Nat`
     spelling when the packed value fits in one machine word. -/
@@ -676,9 +676,9 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
   | _ n ih =>
     rw [chainWalkPackedUU, chainWalkPackedU]
     by_cases hf : fuelU = 0
-    · rw [if_pos hf, if_pos hf]
+    · rw [ite_eq_left hf, ite_eq_left hf]
       exact packMatchU_toNat bestPosU bestLenU data.size hbpdata (by omega) hfit
-    · rw [if_neg hf, if_neg hf]
+    · rw [ite_eq_right hf, ite_eq_right hf]
       have hfuelPos : 0 < fuelU.toNat := by
         rcases Nat.eq_zero_or_pos fuelU.toNat with hz | hp
         · exact absurd (USize.toNat_inj.mp (by rw [hz, USize.toNat_zero])) hf
@@ -710,7 +710,7 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
               hposU, hwindowU]
             exact hc.2
       by_cases hc : candU < posU ∧ posU - candU ≤ windowSizeU
-      · rw [dif_pos hc, dif_pos (hciff.mp hc)]
+      · rw [dite_eq_left hc, dite_eq_left (hciff.mp hc)]
         have hcandNat : candU.toNat + maxLen ≤ data.size := by
           have := hc.1
           rw [USize.lt_iff_toNat_lt, hposU] at this
@@ -760,8 +760,8 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
                 exact hnext (toUSize_toNat_of_lt hnlt)
               rw [chainWalkPackedU]
               by_cases hf' : fuelU - 1 = 0
-              · rw [if_pos hf']
-              · rw [if_neg hf', dif_neg (show ¬ (next < pos ∧ pos - next ≤ windowSize) by omega)]
+              · rw [ite_eq_left hf']
+              · rw [ite_eq_right hf', dite_eq_right (show ¬ (next < pos ∧ pos - next ≤ windowSize) by omega)]
         have hmlLe :
             (countMatchUCore data candU posU maxLenU hsz
               (by rw [hmaxU]; exact hcandNat) hpmU).toNat ≤ maxLen := by
@@ -780,7 +780,7 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
           · simp only [hge, ↓reduceIte, hpack]
           · simp only [hge, ↓reduceIte]
             have hfzero : fuelU - 1 = 0 := by simp [hone]
-            rw [chainWalkPackedU, if_pos hfzero]
+            rw [chainWalkPackedU, ite_eq_left hfzero]
             exact hpack
         -- Once the candidate's round trip is collapsed, both walks have the
         -- same prefilter and match computation; only their continuation differs.
@@ -801,13 +801,13 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
                   exact Nat.lt_trans (by omega) hsz
                 omega)
             else false) = true
-        · rw [if_pos hskip, if_pos hskip, if_pos hskip]
+        · rw [ite_eq_left hskip, ite_eq_left hskip, ite_eq_left hskip]
           by_cases hone : fuelU = 1
-          · rw [if_pos hone]
+          · rw [ite_eq_left hone]
             exact hterminal bestLenU bestPosU hblmax hbpdata hone
-          · rw [if_neg hone]
+          · rw [ite_eq_right hone]
             exact hcont bestLenU bestPosU hblmax hbpdata
-        · rw [if_neg hskip, if_neg hskip, if_neg hskip]
+        · rw [ite_eq_right hskip, ite_eq_right hskip, ite_eq_right hskip]
           by_cases hml : countMatchUCore data candU posU maxLenU hsz
               (by rw [hmaxU]; exact hcandNat) hpmU > bestLenU
           · simp only [hml, ↓reduceIte]
@@ -816,21 +816,21 @@ theorem chainWalkPackedUU_eq (data : ByteArray) (prev : Array Nat)
               rw [hposU] at hcpos
               omega
             by_cases hone : fuelU = 1
-            · rw [if_pos hone]
+            · rw [ite_eq_left hone]
               exact hterminal (countMatchUCore data candU posU maxLenU hsz
                 (by rw [hmaxU]; exact hcandNat) hpmU) candU hmlLe hcandLe hone
-            · rw [if_neg hone]
+            · rw [ite_eq_right hone]
               exact hcont (countMatchUCore data candU posU maxLenU hsz
                 (by rw [hmaxU]; exact hcandNat) hpmU) candU hmlLe hcandLe
           · simp only [hml, ↓reduceIte]
             by_cases hone : fuelU = 1
-            · rw [if_pos hone]
+            · rw [ite_eq_left hone]
               exact hterminal bestLenU bestPosU hblmax hbpdata hone
-            · rw [if_neg hone]
+            · rw [ite_eq_right hone]
               exact hcont bestLenU bestPosU hblmax hbpdata
       · have hcNat : ¬(candU.toNat < pos ∧ pos - candU.toNat ≤ windowSize) :=
           fun h => hc (hciff.mpr h)
-        simp only [dif_neg hc, dif_neg hcNat]
+        simp only [dite_eq_right hc, dite_eq_right hcNat]
         exact packMatchU_toNat bestPosU bestLenU data.size hbpdata (by omega) hfit
 
 set_option maxHeartbeats 1000000 in
@@ -928,7 +928,7 @@ theorem chainWalkPackedUUChecked_toNat (data : ByteArray) (prev : Array Nat)
   have hold : data.size.toUSize.toNat = data.size ∧ fuel.toUSize.toNat = fuel ∧
       (0 : Nat).toUSize.toNat = 0 ∧ (0 : Nat).toUSize.toNat = 0 :=
     ⟨hg.2.1, hg.2.2.2.2.1, rfl, rfl⟩
-  rw [dif_pos hg.1, dif_pos hold]
+  rw [dite_eq_left hg.1, dite_eq_left hold]
   split
   · rw [chainWalkPackedUBelow_eq]
     simpa only [hg.2.2.2.1, show ((0 : Nat).toUSize) = 0 from rfl] using heq
@@ -1003,11 +1003,11 @@ theorem chainWalkGuardedPackedU_one_mod (data : ByteArray) (prev : Array Nat)
     chainWalkGuardedPacked_mod data prev windowSize pos maxLen niceLen hpm cand 1 hml,
     chainWalk_one]
   by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
-  · simp only [dif_pos hc]
+  · simp only [dite_eq_left hc]
     by_cases hz : lz77Greedy.countMatch data cand pos maxLen (by omega) hpm = 0
-    · simp only [hz, if_pos]
+    · simp only [hz, ite_eq_left]
     · simp [hz]
-  · simp only [dif_neg hc]
+  · simp only [dite_eq_right hc]
 
 /-- If the depth-one walk found an encodable match, its decoded position is
     exactly the candidate bucket head. -/
@@ -1025,12 +1025,12 @@ theorem chainWalkGuardedPackedU_one_div_of_ge_three (data : ByteArray)
   rw [chainWalkGuardedPackedU_one_mod data prev windowSize pos maxLen niceLen
     hpm cand hml] at hge
   by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
-  · simp only [dif_pos hc] at hge ⊢
+  · simp only [dite_eq_left hc] at hge ⊢
     by_cases hz : lz77Greedy.countMatch data cand pos maxLen (by omega) hpm = 0
     · simp only [hz] at hge
       omega
     · simp [hz]
-  · simp only [dif_neg hc] at hge ⊢
+  · simp only [dite_eq_right hc] at hge ⊢
     omega
 
 /-- Every matcher call site clamps `maxLen` to `min 258 _`; this discharges
@@ -1049,7 +1049,7 @@ theorem chainWalk_fst_le' (data : ByteArray) (prev : Array Nat)
   induction fuel generalizing cand bestLen bestPos hbl with
   | zero => rw [lz77Chain.chainWalk]; exact hbl
   | succ k ih =>
-    rw [lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0))]
+    rw [lz77Chain.chainWalk, ite_eq_right (by omega : ¬ (k + 1 = 0))]
     split
     · rename_i hc
       have hcand : cand + maxLen ≤ data.size := by omega
@@ -1124,22 +1124,22 @@ theorem updateHashesFast_eq (data : ByteArray) (hashSize : Nat)
   | _ n ih =>
     unfold updateHashesFast lz77Chain.updateHashes
     by_cases hcond : j < matchLen ∧ j ≤ insertCap
-    · rw [if_pos hcond, if_pos hcond]
+    · rw [ite_eq_left hcond, ite_eq_left hcond]
       by_cases hd : pos + j + 2 < data.size
-      · rw [dif_pos hd, dif_pos hd]
+      · rw [dite_eq_left hd, dite_eq_left hd]
         have hb : lz77Greedy.hash3 data (pos + j) hashSize hd < hashTable.size := by
           have : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
           omega
         simp only [getElem!_pos hashTable (lz77Greedy.hash3 data (pos + j) hashSize hd) hb]
         exact ih _ (by omega) _ _ _
           (by simpa only [Array.set!_eq_setIfInBounds, Array.size_setIfInBounds] using hht) rfl
-      · rw [dif_neg hd, dif_neg hd]
+      · rw [dite_eq_right hd, dite_eq_right hd]
         exact ih _ (by omega) _ _ _ hht rfl
-    · rw [if_neg hcond, if_neg hcond]
+    · rw [ite_eq_right hcond, ite_eq_right hcond]
 
 /-- The `uset`-write insertion walk (`updateHashesFastU`) is the proven-bounds
     `set!` walk: identical control flow, with the two writes' in-bounds `set`
-    collapsing to `set!` (`Array.set!_eq_setIfInBounds` + `dif_pos`) at each step. -/
+    collapsing to `set!` (`Array.set!_eq_setIfInBounds` + `dite_eq_left`) at each step. -/
 theorem updateHashesFastU_eq (data : ByteArray) (hashSize : Nat)
     (hashTable : Array Nat) (prev : Array Nat) (pos j matchLen insertCap : Nat)
     (hhs : 0 < hashSize) (hht : hashSize ≤ hashTable.size)
@@ -1150,9 +1150,9 @@ theorem updateHashesFastU_eq (data : ByteArray) (hashSize : Nat)
   | _ n ih =>
     unfold updateHashesFastU updateHashesFast
     by_cases hcond : j < matchLen ∧ j ≤ insertCap
-    · rw [if_pos hcond, if_pos hcond]
+    · rw [ite_eq_left hcond, ite_eq_left hcond]
       by_cases hd : pos + j + 2 < data.size
-      · rw [dif_pos hd, dif_pos hd]
+      · rw [dite_eq_left hd, dite_eq_left hd]
         have hb : lz77Greedy.hash3 data (pos + j) hashSize hd < hashTable.size := by
           have : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
           omega
@@ -1162,18 +1162,18 @@ theorem updateHashesFastU_eq (data : ByteArray) (hashSize : Nat)
           simp only [chainWinSize] at h1 hpv; omega
         have e1 : hashTable.set (lz77Greedy.hash3 data (pos + j) hashSize hd) (pos + j) hb
             = hashTable.set! (lz77Greedy.hash3 data (pos + j) hashSize hd) (pos + j) := by
-          rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos hb]
+          rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dite_eq_left hb]
         have e2 : prev.set ((pos + j) &&& 0x7FFF)
               (hashTable[lz77Greedy.hash3 data (pos + j) hashSize hd]'hb) hmask
             = prev.set! ((pos + j) &&& 0x7FFF)
               (hashTable[lz77Greedy.hash3 data (pos + j) hashSize hd]'hb) := by
-          rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos hmask]
+          rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dite_eq_left hmask]
         simp only [e1, e2]
         exact ih _ (by omega) _ _ _ (by rw [Array.size_set!]; exact hht)
           (by rw [Array.size_set!]; exact hpv) rfl
-      · rw [dif_neg hd, dif_neg hd]
+      · rw [dite_eq_right hd, dite_eq_right hd]
         exact ih _ (by omega) _ _ _ hht hpv rfl
-    · rw [if_neg hcond, if_neg hcond]
+    · rw [ite_eq_right hcond, ite_eq_right hcond]
 
 /-- One runtime guard collapses to the reference insertion. -/
 theorem updateHashesGuarded_eq (data : ByteArray) (hashSize : Nat)

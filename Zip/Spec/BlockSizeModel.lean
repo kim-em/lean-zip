@@ -80,9 +80,9 @@ theorem flush_size (bw : BitWriter) (hwf : bw.wf) :
   by_cases hbc0 : bw.bitCount.toNat % 8 = 0
   · have hcond : ¬((bw.bitCount.toNat % 8).toUInt8 > 0) := by
       rw [gt_iff_lt, UInt8.lt_iff_toNat_lt, hb8, hz]; omega
-    rw [if_neg hcond, hfb]; omega
+    rw [ite_eq_right hcond, hfb]; omega
   · have hcond : (bw.bitCount.toNat % 8).toUInt8 > 0 := by
       rw [gt_iff_lt, UInt8.lt_iff_toNat_lt, hb8, hz]; omega
-    rw [if_pos hcond, ByteArray.size_push, hfb]; omega
+    rw [ite_eq_left hcond, ByteArray.size_push, hfb]; omega
 
 end Zip.Native.BitWriter

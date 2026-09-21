@@ -2540,9 +2540,9 @@ theorem chooseSplitsHeuristicP.go_toArray (toks : TokenArray)
         funext p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT qb qr qc
         exact ih (i + 1) (by omega) p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT
           q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT qb qr qc
-      rw [dif_pos hi, dif_pos hi', TokenArray.get_toArray toks i hi, hstep]
+      rw [dite_eq_left hi, dite_eq_left hi', TokenArray.get_toArray toks i hi, hstep]
     · have hi' : ¬ i < toks.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_neg hi, dif_neg hi']
+      rw [dite_eq_right hi, dite_eq_right hi']
 
 /-- **Entry-point cut-list equality.** The packed split heuristic returns exactly
     the cut list the `Array UInt32` reference produces over the boxed view — the
@@ -2554,8 +2554,8 @@ theorem chooseSplitsHeuristicP_toArray (toks : TokenArray) (totalBytes : Nat)
       = chooseSplitsHeuristicPArray toks.toArray totalBytes minBlockBytes softMaxBlockBytes checkTokens := by
   unfold chooseSplitsHeuristicP chooseSplitsHeuristicPArray
   by_cases hsmall : totalBytes < 2 * minBlockBytes
-  · simp only [hsmall, if_true]
-  · simp only [hsmall, if_false]
+  · simp only [hsmall, ite_true]
+  · simp only [hsmall, ite_false]
     rw [chooseSplitsHeuristicP.go_toArray toks minBlockBytes softMaxBlockBytes checkTokens
       (toks.size + 1) 0 (by omega)]
 
@@ -3053,8 +3053,8 @@ private theorem sharedPartitionSizedP_toArray_fuel (toks : TokenArray) :
     simp only [tokenFreqsPTA_toArray, TokenArray.extract_toArray, TokenArray.size_toArray]
     by_cases hend : min (max (cuts.headD toks.toArray.size) (pos + 1)) toks.toArray.size
         ≥ toks.toArray.size
-    · rw [if_pos hend, if_pos hend]
-    · rw [if_neg hend, if_neg hend,
+    · rw [ite_eq_left hend, ite_eq_left hend]
+    · rw [ite_eq_right hend, ite_eq_right hend,
         ih (min (max (cuts.headD toks.toArray.size) (pos + 1)) toks.toArray.size) (by
           simp only [TokenArray.size_toArray] at hf ⊢; omega) cuts.tail]
 
@@ -3471,7 +3471,7 @@ theorem deflateRawBaseFU64Greedy_eq (data : ByteArray) (level : UInt8)
     (hlevel : level ≠ 1) :
     deflateRawBaseFU64Greedy data level = deflateRawBaseFLevel1Impl data level := by
   unfold deflateRawBaseFU64Greedy deflateRawBaseFNU64 deflateRawBaseFLevel1Impl
-  rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+  rw [ite_eq_right (by simpa only [beq_iff_eq] using hlevel)]
   rw [lz77ChainIterPMergedFNU64_eq, lz77ChainIterPMergedFNU_eq]
 
 /-- The reference greedy-tier (levels 1–4) base candidate computed from **one
@@ -3507,10 +3507,10 @@ theorem deflateRawBaseF_eq (data : ByteArray) (level : UInt8) (h : ¬ (5 ≤ lev
     simp only [show ¬ (5 : UInt8) ≤ 1 by decide,
       show (1 : UInt8) ≤ 1 by decide, show (1 : UInt8) ≤ 4 by decide,
       show ¬((1 : UInt8) == 7) = true by decide, Bool.false_eq_true, ↓reduceIte]
-  · rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+  · rw [ite_eq_right (by simpa only [beq_iff_eq] using hlevel)]
     rw [deflateRawBaseFU64Greedy_eq data level hlevel]
     unfold deflateRawBaseFLevel1Impl
-    rw [if_neg (by simpa only [beq_iff_eq] using hlevel)]
+    rw [ite_eq_right (by simpa only [beq_iff_eq] using hlevel)]
     simp only [lz77ChainIterPMergedF_eq]
     rw [← tokenFreqsPTA_toArray]
     rw [deflateRawBasePF_tokenFreqsP]

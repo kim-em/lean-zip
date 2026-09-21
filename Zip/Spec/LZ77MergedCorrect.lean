@@ -72,7 +72,7 @@ private theorem set!_append_right' {α : Type} (a b : Array α) (s i : Nat) (v :
 /-- Proven-bounds `set` is the panic-checked `set!` in bounds. -/
 private theorem set_eq_set! {α : Type} (a : Array α) (i : Nat) (v : α) (h : i < a.size) :
     a.set i v h = a.set! i v := by
-  rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos h]
+  rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dite_eq_left h]
 
 /-! ## Chain walk is invariant under the appended hash table -/
 
@@ -88,16 +88,16 @@ private theorem chainWalk_append (data : ByteArray) (prev hashTable : Array Nat)
   induction fuel generalizing cand bestLen bestPos with
   | zero => rw [lz77Chain.chainWalk, lz77Chain.chainWalk]; simp only [↓reduceIte]
   | succ k ih =>
-    rw [lz77Chain.chainWalk, lz77Chain.chainWalk, if_neg (by omega : ¬ (k + 1 = 0)),
-      if_neg (by omega : ¬ (k + 1 = 0))]
+    rw [lz77Chain.chainWalk, lz77Chain.chainWalk, ite_eq_right (by omega : ¬ (k + 1 = 0)),
+      ite_eq_right (by omega : ¬ (k + 1 = 0))]
     by_cases hc : cand < pos ∧ pos - cand ≤ windowSize
     · have hmask : (cand &&& 0x7FFF) < prev.size := by
         have h1 := winMask_lt cand
         have h2 := Nat.and_le_left (n := cand) (m := 0x7FFF)
         simp only [chainWinSize] at h1 hpv; omega
-      simp only [dif_pos hc, Nat.add_sub_cancel, ih]
+      simp only [dite_eq_left hc, Nat.add_sub_cancel, ih]
       rw [getElem!_append_left prev hashTable (cand &&& 0x7FFF) hmask]
-    · simp only [dif_neg hc]
+    · simp only [dite_eq_right hc]
 
 /-- Lifted to the guarded packed `USize` walk the matcher actually calls. -/
 private theorem chainWalkGuardedPackedU_append (data : ByteArray) (prev hashTable : Array Nat)
@@ -126,9 +126,9 @@ private theorem updateHashesMerged_append (data : ByteArray) (hashSize prevSize 
   | _ n ih =>
     rw [updateHashesMerged, lz77Chain.updateHashes]
     by_cases hcond : j < matchLen ∧ j ≤ insertCap
-    · rw [if_pos hcond, if_pos hcond]
+    · rw [ite_eq_left hcond, ite_eq_left hcond]
       by_cases hd : pos + j + 2 < data.size
-      · rw [dif_pos hd, dif_pos hd]
+      · rw [dite_eq_left hd, dite_eq_left hd]
         have hb : lz77Greedy.hash3 data (pos + j) hashSize hd < hashTable.size := by
           have : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
           omega
@@ -143,9 +143,9 @@ private theorem updateHashesMerged_append (data : ByteArray) (hashSize prevSize 
             ((pos + j) &&& 0x7FFF) (hashTable[lz77Greedy.hash3 data (pos + j) hashSize hd]!) hmask]
         exact ih _ (by omega) _ _ _ (by rw [Array.size_set!]; exact hht)
           (by rw [Array.size_set!]; exact hps) (by rw [Array.size_set!]; exact hpv) rfl
-      · rw [dif_neg hd, dif_neg hd]
+      · rw [dite_eq_right hd, dite_eq_right hd]
         exact ih _ (by omega) _ _ _ hht hps hpv rfl
-    · rw [if_neg hcond, if_neg hcond]
+    · rw [ite_eq_right hcond, ite_eq_right hcond]
 
 /-- `lz77Chain.updateHashes` preserves the hash-table size (`.1`). -/
 private theorem updateHashes_size1 (data : ByteArray) (hashSize : Nat)
@@ -155,11 +155,11 @@ private theorem updateHashes_size1 (data : ByteArray) (hashSize : Nat)
   | _ n ih =>
     rw [lz77Chain.updateHashes]
     by_cases hcond : j < matchLen ∧ j ≤ insertCap
-    · rw [if_pos hcond]
+    · rw [ite_eq_left hcond]
       by_cases hd : pos + j + 2 < data.size
-      · rw [dif_pos hd, ih _ (by omega) _ _ _ rfl, Array.size_set!]
-      · rw [dif_neg hd, ih _ (by omega) _ _ _ rfl]
-    · rw [if_neg hcond]
+      · rw [dite_eq_left hd, ih _ (by omega) _ _ _ rfl, Array.size_set!]
+      · rw [dite_eq_right hd, ih _ (by omega) _ _ _ rfl]
+    · rw [ite_eq_right hcond]
 
 /-- `lz77Chain.updateHashes` preserves the `prev`-ring size (`.2`). -/
 private theorem updateHashes_size2 (data : ByteArray) (hashSize : Nat)
@@ -169,11 +169,11 @@ private theorem updateHashes_size2 (data : ByteArray) (hashSize : Nat)
   | _ n ih =>
     rw [lz77Chain.updateHashes]
     by_cases hcond : j < matchLen ∧ j ≤ insertCap
-    · rw [if_pos hcond]
+    · rw [ite_eq_left hcond]
       by_cases hd : pos + j + 2 < data.size
-      · rw [dif_pos hd, ih _ (by omega) _ _ _ rfl, Array.size_set!]
-      · rw [dif_neg hd, ih _ (by omega) _ _ _ rfl]
-    · rw [if_neg hcond]
+      · rw [dite_eq_left hd, ih _ (by omega) _ _ _ rfl, Array.size_set!]
+      · rw [dite_eq_right hd, ih _ (by omega) _ _ _ rfl]
+    · rw [ite_eq_right hcond]
 
 /-- The proven-bounds merged walk equals the runtime-guarded one: identical
     control flow, each `set`/`getElem` collapsing to `set!`/`[]!` in bounds. -/
@@ -187,9 +187,9 @@ private theorem updateHashesMergedFast_eq (data : ByteArray) (hashSize prevSize 
   | _ n ih =>
     rw [updateHashesMergedFast, updateHashesMerged]
     by_cases hcond : j < matchLen ∧ j ≤ insertCap
-    · rw [if_pos hcond, if_pos hcond]
+    · rw [ite_eq_left hcond, ite_eq_left hcond]
       by_cases hd : pos + j + 2 < data.size
-      · rw [dif_pos hd, dif_pos hd]
+      · rw [dite_eq_left hd, dite_eq_left hd]
         have hb : prevSize + lz77Greedy.hash3 data (pos + j) hashSize hd < c.size := by
           have : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
           omega
@@ -201,9 +201,9 @@ private theorem updateHashesMergedFast_eq (data : ByteArray) (hashSize prevSize 
             c[prevSize + lz77Greedy.hash3 data (pos + j) hashSize hd]! := (getElem!_pos c _ hb).symm
         simp only [headProbeGuarded_eq, guardedSet_eq, ehead, set_eq_set!]
         exact ih _ (by omega) _ _ (by rw [Array.size_set!, Array.size_set!]; exact hph) rfl
-      · rw [dif_neg hd, dif_neg hd]
+      · rw [dite_eq_right hd, dite_eq_right hd]
         exact ih _ (by omega) _ _ hph rfl
-    · rw [if_neg hcond, if_neg hcond]
+    · rw [ite_eq_right hcond, ite_eq_right hcond]
 
 /-! ## The de-boxed `USize` insertion walk -/
 
@@ -232,9 +232,9 @@ private theorem hash3U_toNat (data : ByteArray) (p hashSize : Nat) (pU hashSizeU
         = ((w * 0x1E35A7BD) >>> 16).toNat % hashSize := by
     intro w; rw [USize.toNat_mod, UInt32.toNat_toUSize, hhsU]
   by_cases h4 : p + 4 ≤ data.size
-  · rw [dif_pos h4, dif_pos h4, dif_pos (toUSize_toNat_of_lt hsz)]
+  · rw [dite_eq_left h4, dite_eq_left h4, dite_eq_left (toUSize_toNat_of_lt hsz)]
     exact tail _
-  · rw [dif_neg h4, dif_neg h4]
+  · rw [dite_eq_right h4, dite_eq_right h4]
     exact tail _
 
 /-- The de-boxed `USize` merged walk equals the reference merged walk: identical
@@ -260,7 +260,7 @@ private theorem updateHashesMergedFastU_eq (data : ByteArray) (hashSize prevSize
     have hcond : (jU < matchLenU ∧ jU ≤ capU) ↔ (j < matchLen ∧ j ≤ insertCap) := by
       rw [USize.lt_iff_toNat_lt, USize.le_iff_toNat_le, hjU, hmlU, hcapU]
     by_cases hc : j < matchLen ∧ j ≤ insertCap
-    · rw [if_pos (hcond.mpr hc), if_pos hc]
+    · rw [ite_eq_left (hcond.mpr hc), ite_eq_left hc]
       have hmllt := USize.toNat_lt_two_pow_numBits matchLenU
       have hj1 : (jU + 1).toNat = j + 1 := by
         rw [USize.toNat_add, USize.toNat_one, hjU]
@@ -268,7 +268,7 @@ private theorem updateHashesMergedFastU_eq (data : ByteArray) (hashSize prevSize
       have hdata : (jU < rem2U) ↔ (pos + j + 2 < data.size) := by
         rw [USize.lt_iff_toNat_lt, hjU, hrem2U]; omega
       by_cases hd : pos + j + 2 < data.size
-      · rw [dif_pos (hdata.mpr hd), dif_pos hd]
+      · rw [dite_eq_left (hdata.mpr hd), dite_eq_left hd]
         have e1 : (posU + jU).toNat = pos + j := by
           rw [USize.toNat_add, hposU, hjU]; exact Nat.mod_eq_of_lt (by omega)
         have hb3 : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
@@ -294,9 +294,9 @@ private theorem updateHashesMergedFastU_eq (data : ByteArray) (hashSize prevSize
         simp only [e1]
         exact ih _ (by omega) _ _
           (by rw [Array.size_set!, Array.size_set!]; exact hph) _ hj1 rfl
-      · rw [dif_neg (fun hx => hd (hdata.mp hx)), dif_neg hd]
+      · rw [dite_eq_right (fun hx => hd (hdata.mp hx)), dite_eq_right hd]
         exact ih _ (by omega) _ _ hph _ hj1 rfl
-    · rw [if_neg (fun hx => hc (hcond.mp hx)), if_neg hc]
+    · rw [ite_eq_right (fun hx => hc (hcond.mp hx)), ite_eq_right hc]
 
 /-- `hash3Single` congruence in the position (the bounds proof transports). -/
 private theorem hash3Single_congr (data : ByteArray) {p q : Nat} (e : p = q)
@@ -322,9 +322,9 @@ private theorem hash3SingleU_toNat (data : ByteArray) (p : Nat) (pU : USize)
         = (((w &&& 0xFFFFFF) * 2654435761) >>> 17).toNat := by
     intro w; rw [UInt32.toNat_toUSize]
   by_cases h4 : p + 4 ≤ data.size
-  · rw [dif_pos h4, dif_pos h4, dif_pos (toUSize_toNat_of_lt hsz)]
+  · rw [dite_eq_left h4, dite_eq_left h4, dite_eq_left (toUSize_toNat_of_lt hsz)]
     exact tail _
-  · rw [dif_neg h4, dif_neg h4]
+  · rw [dite_eq_right h4, dite_eq_right h4]
     exact tail _
 
 /-- The fused de-boxed walk computes exactly the pair of reference walks: `.1`
@@ -352,7 +352,7 @@ private theorem updateHashesMergedH3FastU_eq (data : ByteArray) (hashSize prevSi
     have hcond : (jU < matchLenU ∧ jU ≤ capU) ↔ (j < matchLen ∧ j ≤ insertCap) := by
       rw [USize.lt_iff_toNat_lt, USize.le_iff_toNat_le, hjU, hmlU, hcapU]
     by_cases hc : j < matchLen ∧ j ≤ insertCap
-    · rw [if_pos (hcond.mpr hc), if_pos hc, if_pos hc]
+    · rw [ite_eq_left (hcond.mpr hc), ite_eq_left hc, ite_eq_left hc]
       have hmllt := USize.toNat_lt_two_pow_numBits matchLenU
       have hj1 : (jU + 1).toNat = j + 1 := by
         rw [USize.toNat_add, USize.toNat_one, hjU]
@@ -360,7 +360,7 @@ private theorem updateHashesMergedH3FastU_eq (data : ByteArray) (hashSize prevSi
       have hdata : (jU < rem2U) ↔ (pos + j + 2 < data.size) := by
         rw [USize.lt_iff_toNat_lt, hjU, hrem2U]; omega
       by_cases hd : pos + j + 2 < data.size
-      · rw [dif_pos (hdata.mpr hd), dif_pos hd, dif_pos hd]
+      · rw [dite_eq_left (hdata.mpr hd), dite_eq_left hd, dite_eq_left hd]
         have e1 : (posU + jU).toNat = pos + j := by
           rw [USize.toNat_add, hposU, hjU]; exact Nat.mod_eq_of_lt (by omega)
         have hb3 : lz77Greedy.hash3 data (pos + j) hashSize hd < hashSize := Nat.mod_lt _ hhs
@@ -388,9 +388,9 @@ private theorem updateHashesMergedH3FastU_eq (data : ByteArray) (hashSize prevSi
         exact ih _ (by omega) _ _ _
           (by rw [Array.size_set!, Array.size_set!]; exact hph)
           (by rw [Array.size_set!]; exact hh3) _ hj1 rfl
-      · rw [dif_neg (fun hx => hd (hdata.mp hx)), dif_neg hd, dif_neg hd]
+      · rw [dite_eq_right (fun hx => hd (hdata.mp hx)), dite_eq_right hd, dite_eq_right hd]
         exact ih _ (by omega) _ _ _ hph hh3 _ hj1 rfl
-    · rw [if_neg (fun hx => hc (hcond.mp hx)), if_neg hc, if_neg hc]
+    · rw [ite_eq_right (fun hx => hc (hcond.mp hx)), ite_eq_right hc, ite_eq_right hc]
 
 /-- The guarded merged walk equals the reference merged walk (the de-boxed
     `USize` branch via `updateHashesMergedFastU_eq`, the proven-bounds `Nat`
@@ -429,7 +429,7 @@ private theorem updateHashesMergedH3Guarded_eq (useH3 : Bool) (data : ByteArray)
        if useH3 then updateHash3 data h3tab pos j matchLen insertCap else h3tab) := by
   unfold updateHashesMergedH3Guarded
   by_cases hu3 : useH3
-  · rw [if_pos hu3, if_pos hu3]
+  · rw [ite_eq_left hu3, ite_eq_left hu3]
     split
     · rename_i hg
       split
@@ -446,7 +446,7 @@ private theorem updateHashesMergedH3Guarded_eq (useH3 : Bool) (data : ByteArray)
       · rw [updateHashesMergedFast_eq data hashSize prevSize c pos j matchLen insertCap
           hg.1 hg.2.1 hg.2.2.1]
     · rfl
-  · rw [if_neg hu3, if_neg hu3, updateHashesMergedGuarded_eq]
+  · rw [ite_eq_right hu3, ite_eq_right hu3, updateHashesMergedGuarded_eq]
 
 /-! ## Seeded lookahead probe: byte-identity bridge -/
 
@@ -485,7 +485,7 @@ private theorem seeded_probe_bridge (data : ByteArray) (prev : Array Nat)
            (base - chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel
              (if len1 < min niceLen maxLen then len1 else 0) 0 / 512) = false) := by
   by_cases hc1 : len1 < min niceLen maxLen
-  · rw [if_pos hc1]
+  · rw [ite_eq_left hc1]
     obtain ⟨hEq, hLe⟩ := chainWalkGuardedPackedU_seed data prev windowSize pos1 maxLen niceLen hpm hml511 len1 hc1 cand fuel
     by_cases hgt : len1 < chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel 0 0 % 512
     · rw [hEq hgt]; exact ⟨rfl, Or.inl rfl⟩
@@ -497,7 +497,7 @@ private theorem seeded_probe_bridge (data : ByteArray) (prev : Array Nat)
           (base - chainWalkGuardedPackedU data prev windowSize pos1 maxLen niceLen hpm cand fuel 0 0 / 512) = false :=
         lazyAcceptCost_of_le (Nat.le_of_not_lt hgt)
       exact ⟨by rw [hfL, hfR], Or.inr hfL⟩
-  · rw [if_neg hc1]; exact ⟨rfl, Or.inl rfl⟩
+  · rw [ite_eq_right hc1]; exact ⟨rfl, Or.inl rfl⟩
 
 /-! ## The lockstep loop equality -/
 
@@ -527,7 +527,7 @@ private theorem mergedLoop_eq (data : ByteArray)
       -- (`pLen ≠ 0`) equals the packed `rollDefer`, by a nested strong induction on
       -- `data.size - mp`; its commit into `mainLoop` at `mp + pLen` reuses the OUTER
       -- `ih` (`pos < mp ⇒ data.size-(mp+pLen) < n`). The fused loop's top `pLen = 0`
-      -- dispatch is stripped by `dif_neg hpl`, exposing the rolling-mode body (the old
+      -- dispatch is stripped by `dite_eq_right hpl`, exposing the rolling-mode body (the old
       -- `rollDefer` body verbatim), so the seed-bridge `rw`s stay motive-correct.
       have rdeq : ∀ (mp pLen pMatchPos step : Nat) (accd : TokenArray) (htd prevd h3td : Array Nat)
           (hhtd : htd.size = hashSize) (hpsd : prevd.size = prevSize)
@@ -540,7 +540,7 @@ private theorem mergedLoop_eq (data : ByteArray)
         induction hnm : data.size - mp using Nat.strongRecOn generalizing mp pLen pMatchPos step accd htd prevd h3td hhtd hpsd hpvd hlo hpl with
         | _ mnat ihm =>
           unfold lz77LazyMergedLoop
-          rw [dif_neg hpl]
+          rw [dite_eq_right hpl]
           unfold lz77ChainLazyIterP.rollDefer
           by_cases hcan : step < lazy2Steps ∧ mp + 3 < data.size ∧ pLen < goodMatch
           · have hhd : lz77Greedy.hash3 data mp hashSize (by omega) < htd.size := by
@@ -549,7 +549,7 @@ private theorem mergedLoop_eq (data : ByteArray)
               have h1 := winMask_lt mp
               have h2 := Nat.and_le_left (n := mp) (m := 0x7FFF)
               simp only [chainWinSize] at h1 hpvd; omega
-            rw [dif_pos hcan, dif_pos hcan]
+            rw [dite_eq_left hcan, dite_eq_left hcan]
             simp only [headProbeGuarded_eq, guardedSet_eq,
               getElem!_append_right' prevd htd prevSize (lz77Greedy.hash3 data mp hashSize (by omega)) hpsd hhd,
               set!_append_right' prevd htd prevSize (lz77Greedy.hash3 data mp hashSize (by omega)) mp hpsd hhd,
@@ -593,14 +593,14 @@ private theorem mergedLoop_eq (data : ByteArray)
               -- so reduce both ites to `else` without `split` (which would descend into
               -- the seed `if` in the merged bound), then commit via the OUTER ih.
               have huw := hbr.1.symm.trans hfalse
-              simp only [huw, false_and, Bool.false_eq_true, if_false, reduceIte]
+              simp only [huw, false_and, Bool.false_eq_true, ite_false, reduceIte]
               rw [updateHashesMergedH3Guarded_eq,
                 updateHashesMerged_append data hashSize prevSize t'' p'' mp 1 _ insertCap hhs hht'' hps'' hpv'',
                 updateHashesGuarded_eq]
               exact ih _ (by omega) _ _ _ _ _ (by rw [updateHashes_size1]; exact hht'')
                 (by rw [updateHashes_size2]; exact hps'') (by rw [updateHashes_size2]; exact hpv'') rfl
           · -- no more defers: commit `reference pLen`, then `mainLoop` via OUTER ih
-            rw [dif_neg hcan, dif_neg hcan]
+            rw [dite_eq_right hcan, dite_eq_right hcan]
             rw [updateHashesMergedH3Guarded_eq,
               updateHashesMerged_append data hashSize prevSize htd prevd (mp - 1) 1 _ insertCap hhs hhtd hpsd hpvd,
               updateHashesGuarded_eq]

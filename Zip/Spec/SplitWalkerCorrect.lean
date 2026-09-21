@@ -78,7 +78,7 @@ theorem chooseSplitsHeuristicP_go_no_remaining (toks : TokenArray)
       n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes remaining cuts hr
     unfold chooseSplitsHeuristicP.go
     by_cases hi : i < toks.size
-    · rw [dif_pos hi]
+    · rw [dite_eq_left hi]
       have hr' :
           remaining - splitTokenBytesP (toks.get i hi) < minBlockBytes :=
         Nat.lt_of_le_of_lt (Nat.sub_le remaining (splitTokenBytesP (toks.get i hi))) hr
@@ -97,7 +97,7 @@ theorem chooseSplitsHeuristicP_go_no_remaining (toks : TokenArray)
       have hnrem :
           ¬ remaining - splitTokenBytesP (toks.get i hi) ≥ minBlockBytes := by omega
       simp [hnrem, hstep]
-    · rw [dif_neg hi]
+    · rw [dite_eq_right hi]
 
 private def splitSum10
     (a0 a1 a2 a3 a4 a5 a6 a7 a8 a9 : Nat) : Nat :=
@@ -262,7 +262,7 @@ theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
     · have hiNat : i.toNat < toks.size := by
         rw [← hend]
         exact USize.lt_iff_toNat_lt.mp hi
-      rw [dif_pos hi, dif_pos hiNat]
+      rw [dite_eq_left hi, dite_eq_left hiNat]
       have hbytesMul : toks.bytes.size = 4 * (toks.bytes.size / 4) := by
         have hm := Nat.mod_add_div toks.bytes.size 4
         rw [toks.aligned] at hm
@@ -481,10 +481,10 @@ theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
       simp only [USize.lt_iff_toNat_lt, USize.le_iff_toNat_le,
         hremNat, hblockNat, hnewNat, hmin, hsoft, hcheck, hdivGen]
       by_cases htail : remaining.toNat - splitTokenBytesP t < splitMinBlockBytes
-      · rw [if_pos htail]
+      · rw [ite_eq_left htail]
         have hnrem :
             ¬ remaining.toNat - splitTokenBytesP t ≥ splitMinBlockBytes := by omega
-        simp only [hnrem, decide_false, Bool.and_false, Bool.false_eq_true, if_false]
+        simp only [hnrem, decide_false, Bool.and_false, Bool.false_eq_true, ite_false]
         exact (chooseSplitsHeuristicP_go_no_remaining toks
           splitMinBlockBytes splitSoftMaxBlockBytes checkTokens
           (toks.size + 1) (i.toNat + 1) (by omega)
@@ -493,13 +493,13 @@ theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
           nn0 nn1 nn2 nn3 nn4 nn5 nn6 nn7 nn8 nn9
           (newTot.toNat + 1) (blockBytes.toNat + splitTokenBytesP t)
           (remaining.toNat - splitTokenBytesP t) cuts htail).symm
-      · rw [if_neg htail]
+      · rw [ite_eq_right htail]
         have hremFloor :
             remaining.toNat - splitTokenBytesP t ≥ splitMinBlockBytes := by omega
         simp only [hremFloor, decide_true, Bool.and_true]
         by_cases hfloor :
             blockBytes.toNat + splitTokenBytesP t ≥ splitMinBlockBytes
-        · rw [if_pos hfloor]
+        · rw [ite_eq_left hfloor]
           simp only [hfloor, decide_true]
           let cutN :=
             decide (blockBytes.toNat + splitTokenBytesP t ≥ splitSoftMaxBlockBytes) ||
@@ -513,7 +513,7 @@ theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
                   (newTot.toNat + 1) (blockBytes.toNat + splitTokenBytesP t)
           by_cases hcut : cutN = true
           · change (if cutN = true then _ else _) = _
-            rw [if_pos hcut, if_pos hcut]
+            rw [ite_eq_left hcut, ite_eq_left hcut]
             have hrec := ih (i + 1) hfnext
               0 0 0 0 0 0 0 0 0 0 0
               0 0 0 0 0 0 0 0 0 0 0
@@ -521,9 +521,9 @@ theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
               (by rfl) (by rfl) (by simp) (by
                 simp only [splitSoftMaxBlockBytes, USize.toNat_zero]
                 omega)
-            simpa only [hstep, hremNat, USize.toNat_zero, if_true] using hrec
+            simpa only [hstep, hremNat, USize.toNat_zero, ite_true] using hrec
           · change (if cutN = true then _ else _) = _
-            rw [if_neg hcut, if_neg hcut]
+            rw [ite_eq_right hcut, ite_eq_right hcut]
             have hblockRec :
                 blockBytes.toNat + splitTokenBytesP t < splitSoftMaxBlockBytes := by
               apply Nat.lt_of_not_ge
@@ -531,7 +531,7 @@ theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
               apply hcut
               simp [cutN, hge']
             by_cases hcad : newTot.toNat + 1 ≥ checkTokens
-            · rw [if_pos hcad, if_pos hcad]
+            · rw [ite_eq_left hcad, ite_eq_left hcad]
               have hmtotNew : (oldTot + newU).toNat =
                   oldTot.toNat + newU.toNat := by
                 rw [← hnewDef]
@@ -559,13 +559,13 @@ theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
               simpa only [hstep, hm0, hm1, hm2, hm3, hm4, hm5, hm6, hm7, hm8,
                 hm9, he0, he1, he2, he3, he4, he5, he6, he7, he8, he9,
                 hmtotNew, hnewNat, hblockNat, hremNat, USize.toNat_zero,
-                if_true] using hrec
-            · rw [if_neg hcad, if_neg hcad]
+                ite_true] using hrec
+            · rw [ite_eq_right hcad, ite_eq_right hcad]
               exact keepEq (by
                 rw [hblockNat]
                 exact hblockRec)
-        · rw [if_neg hfloor]
-          simp only [hfloor, decide_false, Bool.false_eq_true, if_false]
+        · rw [ite_eq_right hfloor]
+          simp only [hfloor, decide_false, Bool.false_eq_true, ite_false]
           exact keepEq (by
             rw [hblockNat]
             have hsoftGt : splitMinBlockBytes < splitSoftMaxBlockBytes := by decide
@@ -573,7 +573,7 @@ theorem chooseSplitsHeuristicPU_go_eq (toks : TokenArray) (endU : USize)
     · have hiNat : ¬ i.toNat < toks.size := by
         rw [← hend]
         exact fun h => hi (USize.lt_iff_toNat_lt.mpr h)
-      rw [dif_neg hi, dif_neg hiNat]
+      rw [dite_eq_right hi, dite_eq_right hiNat]
 
 theorem chooseSplitsHeuristicPU_eq (toks : TokenArray) (totalBytes checkTokens : Nat) :
     chooseSplitsHeuristicPU toks totalBytes checkTokens =
@@ -581,8 +581,8 @@ theorem chooseSplitsHeuristicPU_eq (toks : TokenArray) (totalBytes checkTokens :
         splitSoftMaxBlockBytes checkTokens := by
   unfold chooseSplitsHeuristicPU chooseSplitsHeuristicP
   by_cases hsmall : totalBytes < 2 * splitMinBlockBytes
-  · simp only [hsmall, if_true]
-  · simp only [hsmall, if_false]
+  · simp only [hsmall, ite_true]
+  · simp only [hsmall, ite_false]
     split
     · rename_i hg
       have hbytes : toks.bytes.size < USize.size := by
@@ -623,7 +623,7 @@ theorem chooseSplitsHeuristicP_go_no_cuts_below_two_min (toks : TokenArray)
       n0 n1 n2 n3 n4 n5 n6 n7 n8 n9 newTot blockBytes remaining cuts hsmall
     unfold chooseSplitsHeuristicP.go
     by_cases hi : i < toks.size
-    · rw [dif_pos hi]
+    · rw [dite_eq_left hi]
       let tb := splitTokenBytesP (toks.get i hi)
       have hstep : ∀ p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 pT
           q0 q1 q2 q3 q4 q5 q6 q7 q8 q9 qT qc,
@@ -649,6 +649,6 @@ theorem chooseSplitsHeuristicP_go_no_cuts_below_two_min (toks : TokenArray)
         by_cases hle : tb ≤ remaining <;> omega
       simp only [tb] at hstep hgate
       simp [hgate, hstep]
-    · rw [dif_neg hi]
+    · rw [dite_eq_right hi]
 
 end Zip.Native.Deflate

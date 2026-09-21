@@ -32,8 +32,8 @@ private theorem byteShift_testBit (b : UInt8) (s j : Nat) (hs : s ≤ 56) :
   by_cases hsj : s ≤ j
   · simp only [hsj, decide_true, Bool.true_and]
     by_cases hj : j < s + 8
-    · simp only [hj, and_self, if_true]
-    · simp only [hj, and_false, if_false]
+    · simp only [hj, and_self, ite_true]
+    · simp only [hj, and_false, ite_false]
       apply Nat.testBit_lt_two_pow
       exact Nat.lt_of_lt_of_le hb (show 2 ^ 8 ≤ 2 ^ (j - s) from
         Nat.pow_le_pow_right (by omega) (by omega))
@@ -335,7 +335,7 @@ theorem refill_eq_self_of_full (data : ByteArray) (pos : Nat) (bitBuf : UInt64)
     (cnt : Nat) (hfull : 56 < cnt ∨ pos = data.size) :
     refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by
   rw [refill]
-  apply dif_neg
+  apply dite_eq_right
   intro h
   rcases hfull with hc | hp
   · omega
@@ -452,8 +452,8 @@ theorem wideLoad_corr {data : ByteArray} {bitpos avail : Nat} (pos : USize)
   intro j hj
   rw [UInt64.toNat_or, Nat.testBit_or, shiftLeft_testBit _ hcnt hj]
   by_cases hjc : j < cnt
-  · rw [if_neg (by omega), Bool.or_false, h.bits j (Nat.lt_of_lt_of_le hjc h.cntLe)]
-  · rw [if_pos (by omega), ugetUInt64LE_testBit data pos hpos (j - cnt) (by omega)]
+  · rw [ite_eq_right (by omega), Bool.or_false, h.bits j (Nat.lt_of_lt_of_le hjc h.cntLe)]
+  · rw [ite_eq_left (by omega), ugetUInt64LE_testBit data pos hpos (j - cnt) (by omega)]
     have heq : pos.toNat * 8 + (j - cnt) = bitpos + j := by
       have := h.span
       omega
@@ -531,7 +531,7 @@ theorem wideRefillU_full_of_no_tail {data : ByteArray} {bitpos avail : Nat}
     · rename_i hg
       left
       have hc := wideRefillCnt_toNat cnt ((refillGuardWide_usize data pos cnt hsz).mp hg).1
-      simp only [wideRefillU, dif_pos hg]
+      simp only [wideRefillU, dite_eq_left hg]
       omega
     · exact (hd rfl).elim
 
@@ -688,7 +688,7 @@ theorem takeBits_trim (bitBuf : UInt64) (cnt n : Nat) (hn : n ≤ cnt)
       (Nat.sub_lt (n := 2 ^ n) (m := 1) (Nat.two_pow_pos n) (by omega))
       (Nat.pow_le_pow_right (by omega) hn)
   have hnot : ¬n > cnt := by omega
-  simp only [takeBits, if_neg hnot, Except.map, trimTakeResult]
+  simp only [takeBits, ite_eq_right hnot, Except.map, trimTakeResult]
   rw [hfield]
   rw [trimBits_shiftRight_congr bitBuf hcnt64 hn]
 
@@ -728,9 +728,9 @@ theorem takeBits_trim_error (bitBuf : UInt64) (cnt n : Nat) {e : String}
     takeBits (trimBits bitBuf cnt) cnt n = .error e := by
   unfold takeBits at h ⊢
   by_cases hn : n > cnt
-  · simp only [if_pos hn] at h ⊢
+  · simp only [ite_eq_left hn] at h ⊢
     exact h
-  · simp only [if_neg hn] at h ⊢
+  · simp only [ite_eq_right hn] at h ⊢
     contradiction
 
 end Zip.Native.InflateBuf

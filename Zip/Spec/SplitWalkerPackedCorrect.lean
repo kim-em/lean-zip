@@ -574,7 +574,7 @@ private theorem chooseSplitsHeuristicPUPacked_go_eq (toks : TokenArray) (endU : 
       hO hN ho hn htot hblock hcad
     unfold chooseSplitsHeuristicPUPacked.go chooseSplitsHeuristicPU.go
     by_cases hi : i < endU
-    · rw [dif_pos hi, dif_pos hi]
+    · rw [dite_eq_left hi, dite_eq_left hi]
       have hiNat : i.toNat < toks.size := by
         rw [← hend]
         exact USize.lt_iff_toNat_lt.mp hi
@@ -739,10 +739,10 @@ private theorem chooseSplitsHeuristicPUPacked_go_eq (toks : TokenArray) (endU : 
           un0 un1 un2 un3 un4 un5 un6 un7 un8 un9
           hO hBump ho hnsumRec htotalRec hb hcadRec
       by_cases htail : remU < splitMinBlockBytes.toUSize
-      · rw [if_pos htail, if_pos htail]
-      · rw [if_neg htail, if_neg htail]
+      · rw [ite_eq_left htail, ite_eq_left htail]
+      · rw [ite_eq_right htail, ite_eq_right htail]
         by_cases hfloor : blockU ≥ splitMinBlockBytes.toUSize
-        · rw [if_pos hfloor, if_pos hfloor]
+        · rw [ite_eq_left hfloor, ite_eq_left hfloor]
           let cutU :=
             decide (blockU ≥ splitSoftMaxBlockBytes.toUSize) ||
               decide (newU ≥ checkU) && decide (oldTot > 0) &&
@@ -751,7 +751,7 @@ private theorem chooseSplitsHeuristicPUPacked_go_eq (toks : TokenArray) (endU : 
                   un0 un1 un2 un3 un4 un5 un6 un7 un8 un9 newU blockU
           by_cases hcut : cutU = true
           · change (if cutU = true then _ else _) = _
-            rw [if_pos hcut, if_pos hcut]
+            rw [ite_eq_left hcut, ite_eq_left hcut]
             exact ih (i + 1) hfnext
               0 0 0 0 0 0 0 0 0 0 remU (cuts.push (i + 1).toNat)
               0 0 0 0 0 0 0 0 0 0
@@ -764,7 +764,7 @@ private theorem chooseSplitsHeuristicPUPacked_go_eq (toks : TokenArray) (endU : 
                 simp only [splitMinBlockBytes, USize.toNat_zero]
                 omega))
           · change (if cutU = true then _ else _) = _
-            rw [if_neg hcut, if_neg hcut]
+            rw [ite_eq_right hcut, ite_eq_right hcut]
             have hnotSoft : ¬ blockU ≥ splitSoftMaxBlockBytes.toUSize := by
               intro hs
               apply hcut
@@ -775,7 +775,7 @@ private theorem chooseSplitsHeuristicPUPacked_go_eq (toks : TokenArray) (endU : 
               intro hge
               exact hnotSoft (USize.le_iff_toNat_le.mpr hge)
             by_cases hcadence : newU ≥ checkU
-            · rw [if_pos hcadence, if_pos hcadence]
+            · rw [ite_eq_left hcadence, ite_eq_left hcadence]
               have htotFit :
                   oldTot.toNat + newU.toNat < USize.size := by
                 simp only [splitSoftMaxBlockBytes] at hblockRec
@@ -863,19 +863,19 @@ private theorem chooseSplitsHeuristicPUPacked_go_eq (toks : TokenArray) (endU : 
                 hblockRec (Or.inr (by
                   simp only [USize.toNat_zero]
                   exact hcheckPos))
-            · rw [if_neg hcadence, if_neg hcadence]
+            · rw [ite_eq_right hcadence, ite_eq_right hcadence]
               exact keepEq hblockRec (Or.inr (by
                 apply Nat.lt_of_not_ge
                 intro hge
                 exact hcadence (USize.le_iff_toNat_le.mpr hge)))
-        · rw [if_neg hfloor, if_neg hfloor]
+        · rw [ite_eq_right hfloor, ite_eq_right hfloor]
           have hfloorNat : blockU.toNat < splitMinBlockBytes := by
             rw [← hmin]
             apply Nat.lt_of_not_ge
             intro hge
             exact hfloor (USize.le_iff_toNat_le.mpr hge)
           exact keepEq (Nat.lt_trans hfloorNat (by decide)) (Or.inl hfloorNat)
-    · rw [dif_neg hi, dif_neg hi]
+    · rw [dite_eq_right hi, dite_eq_right hi]
 
 /-- With positive token lengths, the guarded packed-counter entry is exactly
     the scalar native-word walker for every stream, total, and cadence. -/
@@ -886,18 +886,18 @@ theorem chooseSplitsHeuristicPUPacked_eq (toks : TokenArray) (totalBytes checkTo
       chooseSplitsHeuristicPU toks totalBytes checkTokens := by
   unfold chooseSplitsHeuristicPUPacked
   by_cases hsmall : totalBytes < 2 * splitMinBlockBytes
-  · rw [if_pos hsmall]
+  · rw [ite_eq_left hsmall]
     simp [chooseSplitsHeuristicPU, hsmall]
-  · rw [if_neg hsmall]
+  · rw [ite_eq_right hsmall]
     by_cases hc : 0 < checkTokens ∧ checkTokens ≤ 32767
-    · rw [dif_pos hc]
+    · rw [dite_eq_left hc]
       by_cases hg : toks.bytes.size.toUSize.toNat = toks.bytes.size ∧
           toks.size.toUSize.toNat = toks.size ∧
           totalBytes.toUSize.toNat = totalBytes ∧
           checkTokens.toUSize.toNat = checkTokens
-      · rw [dif_pos hg]
+      · rw [dite_eq_left hg]
         unfold chooseSplitsHeuristicPU
-        rw [if_neg hsmall, dif_pos hg]
+        rw [ite_eq_right hsmall, dite_eq_left hg]
         have hbytes : toks.bytes.size < USize.size := by
           rw [← hg.1]
           exact USize.toNat_lt_two_pow_numBits _
@@ -916,8 +916,8 @@ theorem chooseSplitsHeuristicPUPacked_eq (toks : TokenArray) (totalBytes checkTo
             simp only [splitMinBlockBytes, USize.toNat_zero]
             omega))
         exact congrArg Array.toList hgo
-      · rw [dif_neg hg]
-    · rw [dif_neg hc]
+      · rw [dite_eq_right hg]
+    · rw [dite_eq_right hc]
 
 /-- Every packed token produced by `lzMatchP` advances the output. Literals
     contribute one byte; reference lengths inherit the matcher's `3 ≤ len`

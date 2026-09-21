@@ -543,7 +543,7 @@ private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
       by_cases hcond : (hashValid[lz77GreedyIter.hash3 data pos hashSize hlt] : Bool) ∧
           hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] < pos ∧
           pos - hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] ≤ windowSize
-      · simp only [dif_pos hcond]
+      · simp only [dite_eq_left hcond]
         have hmaxLenP : pos + min 258 (data.size - pos) ≤ data.size := by omega
         have hmaxLenM : hashTable[lz77GreedyIter.hash3 data pos hashSize hlt] +
             min 258 (data.size - pos) ≤ data.size := by omega
@@ -579,7 +579,7 @@ private theorem mainLoop_eq (data : ByteArray) (windowSize hashSize : Nat)
         · simp only [hge, ↓reduceDIte]
           rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl,
               List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
-      · simp only [dif_neg hcond]
+      · simp only [dite_eq_right hcond]
         rw [ih _ (by omega) _ _ _ _ hht' hhv' rfl,
             List.toArray_cons, ← Array.append_assoc, Array.push_eq_append]
     · simp only [hlt, ↓reduceDIte]

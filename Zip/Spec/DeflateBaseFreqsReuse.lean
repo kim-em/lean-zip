@@ -34,10 +34,10 @@ private theorem sharedPartitionSizedFreqsP_fst_fuel (toks : TokenArray) :
     by_cases hend : min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size
     · conv => lhs; unfold sharedPartitionSizedFreqsP
       conv => rhs; unfold sharedPartitionSizedP
-      simp only [if_pos hend]
+      simp only [ite_eq_left hend]
     · conv => lhs; unfold sharedPartitionSizedFreqsP
       conv => rhs; unfold sharedPartitionSizedP
-      simp only [if_neg hend]
+      simp only [ite_eq_right hend]
       rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega) cuts.tail]
 
 /-- Component 1 of `sharedPartitionSizedFreqsP` is exactly `sharedPartitionSizedP`. -/
@@ -56,10 +56,10 @@ private theorem sharedPartitionSizedFreqsP_snd_fuel (toks : TokenArray) :
     intro pos hf cuts
     by_cases hend : min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size
     · conv => lhs; unfold sharedPartitionSizedFreqsP
-      simp only [if_pos hend]
+      simp only [ite_eq_left hend]
       rw [show min (max (cuts.headD toks.size) (pos + 1)) toks.size = toks.size from by omega]
     · conv => lhs; unfold sharedPartitionSizedFreqsP
-      simp only [if_neg hend]
+      simp only [ite_eq_right hend]
       rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega) cuts.tail]
       simp only [tokenFreqsPTA_toArray, TokenArray.extract_toArray]
       rw [← tokenFreqsP_append, Array.extract_append_extract,

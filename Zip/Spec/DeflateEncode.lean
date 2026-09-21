@@ -352,7 +352,7 @@ theorem decodeLitLen_of_literal (litLengths distLengths : List Nat)
     (hlt : sym < 256) :
     decodeLitLen litLengths distLengths bits = some (.literal sym.toUInt8, rest) := by
   unfold decodeLitLen
-  simp only [hdec, bind, Option.bind, if_pos hlt, pure, Pure.pure]
+  simp only [hdec, bind, Option.bind, ite_eq_left hlt, pure, Pure.pure]
 
 set_option maxRecDepth 2048 in
 /-- If Huffman decode gives symbol 256, `decodeLitLen` returns endOfBlock. -/
@@ -364,7 +364,7 @@ theorem decodeLitLen_of_endOfBlock (litLengths distLengths : List Nat)
     decodeLitLen litLengths distLengths bits = some (.endOfBlock, rest) := by
   unfold decodeLitLen
   simp only [hdec, bind, Option.bind, show ¬(256 : Nat) < 256 from by omega,
-    if_false, show (256 : Nat) == 256 from rfl, if_true, pure, Pure.pure]
+    ite_false, show (256 : Nat) == 256 from rfl, ite_true, pure, Pure.pure]
 
 set_option maxRecDepth 2048 in
 /-- Encoding then decoding one LZ77 symbol recovers it. -/
@@ -450,8 +450,8 @@ theorem encodeLitLen_decodeLitLen
               hels hpf_lit]
             simp only [bind, Option.bind]
             -- sym = 257 + idx ≥ 257, so not < 256 and not == 256
-            rw [if_neg (by omega : ¬(257 + idx < 256))]
-            rw [if_neg (show ¬((257 + idx == 256) = true) by
+            rw [ite_eq_right (by omega : ¬(257 + idx < 256))]
+            rw [ite_eq_right (show ¬((257 + idx == 256) = true) by
               simp only [beq_iff_eq]; omega)]
             -- idx = (257 + idx) - 257
             simp only [show 257 + idx - 257 = idx from by omega]
@@ -541,7 +541,7 @@ theorem encodeSymbols_decodeSymbols
           have hlen : (restBits ++ rest).length < (symBits ++ (restBits ++ rest)).length := by
             have hpos := encodeLitLen_nonempty litLengths distLengths _ symBits hes
             simp only [List.length_append]; omega
-          rw [dif_pos hlen]
+          rw [dite_eq_left hlen]
           rw [ih restBits her hvalid]
           simp only [pure, Pure.pure]
 
@@ -586,7 +586,7 @@ theorem encodeFixed_decode_append (syms : List LZ77Symbol) (data : List UInt8)
   simp only [List.nil_append]
   rw [hdec]
   simp only [hresolve]
-  exact if_pos rfl
+  exact ite_eq_left rfl
 
 /-- Encoding with fixed Huffman then decoding recovers the original data. -/
 theorem encodeFixed_decode (syms : List LZ77Symbol) (data : List UInt8)
@@ -630,7 +630,7 @@ theorem encodeDynamic_decode_append (syms : List LZ77Symbol) (data : List UInt8)
       henc hv_lit hv_dist hvalid
   rw [hdec]
   simp only [hresolve]
-  exact if_pos rfl
+  exact ite_eq_left rfl
 
 /-! ## goR roundtrip theorems
 
@@ -655,7 +655,7 @@ theorem encodeFixed_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
   simp only [List.nil_append]
   rw [hdec]
   simp only [hresolve]
-  exact if_pos rfl
+  exact ite_eq_left rfl
 
 /-- `decode.goR` variant of `encodeDynamic_decode_append`: the remaining bits after
     decoding a dynamic Huffman block are exactly the trailing `rest`. -/
@@ -682,7 +682,7 @@ theorem encodeDynamic_goR_rest (syms : List LZ77Symbol) (data : List UInt8)
       henc hv_lit hv_dist hvalid
   rw [hdec]
   simp only [hresolve]
-  exact if_pos rfl
+  exact ite_eq_left rfl
 
 private theorem readBitsLSB_1_false (rest : List Bool) :
     readBitsLSB 1 (false :: rest) = some (0, rest) := by
@@ -730,7 +730,7 @@ theorem decode_go_dynBlock_final_acc (syms : List LZ77Symbol) (out acc : List UI
       henc hv_lit hv_dist hvalid
   rw [hdec]
   simp only [hres]
-  exact if_pos rfl
+  exact ite_eq_left rfl
 
 /-- `decode.go` on a *non-final* dynamic block, given the threaded resolve
     `resolveLZ77 syms acc = some out`: continues on the trailing bits from `out`. -/
@@ -755,8 +755,8 @@ theorem decode_go_dynBlock_nonfinal_acc (syms : List LZ77Symbol) (out acc : List
       henc hv_lit hv_dist hvalid
   rw [hdec]
   simp only [hres]
-  rw [if_neg (by decide)]
-  rw [dif_pos (show rest.length <
+  rw [ite_eq_right (by decide)]
+  rw [dite_eq_left (show rest.length <
       (false :: false :: true :: (headerBits ++ symBits ++ rest)).length by
     simp only [List.length_cons, List.length_append]; omega)]
 
@@ -783,7 +783,7 @@ theorem decode_goR_dynBlock_final_acc (syms : List LZ77Symbol) (out acc : List U
       henc hv_lit hv_dist hvalid
   rw [hdec]
   simp only [hres]
-  exact if_pos rfl
+  exact ite_eq_left rfl
 
 /-- `decode.goR` on a *non-final* dynamic block, given `resolveLZ77 syms acc = some out`:
     continues on the trailing bits from `out`. -/
@@ -808,8 +808,8 @@ theorem decode_goR_dynBlock_nonfinal_acc (syms : List LZ77Symbol) (out acc : Lis
       henc hv_lit hv_dist hvalid
   rw [hdec]
   simp only [hres]
-  rw [if_neg (by decide)]
-  rw [dif_pos (show rest.length <
+  rw [ite_eq_right (by decide)]
+  rw [dite_eq_left (show rest.length <
       (false :: false :: true :: (headerBits ++ symBits ++ rest)).length by
     simp only [List.length_cons, List.length_append]; omega)]
 

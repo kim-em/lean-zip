@@ -79,23 +79,23 @@ theorem lz77Greedy.goU_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
   rw [lz77Greedy.goU, lz77Greedy.go]
   by_cases hlt : i < maxLen
   · have hltU : i.toUSize < maxLen.toUSize := USize.lt_iff_toNat_lt.mpr (by omega)
-    rw [dif_pos hlt, dif_pos hltU]
+    rw [dite_eq_left hlt, dite_eq_left hltU]
     have hadd1 : (p1.toUSize + i.toUSize).toNat = p1 + i := by
       rw [USize.toNat_add, hp1, hi]; apply Nat.mod_eq_of_lt; omega
     have hadd2 : (p2.toUSize + i.toUSize).toNat = p2 + i := by
       rw [USize.toNat_add, hp2, hi]; apply Nat.mod_eq_of_lt; omega
     simp only [uget_eq_getElem, hadd1, hadd2]
     by_cases heq : data[p1 + i] == data[p2 + i]
-    · rw [if_pos heq, if_pos heq]
+    · rw [ite_eq_left heq, ite_eq_left heq]
       have hi1 : (i + 1).toUSize = i.toUSize + 1 := by
         apply USize.toNat_inj.mp
         rw [USize.toNat_add, USize.toNat_one, hi, toUSize_toNat_of_lt (by omega)]
         symm; apply Nat.mod_eq_of_lt; omega
       rw [← hi1]
       exact lz77Greedy.goU_eq data p1 p2 (i + 1) maxLen hsz h1 h2 (by omega) hu1 hu2
-    · rw [if_neg heq, if_neg heq, hi]
-  · rw [dif_neg hlt,
-        dif_neg (by rw [USize.lt_iff_toNat_lt]; omega : ¬ i.toUSize < maxLen.toUSize), hi]
+    · rw [ite_eq_right heq, ite_eq_right heq, hi]
+  · rw [dite_eq_right hlt,
+        dite_eq_right (by rw [USize.lt_iff_toNat_lt]; omega : ¬ i.toUSize < maxLen.toUSize), hi]
 termination_by maxLen - i
 
 /-! ## Word-at-a-time match extension (P1a, #2736)
@@ -328,14 +328,14 @@ theorem lz77Greedy.go_advance (data : ByteArray) (p1 p2 maxLen n : Nat)
     intro i hin hbytes
     have hstep : lz77Greedy.go data p1 p2 i maxLen h1 h2
         = lz77Greedy.go data p1 p2 (i + 1) maxLen h1 h2 := by
-      rw [lz77Greedy.go, dif_pos (show i < maxLen by omega)]
+      rw [lz77Greedy.go, dite_eq_left (show i < maxLen by omega)]
       have hb0 : data[p1 + i]'(by omega) = data[p2 + i]'(by omega) := by
         have h0 := hbytes 0 (by omega)
         simp only [Nat.add_zero] at h0
         rw [getElem!_pos data (p1 + i) (by omega),
           getElem!_pos data (p2 + i) (by omega)] at h0
         exact h0
-      rw [if_pos (beq_iff_eq.mpr hb0)]
+      rw [ite_eq_left (beq_iff_eq.mpr hb0)]
     rw [hstep, ih (i + 1) (by omega) (fun k hk => by
       have h := hbytes (k + 1) (by omega)
       have e1 : p1 + i + (k + 1) = p1 + (i + 1) + k := by omega
@@ -381,14 +381,14 @@ theorem lz77Greedy.goUW_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
     have h8U : (8 : USize) ≤ maxLen.toUSize - i.toUSize := by
       rw [USize.le_iff_toNat_le, USize.toNat_sub_of_le _ _ hle, h8v, hmax, hi]
       omega
-    rw [dif_pos h8U]
+    rw [dite_eq_left h8U]
     have hoff1 : (p1.toUSize + i.toUSize).toNat = p1 + i := by
       rw [USize.toNat_add, hp1, hi]; apply Nat.mod_eq_of_lt; omega
     have hoff2 : (p2.toUSize + i.toUSize).toNat = p2 + i := by
       rw [USize.toNat_add, hp2, hi]; apply Nat.mod_eq_of_lt; omega
     by_cases hwe : (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
         == data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) = true
-    · rw [if_pos hwe]
+    · rw [ite_eq_left hwe]
       have hbytes : ∀ k, k < 8 → data[p1 + i + k]! = data[p2 + i + k]! := by
         have hb := ByteArray.ugetUInt64LE_eq_bytes data (p1.toUSize + i.toUSize)
           (p2.toUSize + i.toUSize) (by omega) (by omega) (beq_iff_eq.mp hwe)
@@ -409,7 +409,7 @@ theorem lz77Greedy.goUW_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
       rw [lz77Greedy.goUW_index_congr data p1.toUSize p2.toUSize maxLen.toUSize
         (i.toUSize + 8) ((i + 8).toUSize) hsz hu1 hu2 hA hB hi8, hadv]
       exact lz77Greedy.goUW_eq data p1 p2 (i + 8) maxLen hsz h1 h2 (by omega) hu1 hu2 hB
-    · rw [if_neg hwe]
+    · rw [ite_eq_right hwe]
       -- The two eight-byte words differ; `ugetUInt64LE_ctz_first_diff` locates the
       -- first differing byte at `k = ctz (w1 ^^^ w2) >>> 3`, and `go` stops there.
       have hne : data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
@@ -448,8 +448,8 @@ theorem lz77Greedy.goUW_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
             maxLen h1 h2
           = i + (UInt64.ctz (data.ugetUInt64LE (p1.toUSize + i.toUSize) (by omega)
               ^^^ data.ugetUInt64LE (p2.toUSize + i.toUSize) (by omega)) >>> 3).toNat := by
-        rw [lz77Greedy.go, dif_pos (by omega)]
-        refine if_neg ?_
+        rw [lz77Greedy.go, dite_eq_left (by omega)]
+        refine ite_eq_right ?_
         intro hc
         apply hmisp
         rw [getElem!_pos data (p1 + (i + (UInt64.ctz
@@ -475,7 +475,7 @@ theorem lz77Greedy.goUW_eq (data : ByteArray) (p1 p2 i maxLen : Nat)
     have h8U : ¬ (8 : USize) ≤ maxLen.toUSize - i.toUSize := by
       rw [USize.le_iff_toNat_le, USize.toNat_sub_of_le _ _ hle, h8v, hmax, hi]
       omega
-    rw [dif_neg h8U]
+    rw [dite_eq_right h8U]
     exact lz77Greedy.goU_eq data p1 p2 i maxLen hsz h1 h2 hile hu1 hu2
 termination_by maxLen - i
 
@@ -647,8 +647,8 @@ theorem lz77Greedy.goUW_prefix3_eq_countMatch_normalized
       · rw [← getElem!_pos data (p1.toNat + 2) (by omega),
             ← getElem!_pos data (p2.toNat + 2) (by omega)]
         exact hm.1 2 (by omega)
-    simp only [if_neg hg, USize.toNat_zero,
-      if_neg (show ¬
+    simp only [ite_eq_right hg, USize.toNat_zero,
+      ite_eq_right (show ¬
         lz77Greedy.countMatch data p1.toNat p2.toNat maxLen.toNat h1 h2 ≥ 3 by
           omega)]
 
@@ -773,14 +773,14 @@ theorem lz77Greedy.goUW_prefix4_eq_countMatch_normalized
           exact hfourNe (beq_iff_eq.mp hb)
         have hstop :
             lz77Greedy.go data p1.toNat p2.toNat 3 maxLen.toNat h1 h2 = 3 := by
-          rw [lz77Greedy.go, dif_pos (by rw [hfour] at h4; omega), if_neg hbne]
+          rw [lz77Greedy.go, dite_eq_left (by rw [hfour] at h4; omega), ite_eq_right hbne]
         have heq :
             (3 : USize).toNat =
               (lz77Greedy.goUW data p1 p2 3 maxLen hsz h1 h2 h3).toNat := by
           rw [hthree, hgo3, hstop]
         simp only [hp, hd, ↓reduceIte]
         exact heq
-    · simp only [if_neg hp, USize.toNat_zero]
+    · simp only [ite_eq_right hp, USize.toNat_zero]
   exact hgate.trans
     (lz77Greedy.goUW_prefix3_eq_countMatch_normalized
       data p1 p2 maxLen hsz h1 h2 hw1 hw2 h3)

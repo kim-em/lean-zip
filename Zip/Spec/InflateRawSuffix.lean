@@ -37,7 +37,7 @@ private theorem readBit_append (br : BitReader) (suffix : ByteArray)
   · exact nomatch h
   · rename_i hge
     have hlt : br.pos < br.data.size := by omega
-    rw [if_neg (show ¬ br.pos ≥ (br.data ++ suffix).size from by
+    rw [ite_eq_right (show ¬ br.pos ≥ (br.data ++ suffix).size from by
         simp only [ByteArray.size_append]; omega),
       getElem!_pos (br.data ++ suffix) br.pos (by simp only [ByteArray.size_append]; omega),
       ByteArray.getElem_append_left hlt]
@@ -88,9 +88,9 @@ private theorem readUInt16LE_append (br : BitReader) (suffix : ByteArray)
   simp only [BitReader.readUInt16LE] at h ⊢
   rw [alignToByte_append]; simp only []
   by_cases hle : br.alignToByte.pos + 2 > br.alignToByte.data.size
-  · rw [if_pos hle] at h; exact nomatch h
-  · rw [if_neg hle] at h
-    rw [if_neg (show ¬ br.alignToByte.pos + 2 > (br.alignToByte.data ++ suffix).size from by
+  · rw [ite_eq_left hle] at h; exact nomatch h
+  · rw [ite_eq_right hle] at h
+    rw [ite_eq_right (show ¬ br.alignToByte.pos + 2 > (br.alignToByte.data ++ suffix).size from by
       simp only [ByteArray.size_append]; omega)]
     rw [getElem!_ba_append_left _ _ _ (by omega),
         getElem!_ba_append_left _ _ _ (by omega)]
@@ -105,9 +105,9 @@ private theorem readBytes_append (br : BitReader) (suffix : ByteArray)
   simp only [BitReader.readBytes] at h ⊢
   rw [alignToByte_append]; simp only []
   by_cases hle : br.alignToByte.pos + n > br.alignToByte.data.size
-  · rw [if_pos hle] at h; exact nomatch h
-  · rw [if_neg hle] at h
-    rw [if_neg (show ¬ br.alignToByte.pos + n > (br.alignToByte.data ++ suffix).size from by
+  · rw [ite_eq_left hle] at h; exact nomatch h
+  · rw [ite_eq_right hle] at h
+    rw [ite_eq_right (show ¬ br.alignToByte.pos + n > (br.alignToByte.data ++ suffix).size from by
       simp only [ByteArray.size_append]; omega)]
     have hext : (br.alignToByte.data ++ suffix).extract br.alignToByte.pos
         (br.alignToByte.pos + n) =
@@ -137,15 +137,15 @@ private theorem decode_go_append (tree : HuffTree) (br : BitReader) (suffix : By
     split at h
     · exact nomatch h
     · rename_i hle
-      rw [if_neg hle]
+      rw [ite_eq_right hle]
       cases hrb : br.readBit with
       | error e => simp only [hrb] at h; exact nomatch h
       | ok p =>
         obtain ⟨bit, br₁⟩ := p; simp only [hrb] at h
         rw [readBit_append br suffix bit br₁ hrb]; dsimp only []
         split at h
-        · rw [if_pos (by assumption)]; exact ihz br₁ _ h
-        · rw [if_neg (by assumption)]; exact iho br₁ _ h
+        · rw [ite_eq_left (by assumption)]; exact ihz br₁ _ h
+        · rw [ite_eq_right (by assumption)]; exact iho br₁ _ h
 
 /-- HuffTree.decode with appended suffix. -/
 private theorem huffDecode_append (tree : HuffTree) (br : BitReader) (suffix : ByteArray)
@@ -172,11 +172,11 @@ private theorem decodeStored_append (br : BitReader) (suffix : ByteArray)
       obtain ⟨nlen, br₂⟩ := p2; simp only [h2] at h
       rw [readUInt16LE_append br₁ suffix nlen br₂ h2]; dsimp only []
       by_cases hxor : (len ^^^ nlen != 65535) = true
-      · rw [if_pos hxor] at h ⊢; exact nomatch h
-      · rw [if_neg hxor] at h ⊢
+      · rw [ite_eq_left hxor] at h ⊢; exact nomatch h
+      · rw [ite_eq_right hxor] at h ⊢
         by_cases hmaxOut : output.size + len.toNat > maxOut
-        · simp only [pure, Except.pure] at h ⊢; rw [if_pos hmaxOut] at h ⊢; exact nomatch h
-        · simp only [pure, Except.pure] at h ⊢; rw [if_neg hmaxOut] at h ⊢
+        · simp only [pure, Except.pure] at h ⊢; rw [ite_eq_left hmaxOut] at h ⊢; exact nomatch h
+        · simp only [pure, Except.pure] at h ⊢; rw [ite_eq_right hmaxOut] at h ⊢
           cases h3 : br₂.readBytes len.toNat with
           | error e => simp only [h3] at h; exact nomatch h
           | ok p3 =>
@@ -194,10 +194,10 @@ private theorem readCLCodeLengths_append (br : BitReader) (suffix : ByteArray)
       .ok (result, brAppend br' suffix) := by
   unfold Inflate.readCLCodeLengths at h ⊢
   by_cases hlt : i < numCodeLen
-  · rw [if_pos hlt] at h ⊢
+  · rw [ite_eq_left hlt] at h ⊢
     split at h
     · rename_i h_i
-      simp only [dif_pos h_i] at ⊢
+      simp only [dite_eq_left h_i] at ⊢
       simp only [bind, Except.bind] at h ⊢
       cases hrb : br.readBits 3 with
       | error e => simp only [hrb] at h; exact nomatch h
@@ -206,7 +206,7 @@ private theorem readCLCodeLengths_append (br : BitReader) (suffix : ByteArray)
         rw [readBits_append br suffix 3 v br₁ hrb]; dsimp only []
         exact readCLCodeLengths_append br₁ suffix _ (i + 1) numCodeLen result br' h
     · exact nomatch h
-  · rw [if_neg hlt] at h ⊢
+  · rw [ite_eq_right hlt] at h ⊢
     simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
     obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
 termination_by numCodeLen - i
@@ -228,10 +228,10 @@ private theorem decodeCLSymbols_append (clTree : HuffTree) (br : BitReader) (suf
       decodeCLSymbols_append clTree br_i suffix cl idx' totalCodes result br' h'
   unfold Inflate.decodeCLSymbols at h ⊢
   by_cases hge : idx ≥ totalCodes
-  · rw [if_pos hge] at h ⊢
+  · rw [ite_eq_left hge] at h ⊢
     simp only [Except.ok.injEq, Prod.mk.injEq] at h ⊢
     obtain ⟨hval, hbr'⟩ := h; subst hbr'; exact ⟨hval, rfl⟩
-  · rw [if_neg hge] at h ⊢
+  · rw [ite_eq_right hge] at h ⊢
     simp only [bind, Except.bind] at h ⊢
     cases hd : clTree.decode br with
     | error e => simp only [hd] at h; exact nomatch h
@@ -239,51 +239,51 @@ private theorem decodeCLSymbols_append (clTree : HuffTree) (br : BitReader) (suf
       obtain ⟨sym, br₁⟩ := p; simp only [hd] at h
       rw [huffDecode_append clTree br suffix sym br₁ hd]; dsimp only []
       by_cases hs16 : sym < 16
-      · rw [if_pos hs16] at h ⊢; exact hrec _ br₁ _ (by omega) h
-      · rw [if_neg hs16] at h ⊢
+      · rw [ite_eq_left hs16] at h ⊢; exact hrec _ br₁ _ (by omega) h
+      · rw [ite_eq_right hs16] at h ⊢
         by_cases hs16eq : (sym == 16) = true
-        · rw [if_pos hs16eq] at h ⊢
+        · rw [ite_eq_left hs16eq] at h ⊢
           by_cases hidx0 : (idx == 0) = true
-          · rw [if_pos hidx0] at h ⊢; exact nomatch h
-          · rw [if_neg hidx0] at h ⊢
+          · rw [ite_eq_left hidx0] at h ⊢; exact nomatch h
+          · rw [ite_eq_right hidx0] at h ⊢
             split at h
             · rename_i h_cl
-              simp only [dif_pos h_cl] at ⊢
+              simp only [dite_eq_left h_cl] at ⊢
               cases hrb : br₁.readBits 2 with
               | error e => simp only [hrb] at h; exact nomatch h
               | ok p =>
                 obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
                 rw [readBits_append br₁ suffix 2 rep br₂ hrb]; dsimp only []
                 by_cases hgt : idx + (rep.toNat + 3) > totalCodes
-                · rw [if_pos hgt] at h ⊢; exact nomatch h
-                · rw [if_neg hgt] at h ⊢
+                · rw [ite_eq_left hgt] at h ⊢; exact nomatch h
+                · rw [ite_eq_right hgt] at h ⊢
                   exact hrec _ br₂ _ (by omega) h
             · exact nomatch h
-        · rw [if_neg hs16eq] at h ⊢
+        · rw [ite_eq_right hs16eq] at h ⊢
           by_cases hs17 : (sym == 17) = true
-          · rw [if_pos hs17] at h ⊢
+          · rw [ite_eq_left hs17] at h ⊢
             cases hrb : br₁.readBits 3 with
             | error e => simp only [hrb] at h; exact nomatch h
             | ok p =>
               obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
               rw [readBits_append br₁ suffix 3 rep br₂ hrb]; dsimp only []
               by_cases hgt : idx + (rep.toNat + 3) > totalCodes
-              · rw [if_pos hgt] at h ⊢; exact nomatch h
-              · rw [if_neg hgt] at h ⊢
+              · rw [ite_eq_left hgt] at h ⊢; exact nomatch h
+              · rw [ite_eq_right hgt] at h ⊢
                 exact hrec _ br₂ _ (by omega) h
-          · rw [if_neg hs17] at h ⊢
+          · rw [ite_eq_right hs17] at h ⊢
             by_cases hs18 : (sym == 18) = true
-            · rw [if_pos hs18] at h ⊢
+            · rw [ite_eq_left hs18] at h ⊢
               cases hrb : br₁.readBits 7 with
               | error e => simp only [hrb] at h; exact nomatch h
               | ok p =>
                 obtain ⟨rep, br₂⟩ := p; simp only [hrb] at h
                 rw [readBits_append br₁ suffix 7 rep br₂ hrb]; dsimp only []
                 by_cases hgt : idx + (rep.toNat + 11) > totalCodes
-                · rw [if_pos hgt] at h ⊢; exact nomatch h
-                · rw [if_neg hgt] at h ⊢
+                · rw [ite_eq_left hgt] at h ⊢; exact nomatch h
+                · rw [ite_eq_right hgt] at h ⊢
                   exact hrec _ br₂ _ (by omega) h
-            · rw [if_neg hs18] at h ⊢; exact nomatch h
+            · rw [ite_eq_right hs18] at h ⊢; exact nomatch h
 termination_by totalCodes - idx
 
 /-- decodeDynamicTrees with appended suffix. -/
@@ -373,10 +373,10 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
     simp only [bind, Except.bind]
     split at h
     · -- sym < 256: literal byte
-      rename_i hsym; rw [if_pos hsym]
+      rename_i hsym; rw [ite_eq_left hsym]
       split at h
       · exact nomatch h
-      · rename_i hout; rw [if_neg hout]
+      · rename_i hout; rw [ite_eq_right hout]
         split at h
         · exact nomatch h
         · rename_i h₁
@@ -396,13 +396,13 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
         rename_i hge hsym256
         simp only [Except.ok.injEq, Prod.mk.injEq] at h
         obtain ⟨rfl, rfl⟩ := h
-        rw [if_neg hge, if_pos hsym256]
+        rw [ite_eq_right hge, ite_eq_left hsym256]
       · -- sym > 256: length/distance code
         rename_i hge hne256
-        rw [if_neg hge, if_neg hne256]
+        rw [ite_eq_right hge, ite_eq_right hne256]
         split at h
         · exact nomatch h
-        · rename_i hidx; rw [dif_neg hidx]
+        · rename_i hidx; rw [dite_eq_right hidx]
           simp only [← getElem!_pos] at h ⊢
           cases hextra_r : br₁.readBits (Inflate.lengthExtra[sym.toNat - 257]!).toNat with
           | error e => simp only [hextra_r] at h; exact nomatch h
@@ -416,7 +416,7 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
               rw [huffDecode_append distTree br₂ suffix distSym br₃ hdist_dec]; dsimp only []
               split at h
               · exact nomatch h
-              · rename_i hdidx; rw [dif_neg hdidx]
+              · rename_i hdidx; rw [dite_eq_right hdidx]
                 cases hdextra_r : br₃.readBits (Inflate.distExtra[distSym.toNat]!).toNat with
                 | error e => simp only [hdextra_r] at h; exact nomatch h
                 | ok p =>
@@ -424,13 +424,13 @@ private theorem decodeHuffman_go_append (litTree distTree : HuffTree)
                   rw [readBits_append br₃ suffix _ dExtraBits br₄ hdextra_r]; dsimp only []
                   split at h
                   · exact nomatch h
-                  · rename_i hdist_nz; rw [dif_neg hdist_nz]
+                  · rename_i hdist_nz; rw [dite_eq_right hdist_nz]
                     split at h
                     · exact nomatch h
-                    · rename_i hdist_ok; rw [dif_neg hdist_ok]
+                    · rename_i hdist_ok; rw [dite_eq_right hdist_ok]
                       split at h
                       · exact nomatch h
-                      · rename_i hmax_ok; rw [if_neg hmax_ok]
+                      · rename_i hmax_ok; rw [ite_eq_right hmax_ok]
                         split at h
                         · exact nomatch h
                         · rename_i h₁
@@ -453,10 +453,10 @@ local macro "bfinal_suffix_dispatch" : tactic =>
   `(tactic| (
     by_cases hbf1 : (bfinal == 1) = true
     next =>
-      rw [if_pos hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
+      rw [ite_eq_left hbf1] at h ⊢; simp only [pure, Except.pure] at h ⊢
       rw [alignToByte_append]; exact h
     next =>
-      rw [if_neg hbf1] at h ⊢
+      rw [ite_eq_right hbf1] at h ⊢
       split at h
       next => exact nomatch h
       next h_progress =>

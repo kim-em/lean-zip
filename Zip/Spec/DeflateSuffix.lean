@@ -75,13 +75,13 @@ theorem decodeLitLen_append (litLengths distLengths : List Nat)
         (allCodes_swapped_prefix_free litLengths 15 hvl)]
     dsimp only [bind, Option.bind] at h ⊢
     by_cases hlit : litSym < 256
-    · rw [if_pos hlit] at h ⊢
+    · rw [ite_eq_left hlit] at h ⊢
       obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
-    · rw [if_neg hlit] at h ⊢
+    · rw [ite_eq_right hlit] at h ⊢
       by_cases heob : (litSym == 256) = true
-      · rw [if_pos heob] at h ⊢
+      · rw [ite_eq_left heob] at h ⊢
         obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
-      · rw [if_neg heob] at h ⊢
+      · rw [ite_eq_right heob] at h ⊢
         -- length/distance code — thread through do-notation
         cases hlb : lengthBase[litSym - 257]? with
         | none => simp only [hlb] at h; contradiction
@@ -142,10 +142,10 @@ theorem decodeSymbols_append (litLengths distLengths : List Nat)
       obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
     | .literal _ | .reference .. =>
       by_cases hlt : bits'.length < bits.length
-      · simp only [dif_pos hlt] at h
+      · simp only [dite_eq_left hlt] at h
         have hlt' : (bits' ++ suffix).length < (bits ++ suffix).length := by
           simp only [List.length_append]; omega
-        rw [dif_pos hlt']
+        rw [dite_eq_left hlt']
         cases hrec : decodeSymbols litLengths distLengths bits' with
         | none => simp only [hrec] at h; contradiction
         | some q =>
@@ -155,7 +155,7 @@ theorem decodeSymbols_append (litLengths distLengths : List Nat)
             restSyms bits'' hvl hvd hrec
           rw [ih]; dsimp only [bind, Option.bind]
           obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
-      · simp only [dif_neg hlt] at h
+      · simp only [dite_eq_right hlt] at h
         contradiction
 termination_by bits.length
 
@@ -260,9 +260,9 @@ private theorem decodeCLSymbols_append
       decodeCLSymbols_append clTable totalCodes acc' bits' suffix result' rest' hpf h'
   unfold decodeDynamicTables.decodeCLSymbols at h ⊢
   by_cases hge : acc.length ≥ totalCodes
-  · rw [if_pos hge] at h ⊢
+  · rw [ite_eq_left hge] at h ⊢
     obtain ⟨rfl, rfl⟩ := Option.some.inj h; rfl
-  · rw [if_neg hge] at h ⊢
+  · rw [ite_eq_right hge] at h ⊢
     cases hdec : Huffman.Spec.decode clTable bits with
     | none => simp only [hdec] at h; contradiction
     | some p =>
@@ -271,14 +271,14 @@ private theorem decodeCLSymbols_append
       rw [Huffman.Spec.decode_suffix clTable bits suffix sym bits' hdec hpf]
       dsimp only [bind, Option.bind]
       by_cases hsym16 : sym < 16
-      · rw [if_pos hsym16] at h ⊢
+      · rw [ite_eq_left hsym16] at h ⊢
         exact hrec _ _ _ _ (by simp only [List.length_append, List.length_cons, List.length_nil]; omega) h
-      · rw [if_neg hsym16] at h ⊢
+      · rw [ite_eq_right hsym16] at h ⊢
         by_cases hsym16eq : (sym == 16) = true
-        · rw [if_pos hsym16eq] at h ⊢
+        · rw [ite_eq_left hsym16eq] at h ⊢
           by_cases hg : acc.length == 0
-          · simp only [if_pos hg] at h; contradiction
-          · rw [if_neg hg] at h ⊢
+          · simp only [ite_eq_left hg] at h; contradiction
+          · rw [ite_eq_right hg] at h ⊢
             cases hrb : readBitsLSB 2 bits' with
             | none => simp only [hrb] at h; contradiction
             | some q =>
@@ -290,9 +290,9 @@ private theorem decodeCLSymbols_append
               · simp only [hg2, ↓reduceIte] at h ⊢
                 exact hrec _ _ _ _ (by simp only [List.length_append, List.length_replicate]; omega) h
               · simp only [hg2, ↓reduceIte] at h; contradiction
-        · rw [if_neg hsym16eq] at h ⊢
+        · rw [ite_eq_right hsym16eq] at h ⊢
           by_cases hsym17 : (sym == 17) = true
-          · rw [if_pos hsym17] at h ⊢
+          · rw [ite_eq_left hsym17] at h ⊢
             cases hrb : readBitsLSB 3 bits' with
             | none => simp only [hrb] at h; contradiction
             | some q =>
@@ -304,9 +304,9 @@ private theorem decodeCLSymbols_append
               · simp only [hg, ↓reduceIte] at h ⊢
                 exact hrec _ _ _ _ (by simp only [List.length_append, List.length_replicate]; omega) h
               · simp only [hg, ↓reduceIte] at h; contradiction
-          · rw [if_neg hsym17] at h ⊢
+          · rw [ite_eq_right hsym17] at h ⊢
             by_cases hsym18 : (sym == 18) = true
-            · rw [if_pos hsym18] at h ⊢
+            · rw [ite_eq_left hsym18] at h ⊢
               cases hrb : readBitsLSB 7 bits' with
               | none => simp only [hrb] at h; contradiction
               | some q =>
@@ -318,7 +318,7 @@ private theorem decodeCLSymbols_append
                 · simp only [hg, ↓reduceIte] at h ⊢
                   exact hrec _ _ _ _ (by simp only [List.length_append, List.length_replicate]; omega) h
                 · simp only [hg, ↓reduceIte] at h; contradiction
-            · rw [if_neg hsym18] at h ⊢
+            · rw [ite_eq_right hsym18] at h ⊢
               contradiction
 termination_by totalCodes - acc.length
 

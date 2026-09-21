@@ -43,7 +43,7 @@ private theorem writeCLLengths_go_spec (bw : BitWriter) (clLens : List Nat)
     intro heq
     have hlt : i < numCodeLen := by omega
     unfold writeDynamicHeader.writeCLLengths
-    rw [if_pos hlt]
+    rw [ite_eq_left hlt]
     have hwf' := BitWriter.writeBits_wf bw 3 (clLens.getD (Deflate.Spec.clPermutation.getD i 0) 0).toUInt32 hwf (by omega)
     have hbits := BitWriter.writeBits_toBits bw 3 (clLens.getD (Deflate.Spec.clPermutation.getD i 0) 0).toUInt32 hwf (by omega)
     rw [ih _ (i + 1) hwf' (by omega)]
@@ -92,10 +92,10 @@ private theorem writeCLLengths_go_wf (bw : BitWriter) (clLens : List Nat)
     intro heq
     unfold writeDynamicHeader.writeCLLengths
     by_cases hlt : i < numCodeLen
-    · rw [if_pos hlt]
+    · rw [ite_eq_left hlt]
       exact ih _ (i + 1)
         (BitWriter.writeBits_wf bw 3 _ hwf (by omega)) (by omega)
-    · rw [if_neg hlt]; exact hwf
+    · rw [ite_eq_right hlt]; exact hwf
 
 private theorem writeCLEntries_wf (bw : BitWriter) (clCodes : Array (UInt16 × UInt8))
     (entries : List (Nat × Nat)) (hwf : bw.wf)
@@ -110,7 +110,7 @@ private theorem writeCLEntries_wf (bw : BitWriter) (clCodes : Array (UInt16 × U
     have hcode_lt : code < clCodes.size := hvalid ⟨code, extra⟩ (.head _)
     have hvalid_rest : ∀ p ∈ rest, p.1 < clCodes.size :=
       fun p hp => hvalid p (.tail _ hp)
-    simp only [writeDynamicHeader.writeCLEntries, dif_pos hcode_lt]
+    simp only [writeDynamicHeader.writeCLEntries, dite_eq_left hcode_lt]
     have hgetEq : clCodes[code]! = clCodes[code] := getElem!_pos clCodes code hcode_lt
     have hlen15 : clCodes[code].2.toNat ≤ 15 := by rw [← hgetEq]; exact hlen code hcode_lt
     have hwf1 := BitWriter.writeHuffCode_wf bw clCodes[code].1 clCodes[code].2 hwf hlen15
@@ -178,7 +178,7 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
         rw [getElem!_pos clCodes code hcode_lt] at hcw hlen
         -- Unfold native
         unfold writeDynamicHeader.writeCLEntries
-        rw [dif_pos hcode_lt]
+        rw [dite_eq_left hcode_lt]
         -- writeHuffCode correspondence
         have hlen15 : clCodes[code].2.toNat ≤ 15 := by omega
         have hwf1 := BitWriter.writeHuffCode_wf bw
@@ -189,7 +189,7 @@ private theorem writeCLEntries_spec (bw : BitWriter) (clLengths : Array UInt8)
           fun p hp => hext p (List.mem_cons_of_mem _ hp)
         have hextra_bound : extra < 2 ^ 32 := hext (code, extra) List.mem_cons_self
         -- Extra bits
-        -- After dif_pos + simp, `getInternal` appears; it's defEq to `getElem`
+        -- After dite_eq_left + simp, `getInternal` appears; it's defEq to `getElem`
         -- so `change`/`show` normalizes the mismatch for `rw`
         by_cases h16 : code == 16
         · simp only [h16, ↓reduceIte]

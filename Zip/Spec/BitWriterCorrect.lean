@@ -159,7 +159,7 @@ private theorem flushAcc_spec (data : ByteArray) (acc : UInt64) (total : Nat)
   | ind total ih =>
     rw [flushAcc]
     by_cases hge : total ≥ 8
-    · rw [if_pos hge]
+    · rw [ite_eq_left hge]
       have hsr : (acc >>> 8).toNat = acc.toNat / 2 ^ 8 := by
         rw [UInt64.toNat_shiftRight, show (8 : UInt64).toNat % 64 = 8 from by decide,
           Nat.shiftRight_eq_div_pow]
@@ -182,7 +182,7 @@ private theorem flushAcc_spec (data : ByteArray) (acc : UInt64) (total : Nat)
       · apply List.map_congr_left
         intro i _
         rw [hsr, Nat.testBit_div_two_pow, Nat.add_comm]
-    · rw [if_neg hge]
+    · rw [ite_eq_right hge]
       have htot : total < 8 := by omega
       have htu : total.toUInt8.toNat = total := by
         simp only [Nat.toUInt8, UInt8.toNat_ofNat']
@@ -590,7 +590,7 @@ theorem flush_toBits (bw : BitWriter) (hwf : bw.wf) :
     have hcond : ¬((flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount > 0) := by
       show ¬(0 < (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat)
       rw [hr_bc8]; omega
-    rw [if_neg hcond]
+    rw [ite_eq_right hcond]
     have hrtb : Deflate.Spec.bytesToBits (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).data
         = (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).toBits := by
       simp only [toBits, hr_bc8, hbc0, List.range_zero, List.map_nil, List.append_nil,
@@ -601,7 +601,7 @@ theorem flush_toBits (bw : BitWriter) (hwf : bw.wf) :
     have hcond : (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount > 0 := by
       show 0 < (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat
       rw [hr_bc8]; omega
-    rw [if_pos hcond]
+    rw [ite_eq_left hcond]
     simp only [Deflate.Spec.bytesToBits]
     rw [flatMap_byteToBits_push,
       byteToBits_split _ (flushAcc bw.data bw.bitBuf bw.bitCount.toNat).bitCount.toNat

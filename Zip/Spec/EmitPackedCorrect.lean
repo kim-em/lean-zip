@@ -150,13 +150,13 @@ theorem emitTokensTA_toArray (bw : BitWriter) (ta : TokenArray) (i : Nat) :
     unfold emitTokensTA emitTokensP
     by_cases hi : i < ta.size
     · have hi' : i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_pos hi, dif_pos hi']
+      rw [dite_eq_left hi, dite_eq_left hi']
       simp only [TokenArray.get_toArray]
       by_cases hc : ta.toArray[i] &&& ((1 : UInt32) <<< 31) = 0
-      · rw [if_pos hc, if_pos hc]; exact ih _ (by omega) _ _ rfl
-      · rw [if_neg hc, if_neg hc]; exact ih _ (by omega) _ _ rfl
+      · rw [ite_eq_left hc, ite_eq_left hc]; exact ih _ (by omega) _ _ rfl
+      · rw [ite_eq_right hc, ite_eq_right hc]; exact ih _ (by omega) _ _ rfl
     · have hi' : ¬ i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_neg hi, dif_neg hi']
+      rw [dite_eq_right hi, dite_eq_right hi']
 
 /-! ## Branch equations for `emitRefWithCodesP` -/
 
@@ -393,13 +393,13 @@ theorem emitTokensWithCodesTAPT_toArray (bw : BitWriter) (ta : TokenArray)
     unfold emitTokensWithCodesTAPT emitTokensWithCodesPT
     by_cases hi : i < ta.size
     · have hi' : i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_pos hi, dif_pos hi']
+      rw [dite_eq_left hi, dite_eq_left hi']
       simp only [TokenArray.get_toArray]
       by_cases hc : ta.toArray[i] &&& ((1 : UInt32) <<< 31) = 0
-      · rw [if_pos hc, if_pos hc]; exact ih _ (by omega) _ _ rfl
-      · rw [if_neg hc, if_neg hc]; exact ih _ (by omega) _ _ rfl
+      · rw [ite_eq_left hc, ite_eq_left hc]; exact ih _ (by omega) _ _ rfl
+      · rw [ite_eq_right hc, ite_eq_right hc]; exact ih _ (by omega) _ _ rfl
     · have hi' : ¬ i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_neg hi, dif_neg hi']
+      rw [dite_eq_right hi, dite_eq_right hi']
 
 /-! ## The packed single-block cores equal the boxed ones -/
 

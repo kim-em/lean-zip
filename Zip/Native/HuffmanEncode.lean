@@ -72,8 +72,8 @@ theorem assignLengthsN_toList (depths : List (Nat × Nat)) (numSymbols : Nat) :
     simp only [List.foldl_cons]
     rw [ih (acc.setIfInBounds d.1 d.2), Array.toList_setIfInBounds]
     by_cases h : d.1 < acc.toList.length
-    · rw [if_pos h]
-    · rw [if_neg h, List.set_eq_of_length_le (by omega)]
+    · rw [ite_eq_left h]
+    · rw [ite_eq_right h, List.set_eq_of_length_le (by omega)]
 
 /-! ## Array-based Kraft fixup -/
 
@@ -379,7 +379,7 @@ theorem computeCodeLengthsListN_nonzero (freqs : List (Nat × Nat)) (numSymbols 
   have hne : ¬(freqs.filter (fun x => decide (x.2 > 0))).isEmpty := by
     intro h; rw [List.isEmpty_iff_length_eq_zero] at h
     exact absurd (List.length_pos_of_mem hs_nz) (by omega)
-  rw [if_neg hne]
+  rw [ite_eq_right hne]
   let nz := freqs.filter (fun x => decide (x.2 > 0))
   split
   · rename_i hlen1

@@ -193,12 +193,12 @@ theorem tokenFreqsPTA_go_eq (ta : TokenArray) (lf : {a : Array Nat // a.size = 2
     unfold tokenFreqsPTA.go tokenFreqsP.go
     by_cases hi : i < ta.size
     · have hi' : i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_pos hi, dif_pos hi', TokenArray.get_toArray ta i hi]
+      rw [dite_eq_left hi, dite_eq_left hi', TokenArray.get_toArray ta i hi]
       by_cases hc : ta.toArray[i] &&& ((1 : UInt32) <<< 31) = 0
-      · rw [if_pos hc, if_pos hc]; exact ih _ (by omega) _ _ _ rfl
-      · rw [if_neg hc, if_neg hc]; exact ih _ (by omega) _ _ _ rfl
+      · rw [ite_eq_left hc, ite_eq_left hc]; exact ih _ (by omega) _ _ _ rfl
+      · rw [ite_eq_right hc, ite_eq_right hc]; exact ih _ (by omega) _ _ _ rfl
     · have hi' : ¬ i < ta.toArray.size := by rw [← TokenArray.size_toArray]; exact hi
-      rw [dif_neg hi, dif_neg hi']
+      rw [dite_eq_right hi, dite_eq_right hi']
 
 /-- `tokenFreqsPTA` is `tokenFreqsP` over the `Array UInt32` view. -/
 theorem tokenFreqsPTA_toArray (ta : TokenArray) :
