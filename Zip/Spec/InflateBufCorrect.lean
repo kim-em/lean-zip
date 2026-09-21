@@ -322,13 +322,13 @@ theorem readBit_ok_of_inbounds (br : BitReader) (hwf : br.bitOff < 8) (hin : br.
       ∧ br'.bitOff < 8 ∧ br'.data = br.data := by
   have hb : br.bitPos = br.pos * 8 + br.bitOff := rfl
   unfold BitReader.readBit
-  rw [if_neg (by omega)]
+  rw [ite_eq_right (by omega)]
   by_cases ho : br.bitOff + 1 ≥ 8
-  · rw [if_pos ho]
+  · rw [ite_eq_left ho]
     refine ⟨_, _, rfl, ?_, by show (0 : Nat) < 8; decide, rfl⟩
     show (br.pos + 1) * 8 + 0 = br.bitPos + 1
     omega
-  · rw [if_neg ho]
+  · rw [ite_eq_right ho]
     refine ⟨_, _, rfl, ?_, by show br.bitOff + 1 < 8; omega, rfl⟩
     show br.pos * 8 + (br.bitOff + 1) = br.bitPos + 1
     omega
@@ -359,7 +359,7 @@ theorem readBits_go_error : ∀ (k : Nat) (br : BitReader) (acc : UInt32) (shift
     simp only [BitReader.readBits.go, bind, Except.bind]
     by_cases hpos : br.pos ≥ br.data.size
     · rw [show br.readBit = .error "BitReader: unexpected end of input" from by
-        unfold BitReader.readBit; rw [if_pos hpos]]
+        unfold BitReader.readBit; rw [ite_eq_left hpos]]
     · obtain ⟨bit, br1, hrb1, hbp1, hwf1, hdata1⟩ := readBit_ok_of_inbounds br hwf (by omega)
       rw [hrb1]; simp only []
       exact ih br1 _ _ hwf1 (by rw [hbp1, hdata1]; have : br.bitPos = br.pos*8+br.bitOff := rfl; omega)
@@ -389,7 +389,7 @@ theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : 
       rw [BitReader.readBits]
       exact readBits_go_error n br 0 0 hwf (by rw [hds]; omega) (by rw [hds]; omega)
     have htk : takeBits bitBuf cnt n = .error "BitReader: unexpected end of input" := by
-      unfold takeBits; rw [if_pos hnc]
+      unfold takeBits; rw [ite_eq_left hnc]
     refine ⟨fun val br' h' => by rw [herr] at h'; exact absurd h' (by simp), fun e h' => ?_⟩
     rw [herr] at h'
     have he : "BitReader: unexpected end of input" = e := by injection h'
@@ -398,7 +398,7 @@ theorem takeBits_corr {data : ByteArray} {br : BitReader} {pos : Nat} {bitBuf : 
     have hn : n ≤ cnt := by omega
     have htk : takeBits bitBuf cnt n
         = .ok ((bitBuf &&& ((1 <<< n.toUInt64) - 1)).toNat, bitBuf >>> n.toUInt64, cnt - n) := by
-      unfold takeBits; rw [if_neg hnc]
+      unfold takeBits; rw [ite_eq_right hnc]
     refine ⟨fun val br' h' => ?_, fun e h' => ?_⟩
     · refine ⟨_, _, _, htk, takeBits_value h hwf hdata hn hn32 hn64 h', ?_, ?_,
         readBits_bitOff_lt h' hwf, rfl⟩
@@ -481,7 +481,7 @@ theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (h
   · -- byte `pos` holds the bit, but it is out of range (pos ≥ size); high bytes vanish
     have e8 : decide (br.bitOff + j ≥ 8) = false := by simp only [decide_eq_false_iff_not]; omega
     have e16 : decide (br.bitOff + j ≥ 16) = false := by simp only [decide_eq_false_iff_not]; omega
-    rw [if_neg (Nat.not_lt.mpr (hbyte.1 hlo))]
+    rw [ite_eq_right (Nat.not_lt.mpr (hbyte.1 hlo))]
     simp only [e8, e16, Bool.false_and, Bool.or_false, Nat.zero_testBit]
   · by_cases hmid : br.bitOff + j < 16
     · -- byte `pos`'s bit is past its width; byte `pos+1` is out of range
@@ -493,7 +493,7 @@ theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (h
             _ ≤ 2 ^ (br.bitOff + j) := Nat.pow_le_pow_right (by omega) h8))
       have e8 : decide (br.bitOff + j ≥ 8) = true := by simp only [decide_eq_true_eq]; omega
       have e16 : decide (br.bitOff + j ≥ 16) = false := by simp only [decide_eq_false_iff_not]; omega
-      rw [if_neg (Nat.not_lt.mpr (hbyte.2.1 h8 hmid))]
+      rw [ite_eq_right (Nat.not_lt.mpr (hbyte.2.1 h8 hmid))]
       simp only [hb0f, e8, e16, Bool.true_and, Bool.false_and, Bool.false_or, Bool.or_false,
         Nat.zero_testBit]
     · -- bytes `pos`, `pos+1` contribute no bit; byte `pos+2` is out of range
@@ -510,7 +510,7 @@ theorem peekFast_testBit_eof (br : BitReader) (j : Nat) (hwf : br.bitOff < 8) (h
             _ ≤ 2 ^ (br.bitOff + j - 8) := Nat.pow_le_pow_right (by omega) (by omega)))
       have e8 : decide (br.bitOff + j ≥ 8) = true := by simp only [decide_eq_true_eq]; omega
       have e16 : decide (br.bitOff + j ≥ 16) = true := by simp only [decide_eq_true_eq]; omega
-      rw [if_neg (Nat.not_lt.mpr (hbyte.2.2 h16))]
+      rw [ite_eq_right (Nat.not_lt.mpr (hbyte.2.2 h16))]
       simp only [hb0f, hb1f, e8, e16, Bool.true_and, Bool.false_or, Nat.zero_testBit]
 
 open HuffTree in
@@ -590,11 +590,11 @@ theorem walkTree_consumed (t : HuffTree) :
     intro bitBuf cnt depth s bb c used h
     rw [walkTree] at h
     by_cases hd : depth > 20
-    · rw [if_pos hd] at h; exact absurd h (by simp)
-    · rw [if_neg hd] at h
+    · rw [ite_eq_left hd] at h; exact absurd h (by simp)
+    · rw [ite_eq_right hd] at h
       by_cases hc0 : cnt = 0
-      · rw [if_pos hc0] at h; exact absurd h (by simp)
-      · rw [if_neg hc0] at h
+      · rw [ite_eq_left hc0] at h; exact absurd h (by simp)
+      · rw [ite_eq_right hc0] at h
         cases hrec : walkTree (if bitBuf &&& 1 == 0 then z else o) (bitBuf >>> 1) (cnt - 1) (depth + 1) with
         | error e => rw [hrec] at h; exact absurd h (by simp)
         | ok p =>
@@ -605,8 +605,8 @@ theorem walkTree_consumed (t : HuffTree) :
           subst hc; subst hused
           have hrc : c' + u' = cnt - 1 := by
             by_cases hbit : (bitBuf &&& 1 == 0) = true
-            · rw [if_pos hbit] at hrec; exact ihz hrec
-            · rw [if_neg hbit] at hrec; exact iho hrec
+            · rw [ite_eq_left hbit] at hrec; exact ihz hrec
+            · rw [ite_eq_right hbit] at hrec; exact iho hrec
           omega
 
 /-- A successful `walkTree` on a depth-≤`D` tree consumes at most `D` bits. -/
@@ -622,11 +622,11 @@ theorem walkTree_used_le (t : HuffTree) :
     intro bitBuf cnt depth D s bb c used h hD
     rw [walkTree] at h
     by_cases hd : depth > 20
-    · rw [if_pos hd] at h; exact absurd h (by simp)
-    · rw [if_neg hd] at h
+    · rw [ite_eq_left hd] at h; exact absurd h (by simp)
+    · rw [ite_eq_right hd] at h
       by_cases hc0 : cnt = 0
-      · rw [if_pos hc0] at h; exact absurd h (by simp)
-      · rw [if_neg hc0] at h
+      · rw [ite_eq_left hc0] at h; exact absurd h (by simp)
+      · rw [ite_eq_right hc0] at h
         cases hrec : walkTree (if bitBuf &&& 1 == 0 then z else o) (bitBuf >>> 1) (cnt - 1) (depth + 1) with
         | error e => rw [hrec] at h; exact absurd h (by simp)
         | ok p =>
@@ -640,8 +640,8 @@ theorem walkTree_used_le (t : HuffTree) :
           | D' + 1, ⟨hz, ho⟩ =>
             have hu' : u' ≤ D' := by
               by_cases hbit : (bitBuf &&& 1 == 0) = true
-              · rw [if_pos hbit] at hrec; exact ihz hrec hz
-              · rw [if_neg hbit] at hrec; exact iho hrec ho
+              · rw [ite_eq_left hbit] at hrec; exact ihz hrec hz
+              · rw [ite_eq_right hbit] at hrec; exact iho hrec ho
             omega
 
 /-- **`walkTree` corresponds to `decode.go`.** Under the buffer invariant and the
@@ -679,8 +679,8 @@ theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
     by_cases hd : depth > 20
     · refine ⟨fun s' br' hgo => by simp [HuffTree.decode.go, hd] at hgo, ?_⟩
       intro e hgo
-      simp only [HuffTree.decode.go, hd, if_true, Except.error.injEq] at hgo
-      simp only [walkTree, hd, if_true, ← hgo]
+      simp only [HuffTree.decode.go, hd, ite_true, Except.error.injEq] at hgo
+      simp only [walkTree, hd, ite_true, ← hgo]
     · by_cases hcnt : 0 < cnt
       · -- read one bit; both follow the same stream bit
         have hbp : br.bitPos < data.size * 8 := by have := h.span; have := h.posLe; omega
@@ -713,30 +713,30 @@ theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
         · -- stream bit 0: both descend into `z`
           have hgs : HuffTree.decode.go (HuffTree.node z o) br depth
               = HuffTree.decode.go z br' (depth + 1) := by
-            rw [HuffTree.decode.go, if_neg hd, hrb]; simp [bind, Except.bind, hs]
+            rw [HuffTree.decode.go, ite_eq_right hd, hrb]; simp [bind, Except.bind, hs]
           have hsub : (if bitBuf &&& 1 == 0 then z else o) = z := by
             simp [show (bitBuf &&& 1 == 0) = true from by simp [hbranch, hs]]
           refine ⟨fun s' br'' hgo => ?_, fun e hgo => ?_⟩
           · rw [hgs] at hgo
             obtain ⟨bb2, c2, u2, hwt, hbc, hd2, ho2, hle2⟩ := (ihz hcc hwf' hbdata hsubinv).1 s' br'' hgo
             refine ⟨bb2, c2, u2 + 1, ?_, hbc, hd2, ho2, by omega⟩
-            rw [walkTree, if_neg hd, if_neg hcne, hsub]; simp [hwt]
+            rw [walkTree, ite_eq_right hd, ite_eq_right hcne, hsub]; simp [hwt]
           · rw [hgs] at hgo
-            rw [walkTree, if_neg hd, if_neg hcne, hsub]
+            rw [walkTree, ite_eq_right hd, ite_eq_right hcne, hsub]
             simp [(ihz hcc hwf' hbdata hsubinv).2 e hgo]
         · -- stream bit 1: both descend into `o`
           have hgs : HuffTree.decode.go (HuffTree.node z o) br depth
               = HuffTree.decode.go o br' (depth + 1) := by
-            rw [HuffTree.decode.go, if_neg hd, hrb]; simp [bind, Except.bind, hs]
+            rw [HuffTree.decode.go, ite_eq_right hd, hrb]; simp [bind, Except.bind, hs]
           have hsub : (if bitBuf &&& 1 == 0 then z else o) = o := by
             simp [show (bitBuf &&& 1 == 0) = false from by simp [hbranch, hs]]
           refine ⟨fun s' br'' hgo => ?_, fun e hgo => ?_⟩
           · rw [hgs] at hgo
             obtain ⟨bb2, c2, u2, hwt, hbc, hd2, ho2, hle2⟩ := (iho hcc hwf' hbdata hsubinv).1 s' br'' hgo
             refine ⟨bb2, c2, u2 + 1, ?_, hbc, hd2, ho2, by omega⟩
-            rw [walkTree, if_neg hd, if_neg hcne, hsub]; simp [hwt]
+            rw [walkTree, ite_eq_right hd, ite_eq_right hcne, hsub]; simp [hwt]
           · rw [hgs] at hgo
-            rw [walkTree, if_neg hd, if_neg hcne, hsub]
+            rw [walkTree, ite_eq_right hd, ite_eq_right hcne, hsub]
             simp [(iho hcc hwf' hbdata hsubinv).2 e hgo]
       · -- cnt = 0 → end of input (the EOF disjunct of the invariant must hold)
         have hc0 : cnt = 0 := by omega
@@ -748,16 +748,16 @@ theorem walkTree_corr (t : HuffTree) {data : ByteArray} :
           have hsp := h.span; have hb : br.bitPos = br.pos * 8 + br.bitOff := rfl
           rw [hdata]; omega
         have hrbe : br.readBit = .error "BitReader: unexpected end of input" := by
-          simp only [ZipCommon.BitReader.readBit, show br.pos ≥ br.data.size from hge, if_true]
+          simp only [ZipCommon.BitReader.readBit, show br.pos ≥ br.data.size from hge, ite_true]
         refine ⟨?_, ?_⟩
         · intro s' br' hgo
-          rw [HuffTree.decode.go, if_neg hd, hrbe] at hgo
+          rw [HuffTree.decode.go, ite_eq_right hd, hrbe] at hgo
           simp [bind, Except.bind] at hgo
         · intro e hgo
-          rw [HuffTree.decode.go, if_neg hd, hrbe] at hgo
+          rw [HuffTree.decode.go, ite_eq_right hd, hrbe] at hgo
           simp only [bind, Except.bind] at hgo
           have he : "BitReader: unexpected end of input" = e := by injection hgo
-          rw [walkTree, if_neg hd, if_pos hc0, he]
+          rw [walkTree, ite_eq_right hd, ite_eq_left hc0, he]
 
 open HuffTree in
 /-- **`decodeSym` corresponds to `HuffTree.decodeWithTable`.** Same symbol/error,
@@ -781,13 +781,13 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
   have hav : cnt ≤ HuffTree.bitsAvail br ∧ (pos = data.size → cnt = HuffTree.bitsAvail br) := by
     unfold HuffTree.bitsAvail
     by_cases hpe : br.pos ≥ br.data.size
-    · rw [if_pos hpe]; exact ⟨by omega, fun _ => by omega⟩
-    · rw [if_neg hpe]; exact ⟨by omega, fun hh => by subst hh; omega⟩
+    · rw [ite_eq_left hpe]; exact ⟨by omega, fun _ => by omega⟩
+    · rw [ite_eq_right hpe]; exact ⟨by omega, fun hh => by subst hh; omega⟩
   have hidx : (bitBuf &&& 0x7FF).toNat = (peekFast br).toNat :=
     peek_eq_refilled h hwf hdata (hr.imp (fun hc => by omega) id)
   rw [hidx] at hlen
   unfold HuffTree.decodeWithTable decodeSym
-  rw [if_neg (show ¬ br.bitOff ≥ 8 from by omega), hidx]
+  rw [ite_eq_right (show ¬ br.bitOff ≥ 8 from by omega), hidx]
   simp only []
   -- generalize the packed table's len/sym projections of this slot
   generalize hlenv : table.lenAt (peekFast br).toNat = lenB at hlen ⊢
@@ -802,7 +802,7 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
     · rw [hav.2 hpe]
   by_cases hg : (lenB.toNat == 0 || decide (lenB.toNat > cnt)) = true
   · -- fallback: walkTree ↔ decode
-    rw [if_pos (hgd.trans hg), if_pos hg, HuffTree.decode]
+    rw [ite_eq_left (hgd.trans hg), ite_eq_left hg, HuffTree.decode]
     have hwc := walkTree_corr (depth := 0) tree h hwf hdata (by
       rcases hr with hc | hpe
       · exact Or.inr (by omega)
@@ -814,7 +814,7 @@ theorem decodeSym_corr (tree : HuffTree) (table : HuffTree.DecodeTable)
       have huse := walkTree_used_le tree hwt hdep
       rw [hwt]; exact ⟨rfl, hbc, hbd, hbo, hle, by omega⟩
   · -- table hit
-    rw [if_neg (by rw [hgd]; exact hg), if_neg hg]
+    rw [ite_eq_right (by rw [hgd]; exact hg), ite_eq_right hg]
     simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq, not_or, Nat.not_lt] at hg
     obtain ⟨hne, hle⟩ := hg
     have hcc := consume_corr h hle (show lenB.toNat < 64 from by omega)
@@ -918,31 +918,31 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
         · -- literal
           rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
           dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-          rw [if_pos hlt, if_pos hlt, hkey]
+          rw [ite_eq_left hlt, ite_eq_left hlt, hkey]
           by_cases hmax : output.size ≥ maxOut
-          · rw [if_pos hmax, if_pos hmax]
+          · rw [ite_eq_left hmax, ite_eq_left hmax]
             rfl
-          · rw [if_neg hmax, if_neg hmax]
+          · rw [ite_eq_right hmax, ite_eq_right hmax]
             by_cases hp1 : br₁.bitPos ≤ br.bitPos
-            · rw [dif_pos hp1, dif_pos hp1]
+            · rw [dite_eq_left hp1, dite_eq_left hp1]
               rfl
-            · rw [dif_neg hp1, dif_neg hp1]
+            · rw [dite_eq_right hp1, dite_eq_right hp1]
               by_cases hp2 : dataSize * 8 < br₁.bitPos
-              · rw [dif_pos hp2, dif_pos hp2]
+              · rw [dite_eq_left hp2, dite_eq_left hp2]
                 rfl
-              · rw [dif_neg hp2, dif_neg hp2]
+              · rw [dite_eq_right hp2, dite_eq_right hp2]
                 exact ih_lit sym br₁ hp1 hp2 pos1 bb c hbc2 hbo2 hbd2
         · by_cases hs256 : (sym == 256) = true
           · -- end of block: both return the current state
             rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
             dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-            rw [if_neg hlt, if_neg hlt, if_pos hs256, if_pos hs256, hkey]
+            rw [ite_eq_right hlt, ite_eq_right hlt, ite_eq_left hs256, ite_eq_left hs256, hkey]
             exact ⟨rfl, hbc2, hbd2, hbo2, rfl⟩
           · by_cases hidx : sym.toNat - 257 ≥ Inflate.lengthBase.size
             · -- invalid length code: both throw the same message
               rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
               dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-              rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_pos hidx, dif_pos hidx]
+              rw [ite_eq_right hlt, ite_eq_right hlt, ite_eq_right hs256, ite_eq_right hs256, dite_eq_left hidx, dite_eq_left hidx]
               rfl
             · -- valid length/distance back-reference
               have hN1 : sym.toNat - 257 < Inflate.lengthExtra.size := by
@@ -961,7 +961,7 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
                 have hYe := htc_e.2 e1 hXe
                 rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                 dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-                rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                rw [ite_eq_right hlt, ite_eq_right hlt, ite_eq_right hs256, ite_eq_right hs256, dite_eq_right hidx, dite_eq_right hidx,
                   readBitsFast_eq br₁, hXe, hYe]
               | ok pe =>
                 obtain ⟨extraBits, br₂⟩ := pe
@@ -980,7 +980,7 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
                     rw [hXd, hYd] at htd
                     rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                     dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-                    rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                    rw [ite_eq_right hlt, ite_eq_right hlt, ite_eq_right hs256, ite_eq_right hs256, dite_eq_right hidx, dite_eq_right hidx,
                       readBitsFast_eq br₁, hXe, hYe]
                     dsimp only [bind, Except.bind]
                     rw [hXd, hYd]
@@ -999,10 +999,10 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
                     · -- invalid distance code: both throw the same message
                       rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                       dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-                      rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                      rw [ite_eq_right hlt, ite_eq_right hlt, ite_eq_right hs256, ite_eq_right hs256, dite_eq_right hidx, dite_eq_right hidx,
                         readBitsFast_eq br₁, hXe, hYe]
                       dsimp only [bind, Except.bind]; rw [hXd, hYd]; dsimp only [bind, Except.bind]
-                      rw [dif_pos hdidx, dif_pos hdidx]
+                      rw [dite_eq_left hdidx, dite_eq_left hdidx]
                       rfl
                     · -- valid distance: read distance-extra bits
                       have hdN3 : distSym.toNat < Inflate.distExtra.size := by
@@ -1021,10 +1021,10 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
                         have hYde := htc_de.2 e1 hXde
                         rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                         dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-                        rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                        rw [ite_eq_right hlt, ite_eq_right hlt, ite_eq_right hs256, ite_eq_right hs256, dite_eq_right hidx, dite_eq_right hidx,
                           readBitsFast_eq br₁, hXe, hYe]
                         dsimp only [bind, Except.bind]; rw [hXd, hYd]; dsimp only [bind, Except.bind]
-                        rw [dif_neg hdidx, dif_neg hdidx, readBitsFast_eq br₃, hXde, hYde]
+                        rw [dite_eq_right hdidx, dite_eq_right hdidx, readBitsFast_eq br₃, hXde, hYde]
                       | ok pde =>
                         obtain ⟨dExtraBits, br₄⟩ := pde
                         obtain ⟨deb, bb4, c4, hYde, hval_de, hbc5, hbd5, hbo5, hc4eq⟩ :=
@@ -1035,37 +1035,37 @@ theorem go_corr (litTree distTree : HuffTree) (litTable distTable : HuffTree.Dec
                           have := hbc1.span; have := hbc5.span; omega
                         rw [Inflate.decodeHuffmanFastBR.go, InflateBuf.go, hrf]
                         dsimp only []; rw [hdwt, hds2]; dsimp only [bind, Except.bind]
-                        rw [if_neg hlt, if_neg hlt, if_neg hs256, if_neg hs256, dif_neg hidx, dif_neg hidx,
+                        rw [ite_eq_right hlt, ite_eq_right hlt, ite_eq_right hs256, ite_eq_right hs256, dite_eq_right hidx, dite_eq_right hidx,
                           readBitsFast_eq br₁, hXe, hYe]
                         dsimp only [bind, Except.bind]; rw [hXd, hYd]; dsimp only [bind, Except.bind]
-                        rw [dif_neg hdidx, dif_neg hdidx, readBitsFast_eq br₃, hXde, hYde]
+                        rw [dite_eq_right hdidx, dite_eq_right hdidx, readBitsFast_eq br₃, hXde, hYde]
                         dsimp only [bind, Except.bind]
                         -- distance/length now share the same expression on both sides
                         by_cases hd0 : (Inflate.distBase[distSym.toNat]'(Nat.not_le.mp hdidx)).toNat + dExtraBits.toNat = 0
-                        · rw [dif_pos hd0, dif_pos hd0]
+                        · rw [dite_eq_left hd0, dite_eq_left hd0]
                           rfl
-                        · rw [dif_neg hd0, dif_neg hd0]
+                        · rw [dite_eq_right hd0, dite_eq_right hd0]
                           by_cases hds : (Inflate.distBase[distSym.toNat]'(Nat.not_le.mp hdidx)).toNat + dExtraBits.toNat > output.size
-                          · rw [dif_pos hds, dif_pos hds]
+                          · rw [dite_eq_left hds, dite_eq_left hds]
                             rfl
-                          · rw [dif_neg hds, dif_neg hds]
+                          · rw [dite_eq_right hds, dite_eq_right hds]
                             by_cases hmax2 : output.size + ((Inflate.lengthBase[sym.toNat - 257]'(Nat.not_le.mp hidx)).toNat + extraBits.toNat) > maxOut
-                            · rw [if_pos hmax2, if_pos hmax2]
+                            · rw [ite_eq_left hmax2, ite_eq_left hmax2]
                               rfl
-                            · rw [if_neg hmax2, if_neg hmax2]
+                            · rw [ite_eq_right hmax2, ite_eq_right hmax2]
                               -- progress guards: A uses br₄.bitPos, B uses the tracked bitpos (= it by hkey4)
                               by_cases hp1 : br₄.bitPos ≤ br.bitPos
-                              · rw [dif_pos hp1,
-                                  dif_pos (show br.bitPos + (cnt1 - c4) ≤ br.bitPos from by rw [hkey4]; exact hp1)]
+                              · rw [dite_eq_left hp1,
+                                  dite_eq_left (show br.bitPos + (cnt1 - c4) ≤ br.bitPos from by rw [hkey4]; exact hp1)]
                                 rfl
-                              · rw [dif_neg hp1,
-                                  dif_neg (show ¬ br.bitPos + (cnt1 - c4) ≤ br.bitPos from by rw [hkey4]; exact hp1)]
+                              · rw [dite_eq_right hp1,
+                                  dite_eq_right (show ¬ br.bitPos + (cnt1 - c4) ≤ br.bitPos from by rw [hkey4]; exact hp1)]
                                 by_cases hp2 : dataSize * 8 < br₄.bitPos
-                                · rw [dif_pos hp2,
-                                    dif_pos (show dataSize * 8 < br.bitPos + (cnt1 - c4) from by rw [hkey4]; exact hp2)]
+                                · rw [dite_eq_left hp2,
+                                    dite_eq_left (show dataSize * 8 < br.bitPos + (cnt1 - c4) from by rw [hkey4]; exact hp2)]
                                   rfl
-                                · rw [dif_neg hp2,
-                                    dif_neg (show ¬ dataSize * 8 < br.bitPos + (cnt1 - c4) from by rw [hkey4]; exact hp2)]
+                                · rw [dite_eq_right hp2,
+                                    dite_eq_right (show ¬ dataSize * 8 < br.bitPos + (cnt1 - c4) from by rw [hkey4]; exact hp2)]
                                   simp only [hkey4]
                                   exact ih_ld sym hidx extraBits distSym hdidx dExtraBits br₄
                                     hd0 hds hp1 hp2 pos1 bb4 c4 hbc5 hbo5 hbd5
@@ -1090,16 +1090,16 @@ theorem insert_go_depthLE (code : UInt32) (symbol : UInt16) :
         then .node (HuffTree.insert.go code symbol .empty n) .empty
         else .node .empty (HuffTree.insert.go code symbol .empty n)) (D' + 1)
       by_cases hbit : ((code >>> n.toUInt32) &&& 1) == 0
-      · rw [if_pos hbit]; exact ⟨ih D' .empty True.intro (by omega), True.intro⟩
-      · rw [if_neg hbit]; exact ⟨True.intro, ih D' .empty True.intro (by omega)⟩
+      · rw [ite_eq_left hbit]; exact ⟨ih D' .empty True.intro (by omega), True.intro⟩
+      · rw [ite_eq_right hbit]; exact ⟨True.intro, ih D' .empty True.intro (by omega)⟩
     | node z o =>
       obtain ⟨hz, ho⟩ := hT
       change treeDepthLE (if ((code >>> n.toUInt32) &&& 1) == 0
         then .node (HuffTree.insert.go code symbol z n) o
         else .node z (HuffTree.insert.go code symbol o n)) (D' + 1)
       by_cases hbit : ((code >>> n.toUInt32) &&& 1) == 0
-      · rw [if_pos hbit]; exact ⟨ih D' z hz (by omega), ho⟩
-      · rw [if_neg hbit]; exact ⟨hz, ih D' o ho (by omega)⟩
+      · rw [ite_eq_left hbit]; exact ⟨ih D' z hz (by omega), ho⟩
+      · rw [ite_eq_right hbit]; exact ⟨hz, ih D' o ho (by omega)⟩
 
 /-- `insert` keeps every leaf within depth `D` (code length `len ≤ D`). -/
 theorem insert_depthLE {t : HuffTree} {D : Nat} (code : UInt32) (len : Nat) (symbol : UInt16)
@@ -1115,19 +1115,19 @@ theorem insertLoop_depthLE (lengths : Array UInt8) (maxBits : Nat)
   induction nextCode, start, tree using HuffTree.insertLoop.induct (lengths := lengths) with
   | case1 nextCode start tree h len hpos hsz c tree' nextCode' ih =>
     intro hT
-    rw [HuffTree.insertLoop, dif_pos h, if_pos hpos, dif_pos hsz]
+    rw [HuffTree.insertLoop, dite_eq_left h, ite_eq_left hpos, dite_eq_left hsz]
     exact ih (insert_depthLE _ _ _ hT (hlen start h))
   | case2 nextCode start tree h len hpos hsz ih =>
     intro hT
-    rw [HuffTree.insertLoop, dif_pos h, if_pos hpos, dif_neg hsz]
+    rw [HuffTree.insertLoop, dite_eq_left h, ite_eq_left hpos, dite_eq_right hsz]
     exact ih hT
   | case3 nextCode start tree h len hpos ih =>
     intro hT
-    rw [HuffTree.insertLoop, dif_pos h, if_neg hpos]
+    rw [HuffTree.insertLoop, dite_eq_left h, ite_eq_right hpos]
     exact ih hT
   | case4 nextCode start tree h =>
     intro hT
-    rw [HuffTree.insertLoop, dif_neg h]
+    rw [HuffTree.insertLoop, dite_eq_right h]
     exact hT
 
 /-- The canonical tree built from `≤ maxBits` code lengths has depth `≤ maxBits`. -/
@@ -1170,7 +1170,7 @@ theorem go_refill_step (litTable distTable : HuffTree.DecodeTable) (data : ByteA
         (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) bitpos output := by
   have hr : refill data pos bitBuf cnt
       = refill data (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8) := by
-    rw [refill, dif_pos hrc, getElem!_pos data pos hrc.2]
+    rw [refill, dite_eq_left hrc, getElem!_pos data pos hrc.2]
   rw [go, go, hr]
 
 /-- A short literal (`len ≠ 0`, `len ≤ cnt`) is decoded by `decodeSym` exactly as the
@@ -1186,7 +1186,7 @@ theorem decodeSym_inline (tree : HuffTree) (table : HuffTree.DecodeTable)
         (table.lenAt (bitBuf &&& 0x7FF).toNat).toNat) := by
   unfold decodeSym
   simp only []
-  rw [if_neg (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
+  rw [ite_eq_right (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
 
 /-- `decodeSym` never increases the bit count: the remaining `cnt` only shrinks.
     Both arms qualify — the table read consumes `len` bits, the tree-walk fallback
@@ -1214,7 +1214,7 @@ theorem goFused_absorb_refill (litTable distTable : HuffTree.DecodeTable) (data 
   rw [refill]
   split
   · rename_i hrc
-    rw [goFused, dif_pos hrc, ← getElem!_pos data pos hrc.2]
+    rw [goFused, dite_eq_left hrc, ← getElem!_pos data pos hrc.2]
     exact goFused_absorb_refill litTable distTable data litTree distTree maxOut dataSize bitpos output
       (pos + 1) (bitBuf ||| (data[pos]!.toUInt64 <<< cnt.toUInt64)) (cnt + 8)
   · rfl
@@ -1261,63 +1261,63 @@ theorem goFusedP_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArra
     (litTable := litTable) (data := data) (litTree := litTree) (maxOut := maxOut) with
   | case1 pos bitBuf cnt output hrc ih =>
       intro bp hpos hbp
-      rw [goFusedP, dif_pos hrc, goFused, dif_pos hrc]
+      rw [goFusedP, dite_eq_left hrc, goFused, dite_eq_left hrc]
       exact ih bp (by omega) (by omega)
   | case2 pos bitBuf cnt output hrc hlit hmax =>
       intro bp hpos hbp
-      rw [goFusedP, dif_neg hrc, dif_pos hlit, if_pos hmax,
-          goFused, dif_neg hrc, decodeSym_inline litTree litTable bitBuf cnt hlit.1 hlit.2.1]
+      rw [goFusedP, dite_eq_right hrc, dite_eq_left hlit, ite_eq_left hmax,
+          goFused, dite_eq_right hrc, decodeSym_inline litTree litTable bitBuf cnt hlit.1 hlit.2.1]
       simp only []
-      rw [if_pos hlit.2.2, if_pos hmax]
+      rw [ite_eq_left hlit.2.2, ite_eq_left hmax]
       rfl
   | case3 pos bitBuf cnt output hrc hlit hmax ih =>
       intro bp hpos hbp
       obtain ⟨hl0, hl1, hl2⟩ := hlit
-      rw [goFusedP, dif_neg hrc, dif_pos ⟨hl0, hl1, hl2⟩, if_neg hmax,
-          goFused, dif_neg hrc, decodeSym_inline litTree litTable bitBuf cnt hl0 hl1]
+      rw [goFusedP, dite_eq_right hrc, dite_eq_left ⟨hl0, hl1, hl2⟩, ite_eq_right hmax,
+          goFused, dite_eq_right hrc, decodeSym_inline litTree litTable bitBuf cnt hl0 hl1]
       simp only []
-      rw [if_pos hl2, if_neg hmax,
-          dif_neg (show ¬ bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)) ≤ bp by omega),
-          dif_neg (show ¬ data.size * 8 < bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)) by
+      rw [ite_eq_left hl2, ite_eq_right hmax,
+          dite_eq_right (show ¬ bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)) ≤ bp by omega),
+          dite_eq_right (show ¬ data.size * 8 < bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat)) by
             have : pos * 8 ≤ data.size * 8 := by omega
             omega)]
       exact ih (bp + (cnt - (cnt - (litTable.lenAt (bitBuf &&& 0x7FF).toNat).toNat))) (by omega) (by omega)
   | case4 pos bitBuf cnt output hrc hlit e hde =>
       intro bp hpos hbp
-      rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
+      rw [goFusedP, dite_eq_right hrc, dite_eq_right hlit, goFused, dite_eq_right hrc]
       simp only [hde, Except.map]
   | case5 pos bitBuf cnt output hrc hlit sym bb c used hde hsym hmax =>
       intro bp hpos hbp
-      rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
-      simp only [hde, if_pos hsym, if_pos hmax]
+      rw [goFusedP, dite_eq_right hrc, dite_eq_right hlit, goFused, dite_eq_right hrc]
+      simp only [hde, ite_eq_left hsym, ite_eq_left hmax]
       rfl
   | case6 pos bitBuf cnt output hrc hlit cnt0 sym bb c used hde hsym hmax hnp =>
       intro bp hpos hbp
       have hc0 : cnt0 = cnt := rfl
-      rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
-      simp only [hde, if_pos hsym, if_neg hmax]
-      rw [dif_pos (show cnt ≤ c by omega), dif_pos (show bp + (cnt - c) ≤ bp by omega)]
+      rw [goFusedP, dite_eq_right hrc, dite_eq_right hlit, goFused, dite_eq_right hrc]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax]
+      rw [dite_eq_left (show cnt ≤ c by omega), dite_eq_left (show bp + (cnt - c) ≤ bp by omega)]
       rfl
   | case7 pos bitBuf cnt output hrc hlit cnt0 sym bb c used hde hsym hmax hnp ih =>
       intro bp hpos hbp
       have hc0 : cnt0 = cnt := rfl
-      rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
-      simp only [hde, if_pos hsym, if_neg hmax]
-      rw [dif_neg (show ¬ cnt ≤ c by omega),
-          dif_neg (show ¬ bp + (cnt - c) ≤ bp by omega),
-          dif_neg (show ¬ data.size * 8 < bp + (cnt - c) by
+      rw [goFusedP, dite_eq_right hrc, dite_eq_right hlit, goFused, dite_eq_right hrc]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax]
+      rw [dite_eq_right (show ¬ cnt ≤ c by omega),
+          dite_eq_right (show ¬ bp + (cnt - c) ≤ bp by omega),
+          dite_eq_right (show ¬ data.size * 8 < bp + (cnt - c) by
             have : pos * 8 ≤ data.size * 8 := by omega
             omega)]
       exact ih (bp + (cnt - c)) (by omega) (by omega)
   | case8 pos bitBuf cnt output hrc hlit sym bb c used hde hsym heob =>
       intro bp hpos hbp
-      rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
-      simp only [hde, if_neg hsym, if_pos heob, Except.map]
+      rw [goFusedP, dite_eq_right hrc, dite_eq_right hlit, goFused, dite_eq_right hrc]
+      simp only [hde, ite_eq_right hsym, ite_eq_left heob, Except.map]
   | case9 pos bitBuf cnt output hrc hlit sym bb c used hde hsym hneob idx hidx =>
       intro bp hpos hbp
       have hidxc : sym.toNat - 257 ≥ Inflate.lengthBase.size := hidx
-      rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
-      simp only [hde, if_neg hsym, if_neg hneob, dif_pos hidxc]
+      rw [goFusedP, dite_eq_right hrc, dite_eq_right hlit, goFused, dite_eq_right hrc]
+      simp only [hde, ite_eq_right hsym, ite_eq_right hneob, dite_eq_left hidxc]
       rfl
   | case10 pos bitBuf cnt output hrc hlit cnt0 sym bb c used hde hsym hneob idx hh base ih =>
       intro bp hpos hbp
@@ -1326,8 +1326,8 @@ theorem goFusedP_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArra
       have hext_lt : sym.toNat - 257 < Inflate.lengthExtra.size := by
         simp only [Inflate.lengthExtra_size]
         simp only [Inflate.lengthBase_size, ge_iff_le, Nat.not_le] at hhc; omega
-      rw [goFusedP, dif_neg hrc, dif_neg hlit, goFused, dif_neg hrc]
-      simp only [hde, if_neg hsym, if_neg hneob, dif_neg hhc]
+      rw [goFusedP, dite_eq_right hrc, dite_eq_right hlit, goFused, dite_eq_right hrc]
+      simp only [hde, ite_eq_right hsym, ite_eq_right hneob, dite_eq_right hhc]
       cases hex : InflateBuf.takeBits bb c (Inflate.lengthExtra[sym.toNat - 257]'hext_lt).toNat with
       | error e => rfl
       | ok pe =>
@@ -1392,53 +1392,53 @@ theorem goFused_eq_go (litTable distTable : HuffTree.DecodeTable) (data : ByteAr
     (litTable := litTable) (data := data) (litTree := litTree) (maxOut := maxOut)
     (dataSize := dataSize) with
   | case1 pos bitBuf cnt bitpos output hrc ih =>
-      rw [goFused, dif_pos hrc, ih,
+      rw [goFused, dite_eq_left hrc, ih,
         go_refill_step litTable distTable data litTree distTree maxOut dataSize
           pos bitBuf cnt bitpos output hrc, getElem!_pos data pos hrc.2]
   | case2 pos bitBuf cnt bitpos output hrc e hde =>
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
-      rw [goFused, dif_neg hrc, go, hrid]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dite_eq_right hrc]
+      rw [goFused, dite_eq_right hrc, go, hrid]
       simp only [hde]
   | case3 pos bitBuf cnt bitpos output hrc s bb c used hde hsym hmax =>
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
-      rw [goFused, dif_neg hrc, go, hrid]
-      simp only [hde, if_pos hsym, if_pos hmax]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dite_eq_right hrc]
+      rw [goFused, dite_eq_right hrc, go, hrid]
+      simp only [hde, ite_eq_left hsym, ite_eq_left hmax]
   | case4 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 =>
       have h1c : bitpos + (cnt - c) ≤ bitpos := h1
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
-      rw [goFused, dif_neg hrc, go, hrid]
-      simp only [hde, if_pos hsym, if_neg hmax, dif_pos h1c]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dite_eq_right hrc]
+      rw [goFused, dite_eq_right hrc, go, hrid]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax, dite_eq_left h1c]
   | case5 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 h2 =>
       have h1c : ¬ bitpos + (cnt - c) ≤ bitpos := h1
       have h2c : dataSize * 8 < bitpos + (cnt - c) := h2
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
-      rw [goFused, dif_neg hrc, go, hrid]
-      simp only [hde, if_pos hsym, if_neg hmax, dif_neg h1c, dif_pos h2c]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dite_eq_right hrc]
+      rw [goFused, dite_eq_right hrc, go, hrid]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax, dite_eq_right h1c, dite_eq_left h2c]
   | case6 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hsym hmax h1 h2 ih =>
       have h1c : ¬ bitpos + (cnt - c) ≤ bitpos := h1
       have h2c : ¬ dataSize * 8 < bitpos + (cnt - c) := h2
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
-      rw [goFused, dif_neg hrc, go, hrid]
-      simp only [hde, if_pos hsym, if_neg hmax, dif_neg h1c, dif_neg h2c]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dite_eq_right hrc]
+      rw [goFused, dite_eq_right hrc, go, hrid]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax, dite_eq_right h1c, dite_eq_right h2c]
       exact ih
   | case7 pos bitBuf cnt bitpos output hrc s bb c used hde hsym heob =>
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
-      rw [goFused, dif_neg hrc, go, hrid]
-      simp only [hde, if_neg hsym, if_pos heob]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dite_eq_right hrc]
+      rw [goFused, dite_eq_right hrc, go, hrid]
+      simp only [hde, ite_eq_right hsym, ite_eq_left heob]
   | case8 pos bitBuf cnt bitpos output hrc s bb c used hde hns hneob idx hidx =>
       have hidxc : s.toNat - 257 ≥ Inflate.lengthBase.size := hidx
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
-      rw [goFused, dif_neg hrc, go, hrid]
-      simp only [hde, if_neg hns, if_neg hneob, dif_pos hidxc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dite_eq_right hrc]
+      rw [goFused, dite_eq_right hrc, go, hrid]
+      simp only [hde, ite_eq_right hns, ite_eq_right hneob, dite_eq_left hidxc]
   | case9 pos bitBuf cnt bitpos output hrc cnt0 s bb c used hde hns hneob idx hh base ih =>
       have hhc : ¬ s.toNat - 257 ≥ Inflate.lengthBase.size := hh
-      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dif_neg hrc]
+      have hrid : refill data pos bitBuf cnt = (pos, bitBuf, cnt) := by rw [refill, dite_eq_right hrc]
       simp only [show cnt0 = cnt from rfl] at ih
       have hext_lt : s.toNat - 257 < Inflate.lengthExtra.size := by
         simp only [Inflate.lengthExtra_size]
         simp only [Inflate.lengthBase_size, ge_iff_le, Nat.not_le] at hhc; omega
-      rw [goFused, dif_neg hrc, go, hrid]
-      simp only [hde, if_neg hns, if_neg hneob, dif_neg hhc]
+      rw [goFused, dite_eq_right hrc, go, hrid]
+      simp only [hde, ite_eq_right hns, ite_eq_right hneob, dite_eq_right hhc]
       cases hex : InflateBuf.takeBits bb c (Inflate.lengthExtra[s.toNat - 257]'hext_lt).toNat with
       | error e => rfl
       | ok pe =>
@@ -1506,14 +1506,14 @@ theorem goFusedPU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArr
         exact USize.size_eq_two_pow ▸ (show pos.toNat + 1 < USize.size by omega)
       have e2 : (cnt + 8).toNat = cnt.toNat + 8 := by
         rw [USize.toNat_add, h8]; apply Nat.mod_eq_of_lt; omega
-      rw [InflateBuf.goFusedPU, dif_pos hrc, InflateBuf.goFusedP, dif_pos hgN,
+      rw [InflateBuf.goFusedPU, dite_eq_left hrc, InflateBuf.goFusedP, dite_eq_left hgN,
           ih (by rw [e1]; omega), e1, e2,
           InflateBuf.uget_eq_getElem data pos hpn, InflateBuf.usize_toUInt64_toNat]
   | case2 pos bitBuf cnt output hrc ent hlit hmax =>
       intro hpos
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_pos hlit, if_pos hmax,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_pos ((InflateBuf.litGuard_usize litTable bitBuf cnt).mp hlit), if_pos hmax]
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_left hlit, ite_eq_left hmax,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_left ((InflateBuf.litGuard_usize litTable bitBuf cnt).mp hlit), ite_eq_left hmax]
       rfl
   | case3 pos bitBuf cnt output hrc ent hlit hmax ih =>
       intro hpos
@@ -1525,30 +1525,30 @@ theorem goFusedPU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArr
       have hsub : (cnt - (HuffTree.unpackLen ent).toUSize).toNat
           = cnt.toNat - (HuffTree.unpackLen ent).toNat := by
         rw [USize.toNat_sub_of_le _ _ hl1, UInt8.toNat_toUSize]
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_pos ⟨hl0, hl1, hl2⟩, if_neg hmax,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_pos ((InflateBuf.litGuard_usize litTable bitBuf cnt).mp ⟨hl0, hl1, hl2⟩), if_neg hmax,
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_left ⟨hl0, hl1, hl2⟩, ite_eq_right hmax,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_left ((InflateBuf.litGuard_usize litTable bitBuf cnt).mp ⟨hl0, hl1, hl2⟩), ite_eq_right hmax,
           ih hpos, hsub, hle, hse, uint8_toUInt64_toNat]
   | case4 pos bitBuf cnt output hrc ent hlit e hde =>
       intro hpos
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_right hlit,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
       simp only [hde, Except.map]
   | case5 pos bitBuf cnt output hrc ent hlit sym bb c used hde hsym hmax =>
       intro hpos
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
-      simp only [hde, if_pos hsym, if_pos hmax]
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_right hlit,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, ite_eq_left hsym, ite_eq_left hmax]
       rfl
   | case6 pos bitBuf cnt output hrc ent hlit cnt0 sym bb c used hde hsym hmax hnp =>
       intro hpos
       have hnp' : cnt.toNat ≤ c := hnp
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
-      simp only [hde, if_pos hsym, if_neg hmax, dif_pos hnp']
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_right hlit,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax, dite_eq_left hnp']
       rfl
   | case7 pos bitBuf cnt output hrc ent hlit cnt0 sym bb c used hde hsym hmax hnp ih =>
       intro hpos
@@ -1556,35 +1556,35 @@ theorem goFusedPU_eq (litTable distTable : HuffTree.DecodeTable) (data : ByteArr
       have hcle : c ≤ cnt.toNat := decodeSym_cnt_le litTree litTable bitBuf cnt.toNat hde
       have hcrt : c.toUSize.toNat = c :=
         InflateBuf.toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hcle cnt.toNat_lt_two_pow_numBits)
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
-      simp only [hde, if_pos hsym, if_neg hmax, dif_neg hnp']
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_right hlit,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, ite_eq_left hsym, ite_eq_right hmax, dite_eq_right hnp']
       rw [ih hpos, hcrt]
   | case8 pos bitBuf cnt output hrc ent hlit sym bb c used hde hsym heob =>
       intro hpos
       have hcle : c ≤ cnt.toNat := decodeSym_cnt_le litTree litTable bitBuf cnt.toNat hde
       have hcrt : c.toUSize.toNat = c :=
         InflateBuf.toUSize_toNat_of_lt (Nat.lt_of_le_of_lt hcle cnt.toNat_lt_two_pow_numBits)
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
-      simp only [hde, if_neg hsym, if_pos heob, Except.map, hcrt]
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_right hlit,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, ite_eq_right hsym, ite_eq_left heob, Except.map, hcrt]
   | case9 pos bitBuf cnt output hrc ent hlit sym bb c used hde hsym hneob idx hidx =>
       intro hpos
       have hidxc : sym.toNat - 257 ≥ Inflate.lengthBase.size := hidx
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
-      simp only [hde, if_neg hsym, if_neg hneob, dif_pos hidxc]
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_right hlit,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, ite_eq_right hsym, ite_eq_right hneob, dite_eq_left hidxc]
       rfl
   | case10 pos bitBuf cnt output hrc ent hlit cnt0 sym bb c used hde hsym hneob idx hh base ih =>
       intro hpos
       have hhc : ¬ sym.toNat - 257 ≥ Inflate.lengthBase.size := hh
-      rw [InflateBuf.goFusedPU, dif_neg hrc, dif_neg hlit,
-          InflateBuf.goFusedP, dif_neg (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
-          dif_neg (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
-      simp only [hde, if_neg hsym, if_neg hneob, dif_neg hhc]
+      rw [InflateBuf.goFusedPU, dite_eq_right hrc, dite_eq_right hlit,
+          InflateBuf.goFusedP, dite_eq_right (fun h => hrc ((InflateBuf.refillGuard_usize data pos cnt hsz).mpr h)),
+          dite_eq_right (fun h => hlit ((InflateBuf.litGuard_usize litTable bitBuf cnt).mpr h))]
+      simp only [hde, ite_eq_right hsym, ite_eq_right hneob, dite_eq_right hhc]
       cases hex : InflateBuf.takeBits bb c
           (Inflate.lengthExtra[sym.toNat - 257]'(by
             simp only [Inflate.lengthExtra_size]
@@ -1786,8 +1786,8 @@ theorem decode_go_bitOff_pres : ∀ (t : HuffTree) (br : BitReader) (depth : Nat
     intro br depth s' br' hbo h
     rw [HuffTree.decode.go] at h
     by_cases hd : depth > 20
-    · rw [if_pos hd] at h; simp at h
-    · rw [if_neg hd] at h
+    · rw [ite_eq_left hd] at h; simp at h
+    · rw [ite_eq_right hd] at h
       cases hrb : br.readBit with
       | error e => rw [hrb] at h; simp [bind, Except.bind] at h
       | ok p =>
@@ -1796,8 +1796,8 @@ theorem decode_go_bitOff_pres : ∀ (t : HuffTree) (br : BitReader) (depth : Nat
         simp only [bind, Except.bind] at h
         have hbo1 : br1.bitOff < 8 := ZipCommon.readBit_bitOff_lt br br1 bit hrb
         by_cases hbit : (bit == 0) = true
-        · rw [if_pos hbit] at h; exact ihz br1 _ s' br' hbo1 h
-        · rw [if_neg hbit] at h; exact iho br1 _ s' br' hbo1 h
+        · rw [ite_eq_left hbit] at h; exact ihz br1 _ s' br' hbo1 h
+        · rw [ite_eq_right hbit] at h; exact iho br1 _ s' br' hbo1 h
 
 theorem decode_bitOff_pres {tree : HuffTree} {br br' : BitReader} {s : UInt16}
     (hbo : br.bitOff < 8) (h : tree.decode br = .ok (s, br')) : br'.bitOff < 8 :=
@@ -1811,7 +1811,7 @@ theorem readCLCodeLengths_bitOff_pres (numCodeLen : Nat) :
   induction br, cl, i using Inflate.readCLCodeLengths.induct (numCodeLen := numCodeLen) with
   | case1 br cl i hlt h_i ih =>
     intro cl' br' hbo h
-    rw [Inflate.readCLCodeLengths, if_pos hlt, dif_pos h_i] at h
+    rw [Inflate.readCLCodeLengths, ite_eq_left hlt, dite_eq_left h_i] at h
     simp only [bind, Except.bind] at h
     cases hrb : br.readBits 3 with
     | error e => rw [hrb] at h; simp at h
@@ -1821,10 +1821,10 @@ theorem readCLCodeLengths_bitOff_pres (numCodeLen : Nat) :
       exact ih v br1 cl' br' (readBits_bitOff_lt_pos (by omega) hrb) h
   | case2 br cl i hlt h_ni =>
     intro cl' br' hbo h
-    rw [Inflate.readCLCodeLengths, if_pos hlt, dif_neg h_ni] at h; simp at h
+    rw [Inflate.readCLCodeLengths, ite_eq_left hlt, dite_eq_right h_ni] at h; simp at h
   | case3 br cl i hni =>
     intro cl' br' hbo h
-    rw [Inflate.readCLCodeLengths, if_neg hni, Except.ok.injEq, Prod.mk.injEq] at h
+    rw [Inflate.readCLCodeLengths, ite_eq_right hni, Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨_, rfl⟩ := h; exact hbo
 
 /-- `decodeCLSymbols` preserves `bitOff < 8`. -/
@@ -1836,11 +1836,11 @@ theorem decodeCLSymbols_bitOff_pres (clTree : HuffTree) (totalCodes : Nat) :
   induction br, cl, idx using Inflate.decodeCLSymbols.induct (totalCodes := totalCodes) with
   | case1 br cl idx hge =>
     intro cl' br' hbo h
-    rw [Inflate.decodeCLSymbols, if_pos hge, Except.ok.injEq, Prod.mk.injEq] at h
+    rw [Inflate.decodeCLSymbols, ite_eq_left hge, Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨_, rfl⟩ := h; exact hbo
   | case2 br cl idx hge ih_set ih16 ih17 ih18 =>
     intro cl' br' hbo h
-    rw [Inflate.decodeCLSymbols, if_neg hge] at h
+    rw [Inflate.decodeCLSymbols, ite_eq_right hge] at h
     simp only [bind, Except.bind] at h
     cases hdec : clTree.decode br with
     | error e => rw [hdec] at h; simp at h
@@ -1849,15 +1849,15 @@ theorem decodeCLSymbols_bitOff_pres (clTree : HuffTree) (totalCodes : Nat) :
       rw [hdec] at h; simp only [] at h
       have hbo1 : br1.bitOff < 8 := decode_bitOff_pres hbo hdec
       by_cases hs16 : sym < 16
-      · rw [if_pos hs16] at h; exact ih_set sym br1 cl' br' hbo1 h
-      · rw [if_neg hs16] at h
+      · rw [ite_eq_left hs16] at h; exact ih_set sym br1 cl' br' hbo1 h
+      · rw [ite_eq_right hs16] at h
         by_cases he16 : (sym == 16) = true
-        · rw [if_pos he16] at h
+        · rw [ite_eq_left he16] at h
           by_cases hi0 : (idx == 0) = true
-          · rw [if_pos hi0] at h; simp [bind, Except.bind] at h
-          · rw [if_neg hi0] at h
+          · rw [ite_eq_left hi0] at h; simp [bind, Except.bind] at h
+          · rw [ite_eq_right hi0] at h
             by_cases hcl : idx - 1 < cl.size
-            · rw [dif_pos hcl] at h
+            · rw [dite_eq_left hcl] at h
               cases hrb : br1.readBits 2 with
               | error e => rw [hrb] at h; simp at h
               | ok q =>
@@ -1865,10 +1865,10 @@ theorem decodeCLSymbols_bitOff_pres (clTree : HuffTree) (totalCodes : Nat) :
                 split at h
                 · simp at h
                 · exact ih16 hcl rep br2 cl' br' (readBits_bitOff_lt_pos (by omega) hrb) h
-            · rw [dif_neg hcl] at h; simp at h
-        · rw [if_neg he16] at h
+            · rw [dite_eq_right hcl] at h; simp at h
+        · rw [ite_eq_right he16] at h
           by_cases he17 : (sym == 17) = true
-          · rw [if_pos he17] at h
+          · rw [ite_eq_left he17] at h
             cases hrb : br1.readBits 3 with
             | error e => rw [hrb] at h; simp at h
             | ok q =>
@@ -1876,9 +1876,9 @@ theorem decodeCLSymbols_bitOff_pres (clTree : HuffTree) (totalCodes : Nat) :
               split at h
               · simp at h
               · exact ih17 rep br2 cl' br' (readBits_bitOff_lt_pos (by omega) hrb) h
-          · rw [if_neg he17] at h
+          · rw [ite_eq_right he17] at h
             by_cases he18 : (sym == 18) = true
-            · rw [if_pos he18] at h
+            · rw [ite_eq_left he18] at h
               cases hrb : br1.readBits 7 with
               | error e => rw [hrb] at h; simp at h
               | ok q =>
@@ -1886,7 +1886,7 @@ theorem decodeCLSymbols_bitOff_pres (clTree : HuffTree) (totalCodes : Nat) :
                 split at h
                 · simp at h
                 · exact ih18 rep br2 cl' br' (readBits_bitOff_lt_pos (by omega) hrb) h
-            · rw [if_neg he18] at h; simp at h
+            · rw [ite_eq_right he18] at h; simp at h
 
 /-- `decodeDynamicTrees` preserves `bitOff < 8`. -/
 theorem decodeDynamicTrees_bitOff_pres {br : BitReader} {litTree distTree : HuffTree} {br' : BitReader}
@@ -2028,14 +2028,14 @@ theorem inflateLoopBuf_eq (fixedLit fixedDist : HuffTree) (maxOut dataSize : Nat
                 else Inflate.inflateLoop br' o' fixedLit fixedDist maxOut dataSize) := by
       intro o' br' hp' hl' hd'
       by_cases hbf : (bfinal == 1) = true
-      · rw [if_pos hbf, if_pos hbf]
-      · rw [if_neg hbf, if_neg hbf]
+      · rw [ite_eq_left hbf, ite_eq_left hbf]
+      · rw [ite_eq_right hbf, ite_eq_right hbf]
         by_cases hg1 : br'.bitPos ≤ br.bitPos
-        · rw [dif_pos hg1, dif_pos hg1]
-        · rw [dif_neg hg1, dif_neg hg1]
+        · rw [dite_eq_left hg1, dite_eq_left hg1]
+        · rw [dite_eq_right hg1, dite_eq_right hg1]
           by_cases hg2 : dataSize * 8 < br'.bitPos
-          · rw [dif_pos hg2, dif_pos hg2]
-          · rw [dif_neg hg2, dif_neg hg2]
+          · rw [dite_eq_left hg2, dite_eq_left hg2]
+          · rw [dite_eq_right hg2, dite_eq_right hg2]
             exact ih o' br' hg1 hg2 hp' hl' hd'
     simp only [h1, h2, hrb1, hrb2, bind, Except.bind]
     split

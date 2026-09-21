@@ -57,7 +57,7 @@ theorem ByteArray.ugetUInt64LE_usetUInt64LE_disjoint (a : ByteArray)
   simp only [ByteArray.ugetUInt64LE, ByteArray.usetUInt64LE,
     ByteArray.getElem_eq_getElem_data, ByteArray.data_set, Array.getElem_set]
   rcases hdisj with hdisj | hdisj <;>
-    simp (config := { maxSteps := 100000 }) (discharger := omega) only [if_neg] <;> rfl
+    simp (config := { maxSteps := 100000 }) (discharger := omega) only [ite_eq_right] <;> rfl
 
 theorem ByteArray.ugetUInt32LE_usetUInt32LE_same (a : ByteArray) (off : USize)
     (v : UInt32) (h : off.toNat + 4 ≤ a.size) :
@@ -79,7 +79,7 @@ theorem ByteArray.ugetUInt32LE_usetUInt32LE_disjoint (a : ByteArray)
   simp only [ByteArray.ugetUInt32LE, ByteArray.usetUInt32LE,
     ByteArray.getElem_eq_getElem_data, ByteArray.data_set, Array.getElem_set]
   rcases hdisj with hdisj | hdisj <;>
-    simp (config := { maxSteps := 100000 }) (discharger := omega) only [if_neg] <;> rfl
+    simp (config := { maxSteps := 100000 }) (discharger := omega) only [ite_eq_right] <;> rfl
 
 theorem fusedFreqOffset_toNat (idx : Nat) (hidx : idx < fusedFreqBinCount) :
     (idx * 8).toUSize.toNat = idx * 8 := by
@@ -321,9 +321,9 @@ private theorem hash3L1U_toNat_eq (data : ByteArray) (dataSizeU pU : USize)
     omega
   unfold hash3L1U lz77Greedy.hash3
   by_cases h4 : pU.toNat + 4 ≤ data.size
-  · rw [dif_pos (h4iff.mpr h4), dif_pos h4, dif_pos hround]
+  · rw [dite_eq_left (h4iff.mpr h4), dite_eq_left h4, dite_eq_left hround]
     simp only [hpUeq, UInt32.toNat_toUSize, Nat.mod_eq_of_lt (hhigh _)]
-  · rw [dif_neg (fun h => h4 (h4iff.mp h)), dif_neg h4,
+  · rw [dite_eq_right (fun h => h4 (h4iff.mp h)), dite_eq_right h4,
       UInt32.toNat_toUSize, Nat.mod_eq_of_lt (hhigh _)]
 
 /-- The full sixteen-bit direct-table mask is inert on the established L1
@@ -380,7 +380,7 @@ private theorem directHead16_probe_update_eq (data : ByteArray)
     exact (getElem!_pos heads _ hh).symm
   · rw [guardedSet_eq]
     simp only [Array.uset, eh, Array.set!_eq_setIfInBounds,
-      Array.setIfInBounds_def, dif_pos hh]
+      Array.setIfInBounds_def, dite_eq_left hh]
 
 /-- The native-word clamp used by the direct matcher is the ordinary
     `min 258` clamp.  At every position admitted by the three-byte outer guard,
@@ -482,10 +482,10 @@ private theorem directHeadMatchLenU_spec (data : ByteArray)
       · intro hd
         by_cases hm : ml ≥ 3
         · exact hm
-        · rw [if_neg hm] at hd
+        · rw [ite_eq_right hm] at hd
           omega
       · intro hm
-        rw [if_pos hm]
+        rw [ite_eq_left hm]
         exact hm
     · intro hd
       have hm : ml ≥ 3 := by
@@ -493,7 +493,7 @@ private theorem directHeadMatchLenU_spec (data : ByteArray)
         · exact hm
         · simp only [hm, ↓reduceIte] at hd
           omega
-      rw [if_pos hm]
+      rw [ite_eq_left hm]
   · have hcore :
         (countMatchUCore data headU posU maxLenU hsz
           hheadMax hposMax).toNat = ml :=
@@ -561,11 +561,11 @@ theorem directHeadPrefixMatch_chainOne (data : ByteArray)
   by_cases hcN : headU.toNat < posU.toNat ∧
       posU.toNat - headU.toNat ≤ 32768
   · have hcU := hciff.mpr hcN
-    rw [dif_pos hcU]
+    rw [dite_eq_left hcU]
     have hrmod' :
         chainWalkGuardedPackedU data prev 32768 posU.toNat maxLenU.toNat
             258 hposMax headU.toNat 1 0 0 % 512 = ml := by
-      rw [hrmod, dif_pos hcN]
+      rw [hrmod, dite_eq_left hcN]
     have hdirect := directHeadMatchLenU_spec data headU posU maxLenU
       hsz hheadMax hposMax
     dsimp only at hdirect
@@ -585,8 +585,8 @@ theorem directHeadPrefixMatch_chainOne (data : ByteArray)
     have hrmod0 :
         chainWalkGuardedPackedU data prev 32768 posU.toNat maxLenU.toNat
             258 hposMax headU.toNat 1 0 0 % 512 = 0 := by
-      rw [hrmod, dif_neg hcN]
-    rw [dif_neg hcU, USize.toNat_zero, hrmod0]
+      rw [hrmod, dite_eq_right hcN]
+    rw [dite_eq_right hcU, USize.toNat_zero, hrmod0]
     simp
 
 /-- Whole-probe form of `directHeadPrefixMatch_chainOne`.  A table invariant
@@ -642,7 +642,7 @@ theorem directHeadPrefixMatch_chainOne_bounded (data : ByteArray)
       exact hc.2
   by_cases hc :
       head.toUSize < posU ∧ posU - head.toUSize ≤ 32768
-  · rw [dif_pos hc]
+  · rw [dite_eq_left hc]
     have hheadMax :
         head.toUSize.toNat + maxLenU.toNat ≤ data.size := by
       rw [hround]
@@ -652,14 +652,14 @@ theorem directHeadPrefixMatch_chainOne_bounded (data : ByteArray)
     have hprobe := directHeadPrefixMatch_chainOne data head.toUSize posU
       maxLenU hsz hheadMax hposMax h3max hmax511 prev
     dsimp only at hprobe
-    rw [dif_pos hc] at hprobe
+    rw [dite_eq_left hc] at hprobe
     simpa only [hround] using hprobe
-  · rw [dif_neg hc]
+  · rw [dite_eq_right hc]
     have hcN : ¬(head < posU.toNat ∧
         posU.toNat - head ≤ 32768) :=
       fun hh => hc (hciff.mpr hh)
     rw [chainWalkGuardedPackedU_one_mod data prev 32768 posU.toNat
-      maxLenU.toNat 258 hposMax head hmax511, dif_neg hcN]
+      maxLenU.toNat 258 hposMax head hmax511, dite_eq_right hcN]
     simp
 
 /-- One native insertion from the fixed cap-three prefix is the corresponding guarded `Nat` insertion
@@ -694,7 +694,7 @@ private theorem insertHashL1U_eq (data : ByteArray) (prevSize pos j : Nat)
     rw [USize.lt_iff_toNat_lt, epj2, hds]
   unfold insertHashL1U
   by_cases hd : pos + j + 2 < data.size
-  · rw [dif_pos (hcond.mpr hd), dif_pos hd]
+  · rw [dite_eq_left (hcond.mpr hd), dite_eq_left hd]
     have hhash := hash3L1U_toNat_eq data dataSizeU (posU + jU) hds hfit (by rw [epj]; omega)
     have hhash' :
         (hash3L1U data dataSizeU (posU + jU) hds hfit (by rw [epj]; omega)).toNat =
@@ -716,9 +716,9 @@ private theorem insertHashL1U_eq (data : ByteArray) (prevSize pos j : Nat)
       fun a i h => (getElem!_pos a i h).symm
     have eset : ∀ (a : Array Nat) (i v : Nat) (h : i < a.size),
         a.set i v h = a.set! i v := fun a i v h => by
-      rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos h]
+      rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dite_eq_left h]
     simp only [Array.uget, Array.uset, eset, eget, eidx, emask, epj]
-  · rw [dif_neg (fun h => hd (hcond.mp h)), dif_neg hd]
+  · rw [dite_eq_right (fun h => hd (hcond.mp h)), dite_eq_right hd]
 
 /-- For a reference, the fixed first two insertions plus the third insertion
     guarded by `3 < matchLen` are exactly the generic cap-3 merged update. -/
@@ -782,13 +782,13 @@ private theorem insertHashL1U_cap3_eq (data : ByteArray) (prevSize : Nat)
         by_cases h3 : posU.toNat + 3 + 2 < data.size <;>
           simp only [h1, h2, h3, ↓reduceDIte]
     all_goals
-      rw [updateHashesMerged, if_pos (by omega)]
+      rw [updateHashesMerged, ite_eq_left (by omega)]
       simp only [h1, ↓reduceDIte]
-      rw [updateHashesMerged, if_pos (by omega)]
+      rw [updateHashesMerged, ite_eq_left (by omega)]
       simp only [h2, ↓reduceDIte]
-      rw [updateHashesMerged, if_pos (by omega)]
+      rw [updateHashesMerged, ite_eq_left (by omega)]
       simp only [h3, ↓reduceDIte]
-      rw [updateHashesMerged, if_neg (by omega)]
+      rw [updateHashesMerged, ite_eq_right (by omega)]
     all_goals
       simp only [headProbeGuarded_eq, guardedSet_eq, Nat.reduceAdd]
   · have hcapN : ¬ 3 < matchLenU.toNat := by
@@ -802,11 +802,11 @@ private theorem insertHashL1U_cap3_eq (data : ByteArray) (prevSize : Nat)
       by_cases h2 : posU.toNat + 2 + 2 < data.size <;>
         simp only [h1, h2, ↓reduceDIte]
     all_goals
-      rw [updateHashesMerged, if_pos (by omega)]
+      rw [updateHashesMerged, ite_eq_left (by omega)]
       simp only [h1, ↓reduceDIte]
-      rw [updateHashesMerged, if_pos (by omega)]
+      rw [updateHashesMerged, ite_eq_left (by omega)]
       simp only [h2, ↓reduceDIte]
-      rw [updateHashesMerged, if_neg (by omega)]
+      rw [updateHashesMerged, ite_eq_right (by omega)]
     all_goals
       simp only [headProbeGuarded_eq, guardedSet_eq, Nat.reduceAdd]
 
@@ -1159,12 +1159,12 @@ private theorem lz77GreedyMergedLoopF1U_eq_step (data : ByteArray) (prevSize : N
     have hcond : posU + 2 < dataSizeU ↔ posU.toNat + 2 < data.size := by
       rw [USize.lt_iff_toNat_lt, ep2, hds]
     by_cases hlt : posU.toNat + 2 < data.size
-    · rw [dif_pos (hcond.mpr hlt), dif_pos hlt]
+    · rw [dite_eq_left (hcond.mpr hlt), dite_eq_left hlt]
       have eget : ∀ (a : Array Nat) (i : Nat) (h : i < a.size), a[i]'h = a[i]! :=
         fun a i h => (getElem!_pos a i h).symm
       have eset : ∀ (a : Array Nat) (i v : Nat) (h : i < a.size),
           a.set i v h = a.set! i v := fun a i v h => by
-        rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dif_pos h]
+        rw [Array.set!_eq_setIfInBounds, Array.setIfInBounds, dite_eq_left h]
       have ehsh : ∀ (hp : posU.toNat + 2 < data.size),
           (hash3L1U data dataSizeU posU hds hfit hp).toNat =
             lz77Greedy.hash3 data posU.toNat 65536 hlt := by
@@ -1387,7 +1387,7 @@ private theorem lz77GreedyMergedLoopF1U_eq_step (data : ByteArray) (prevSize : N
             cRing hcsRing (posU + 1) (by rw [hnext]; omega) hcRing
             (acc.push w) (bumpLitFreqP litF w) distF rfl
           simpa only [hnext] using hi
-    · rw [dif_neg (fun h => hlt (hcond.mp h)), dif_neg hlt]
+    · rw [dite_eq_right (fun h => hlt (hcond.mp h)), dite_eq_right hlt]
 
 set_option maxRecDepth 100000 in
 /-- The level-one native-word outer loop is the fixed-policy generic fused
@@ -1466,7 +1466,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
     have hcond : posU + 2 < dataSizeU ↔ posU.toNat + 2 < data.size := by
       rw [USize.lt_iff_toNat_lt, ep2, hds]
     by_cases hlt : posU.toNat + 2 < data.size
-    · rw [dif_pos (hcond.mpr hlt), dif_pos hlt]
+    · rw [dite_eq_left (hcond.mpr hlt), dite_eq_left hlt]
       have ehsh :
           (hash3L1U data dataSizeU posU hds hfit hlt).toNat =
             lz77Greedy.hash3 data posU.toNat 65536 hlt :=
@@ -1514,7 +1514,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
           (headProbeGuarded c
             (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt))
           maxChain
-      · simp only [dif_pos hg]
+      · simp only [dite_eq_left hg]
         let cRing := guardedSet
           (guardedSet c
             (prevSize + lz77Greedy.hash3 data posU.toNat 65536 hlt)
@@ -1554,7 +1554,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
           have hgeN : matchLenU.toNat ≥ 3 := hgeIff.mp hgeU
           have hgeNRaw := hgeN
           simp only [matchLenU, r, cRing, head, maxLen] at hgeNRaw
-          rw [dif_pos hgeNRaw]
+          rw [dite_eq_left hgeNRaw]
           split
           · rename_i hleURaw
             have hleU : posU + matchLenU ≤ dataSizeU := by
@@ -1562,7 +1562,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
             have hleN : posU.toNat + matchLenU.toNat ≤ data.size := hleIff.mp hleU
             have hleNRaw := hleN
             simp only [matchLenU, r, cRing, head, maxLen] at hleNRaw
-            rw [dif_pos hleNRaw]
+            rw [dite_eq_left hleNRaw]
             have hnext : (posU + matchLenU).toNat ≤ data.size := by
               rw [hsum]
               exact hleN
@@ -1590,7 +1590,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
               fun hh => hnleU (hleIff.mpr hh)
             have hnleNRaw := hnleN
             simp only [matchLenU, r, cRing, head, maxLen] at hnleNRaw
-            rw [dif_neg hnleNRaw]
+            rw [dite_eq_right hnleNRaw]
             simp only [uget_eq_getElem]
             have hnext : (posU + 1).toNat = posU.toNat + 1 := by
               rw [USize.toNat_add, USize.toNat_one]
@@ -1611,7 +1611,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
             fun hh => hngeU (hgeIff.mpr hh)
           have hngeNRaw := hngeN
           simp only [matchLenU, r, cRing, head, maxLen] at hngeNRaw
-          rw [dif_neg hngeNRaw]
+          rw [dite_eq_right hngeNRaw]
           simp only [uget_eq_getElem]
           have hnext : (posU + 1).toNat = posU.toNat + 1 := by
             rw [USize.toNat_add, USize.toNat_one]
@@ -1625,7 +1625,7 @@ theorem lz77GreedyMergedLoopFNU_eq (data : ByteArray) (prevSize maxChain insertC
               (posU + 1) (by rw [hnext]; omega)
               (acc.push (packTok (.literal data[posU.toNat])))
               (bumpLitFreqP litF (packTok (.literal data[posU.toNat]))) distF rfl
-      · simp only [dif_neg hg, uget_eq_getElem]
+      · simp only [dite_eq_right hg, uget_eq_getElem]
     · have hnU : ¬posU + 2 < dataSizeU := fun h => hlt (hcond.mp h)
       simp only [hnU, hlt, ↓reduceDIte]
 
@@ -1787,7 +1787,7 @@ theorem bumpLitFreqU64_rep (f : FusedFreqBytes) (ws : Array UInt32) (w : UInt32)
     omega
   have hbump : litBumpIdxP w = w.toUInt8.toNat := by
     unfold litBumpIdxP
-    rw [if_pos hc]
+    rw [ite_eq_left hc]
   constructor
   · intro k hk
     rw [litDeltaP_push, hbump]
@@ -1795,16 +1795,16 @@ theorem bumpLitFreqU64_rep (f : FusedFreqBytes) (ws : Array UInt32) (w : UInt32)
     by_cases heq : w.toUInt8.toNat = k
     · subst k
       rw [getFusedFreqBytes_bump_same]
-      · rw [hrep.1 _ hwi, if_pos rfl]
+      · rw [hrep.1 _ hwi, ite_eq_left rfl]
       · rw [hrep.1 _ hwi]
         have hle := litDeltaP_le ws 0 w.toUInt8.toNat
         simp only [Nat.sub_zero] at hle
         omega
     · rw [getFusedFreqBytes_bump_ne]
-      rw [hrep.1 k hk, if_neg heq, Nat.add_zero]
+      rw [hrep.1 k hk, ite_eq_right heq, Nat.add_zero]
       exact heq
   · intro k hk
-    simp only [distDeltaP_push, hc, if_pos, Nat.add_zero]
+    simp only [distDeltaP_push, hc, ite_eq_left, Nat.add_zero]
     simp only [bumpLitFreqU64]
     rw [getFusedFreqBytes_bump_ne]
     · exact hrep.2 k hk
@@ -1845,7 +1845,7 @@ theorem bumpRefFreqU64_rep (f : FusedFreqBytes) (ws : Array UInt32) (w : UInt32)
     omega
   have hbump : litBumpIdxP w = lIdx + 257 := by
     unfold litBumpIdxP
-    rw [if_neg hc]
+    rw [ite_eq_right hc]
   constructor
   · intro k hk
     rw [litDeltaP_push, hbump]
@@ -1854,13 +1854,13 @@ theorem bumpRefFreqU64_rep (f : FusedFreqBytes) (ws : Array UInt32) (w : UInt32)
     · by_cases heq : lIdx + 257 = k
       · subst k
         rw [getFusedFreqBytes_bump_same]
-        · rw [hrep.1 _ hl, if_pos rfl]
+        · rw [hrep.1 _ hl, ite_eq_left rfl]
         · rw [hrep.1 _ hl]
           have hle := litDeltaP_le ws 0 (lIdx + 257)
           simp only [Nat.sub_zero] at hle
           omega
       · rw [getFusedFreqBytes_bump_ne]
-        rw [hrep.1 k hk, if_neg heq, Nat.add_zero]
+        rw [hrep.1 k hk, ite_eq_right heq, Nat.add_zero]
         exact heq
     · omega
   · intro k hk
@@ -1947,7 +1947,7 @@ theorem bumpLitFreqP_push (acc : Array UInt32) (w : UInt32)
     (bumpLitFreqP litF w).val = (tokenFreqsP (acc.push w)).1 := by
   have hidx : w.toUInt8.toNat < litF.val.size := by
     have := UInt8.toNat_lt w.toUInt8; rw [litF.property]; omega
-  have hbump : litBumpIdxP w = w.toUInt8.toNat := by unfold litBumpIdxP; rw [if_pos hc]
+  have hbump : litBumpIdxP w = w.toUInt8.toNat := by unfold litBumpIdxP; rw [ite_eq_left hc]
   apply Array.ext
   · simp only [bumpLitFreqP, Array.size_set!]; rw [litF.property, (tokenFreqsP_size (acc.push w)).1]
   · intro k hk _
@@ -1959,8 +1959,8 @@ theorem bumpLitFreqP_push (acc : Array UInt32) (w : UInt32)
     simp only [bumpLitFreqP]
     by_cases hk2 : k = w.toUInt8.toNat
     · subst hk2
-      rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos litF.val _ hidx, if_pos rfl]
-    · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk2), if_neg (fun h => hk2 h.symm), Nat.add_zero]
+      rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos litF.val _ hidx, ite_eq_left rfl]
+    · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk2), ite_eq_right (fun h => hk2 h.symm), Nat.add_zero]
 
 /-- For a literal word, the distance histogram is unchanged. -/
 theorem distFreq_push_lit (acc : Array UInt32) (w : UInt32)
@@ -1974,7 +1974,7 @@ theorem distFreq_push_lit (acc : Array UInt32) (w : UInt32)
     rw [(tokenFreqsP_size acc).2] at hk
     rw [← getElem!_pos _ k (by rw [(tokenFreqsP_size acc).2]; exact hk),
       ← getElem!_pos _ k (by rw [(tokenFreqsP_size (acc.push w)).2]; exact hk)]
-    rw [tokenFreqsP_dist (acc.push w) k, distDeltaP_push, if_pos hc, Nat.add_zero,
+    rw [tokenFreqsP_dist (acc.push w) k, distDeltaP_push, ite_eq_left hc, Nat.add_zero,
       ← tokenFreqsP_dist acc k]
 
 /-- **Push-reference correspondence (lit/len).** -/
@@ -1990,7 +1990,7 @@ theorem bumpRefLitFreqP_push (acc : Array UInt32) (w : UInt32)
   have hidx : codeIdx (lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)) + 257 < litF.val.size := by
     rw [litF.property, hcodeeq]; omega
   have hbump : litBumpIdxP w = codeIdx (lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)) + 257 := by
-    unfold litBumpIdxP; rw [if_neg hc]
+    unfold litBumpIdxP; rw [ite_eq_right hc]
   apply Array.ext
   · simp only [bumpRefLitFreqP, Array.size_set!]; rw [litF.property, (tokenFreqsP_size (acc.push w)).1]
   · intro k hk _
@@ -2002,8 +2002,8 @@ theorem bumpRefLitFreqP_push (acc : Array UInt32) (w : UInt32)
     simp only [bumpRefLitFreqP]
     by_cases hk2 : k = codeIdx (lenCodeWord (((w >>> 16) &&& 0x7FFF).toNat)) + 257
     · subst hk2
-      rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos litF.val _ hidx, if_pos rfl]
-    · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk2), if_neg (fun h => hk2 h.symm), Nat.add_zero]
+      rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos litF.val _ hidx, ite_eq_left rfl]
+    · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk2), ite_eq_right (fun h => hk2 h.symm), Nat.add_zero]
 
 /-- **Push-reference correspondence (distance).** -/
 theorem bumpRefDistFreqP_push (acc : Array UInt32) (w : UInt32)
@@ -2023,23 +2023,23 @@ theorem bumpRefDistFreqP_push (acc : Array UInt32) (w : UInt32)
     simp only [bumpRefDistFreqP, Array.size_set!, distF.property] at hk
     rw [← getElem!_pos _ k (by simp only [bumpRefDistFreqP, Array.size_set!, distF.property]; exact hk),
       ← getElem!_pos _ k (by rw [(tokenFreqsP_size (acc.push w)).2]; exact hk)]
-    rw [tokenFreqsP_dist (acc.push w) k, distDeltaP_push, if_neg hc, ← tokenFreqsP_dist acc k, ← hdist]
+    rw [tokenFreqsP_dist (acc.push w) k, distDeltaP_push, ite_eq_right hc, ← tokenFreqsP_dist acc k, ← hdist]
     simp only [bumpRefDistFreqP]
     by_cases hk2 : k = codeIdx (distCodeWord ((w &&& 0xFFFF).toNat))
     · subst hk2
-      rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos distF.val _ hidx, if_pos rfl]
-    · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk2), if_neg (fun h => hk2 h.symm), Nat.add_zero]
+      rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos distF.val _ hidx, ite_eq_left rfl]
+    · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk2), ite_eq_right (fun h => hk2 h.symm), Nat.add_zero]
 
 /-- `tokenFreqsP` of the empty stream is the seed histogram (lit/len). -/
 theorem tokenFreqsP_nil_fst : initLitFreqF.val = (tokenFreqsP (#[] : Array UInt32)).1 := by
   unfold tokenFreqsP tokenFreqsP.go
-  rw [dif_neg (by decide)]
+  rw [dite_eq_right (by decide)]
   simp only [initLitFreqF]
 
 /-- `tokenFreqsP` of the empty stream is the seed histogram (distance). -/
 theorem tokenFreqsP_nil_snd : initDistFreqF.val = (tokenFreqsP (#[] : Array UInt32)).2 := by
   unfold tokenFreqsP tokenFreqsP.go
-  rw [dif_neg (by decide)]
+  rw [dite_eq_right (by decide)]
   simp only [initDistFreqF]
 
 /-- The fused trailing loop computes the plain `trailingPT` tokens and their
@@ -2378,7 +2378,7 @@ theorem lz77ChainIterPMergedFNU64_eq (data : ByteArray)
       (boxed.1, boxed.2.1.val, boxed.2.2.val) := by
   unfold lz77ChainIterPMergedFNU64 lz77ChainIterPMergedFNU
   by_cases hsmall : data.size < 3
-  · simp only [hsmall, if_pos]
+  · simp only [hsmall, ite_eq_left]
     have haddr : data.size.toUSize.toNat = data.size :=
       toUSize_toNat_of_lt (Nat.lt_of_lt_of_le (by omega) USize.le_size)
     generalize hr : trailingPFU64 data 0 TokenArray.empty initFusedFreqBytes = r
@@ -2394,10 +2394,10 @@ theorem lz77ChainIterPMergedFNU64_eq (data : ByteArray)
     have hf := fusedFreqBytesToNat_eq freqs
       (trailingPT data 0 TokenArray.empty).toArray hw.2
     rw [hb, hf, hw.1]
-  · simp only [hsmall, if_false]
+  · simp only [hsmall, ite_false]
     by_cases hg : data.size.toUSize.toNat = data.size ∧
         data.size * 512 + 511 < USize.size
-    · simp only [dif_pos hg]
+    · simp only [dite_eq_left hg]
       let prevSize := min chainWinSize data.size
       let c := Array.replicate (prevSize + 65536) data.size
       have hw := lz77GreedyMergedLoopFNU64_spec data prevSize maxChain insertCap niceLen
@@ -2417,7 +2417,7 @@ theorem lz77ChainIterPMergedFNU64_eq (data : ByteArray)
       rcases boxed with ⟨boxedTokens, litF, distF⟩
       have hf := fusedFreqBytesToNat_eq freqs boxedTokens.toArray hw.2.1
       rw [hf, hw.1, hw.2.2.1, hw.2.2.2]
-    · simp only [dif_neg hg]
+    · simp only [dite_eq_right hg]
 
 /-- The specialized native-word wide loop has exactly the same token result as
     the boxed specialized loop, while its final byte buffer represents that
@@ -2536,7 +2536,7 @@ theorem lz77ChainIterPMergedF1U64_eq (data : ByteArray) :
       (boxed.1, boxed.2.1.val, boxed.2.2.val) := by
   unfold lz77ChainIterPMergedF1U64 lz77ChainIterPMergedF1U
   by_cases hsmall : data.size < 3
-  · simp only [hsmall, if_pos]
+  · simp only [hsmall, ite_eq_left]
     have haddr : data.size.toUSize.toNat = data.size :=
       toUSize_toNat_of_lt (Nat.lt_of_lt_of_le (by omega) USize.le_size)
     generalize hr : trailingPFU64 data 0 TokenArray.empty initFusedFreqBytes = r
@@ -2552,11 +2552,11 @@ theorem lz77ChainIterPMergedF1U64_eq (data : ByteArray) :
     have hf := fusedFreqBytesToNat_eq freqs
       (trailingPT data 0 TokenArray.empty).toArray hw.2
     rw [hb, hf, hw.1]
-  · simp only [hsmall, if_false]
+  · simp only [hsmall, ite_false]
     by_cases hg : data.size.toUSize.toNat = data.size ∧
         data.size.toUSize < ((~~~(0 : USize)) >>> 9) ∧
         data.size * 512 + 511 < USize.size
-    · simp only [dif_pos hg]
+    · simp only [dite_eq_left hg]
       let prevSize := min chainWinSize data.size
       let c := Array.replicate (prevSize + 65536) data.size
       have hsz : data.size < USize.size := by
@@ -2588,7 +2588,7 @@ theorem lz77ChainIterPMergedF1U64_eq (data : ByteArray) :
       rcases boxed with ⟨boxedTokens, litF, distF⟩
       have hf := fusedFreqBytesToNat_eq freqs boxedTokens.toArray hw.2.1
       rw [hf, hw.1, hw.2.2.1, hw.2.2.2]
-    · simp only [dif_neg hg]
+    · simp only [dite_eq_right hg]
 
 @[irreducible] private def directHeadFNU64Run (data : ByteArray)
     (dataSizeU : USize) (hds : dataSizeU.toNat = data.size)
@@ -3034,7 +3034,7 @@ private theorem directHeadCandidateCase (data : ByteArray)
         hheadsSizeN hheadsBoundN posU acc freqs hltN)
     (chainOnePostProbe data headsP prevN posU.toNat acc hltN walk)
   by_cases hge : matchLenU ≥ 3
-  · simp only [dif_pos hge]
+  · simp only [dite_eq_left hge]
     have h3v : (3 : USize).toNat = 3 :=
       USize.toNat_ofNat_of_lt
         (Nat.lt_of_lt_of_le (by decide) USize.le_size)
@@ -3043,12 +3043,12 @@ private theorem directHeadCandidateCase (data : ByteArray)
       simpa only [h3v] using hh
     have hwalkGe : walk % 512 ≥ 3 := hprobeM.1.mp hgeN
     obtain ⟨hlenEq, hposEq⟩ := hprobeM.2 hgeN
-    simp only [chainOnePostProbe, lz77ChainIterPPostProbe, dif_pos hwalkGe]
+    simp only [chainOnePostProbe, lz77ChainIterPPostProbe, dite_eq_left hwalkGe]
     by_cases hle : posU.toNat + matchLenU.toNat ≤ data.size
-    · simp only [dif_pos hle]
+    · simp only [dite_eq_left hle]
       have hleW : posU.toNat + walk % 512 ≤ data.size := by
         rwa [← hlenEq]
-      simp only [dif_pos hleW]
+      simp only [dite_eq_left hleW]
       rw [updateHashesGuarded_one_zero]
       rw [← directHeadFNU64Run_eq data dataSizeU hds hsz hfit
         headsN hheadsSizeN hheadsBoundN, ← chainOneRun_eq]
@@ -3056,15 +3056,15 @@ private theorem directHeadCandidateCase (data : ByteArray)
         headsN headsP eheads hheadsSizeN hheadsBoundN prevN posU acc freqs
         hsize hrep hn head matchLenU walk hheadBound hc hgeN hle
         hwalkLe258 hlenEq hposEq
-    · simp only [dif_neg hle]
+    · simp only [dite_eq_right hle]
       have hnleW : ¬posU.toNat + walk % 512 ≤ data.size := by
         rwa [← hlenEq]
-      simp only [dif_neg hnleW]
+      simp only [dite_eq_right hnleW]
       rw [← chainOneRun_eq]
       exact directHeadLiteralRaw_continue data dataSizeU hds hsz hfit n ih
         headsN headsP eheads hheadsSizeN hheadsBoundN prevN posU acc freqs
         hsize hrep hn hltN
-  · simp only [dif_neg hge]
+  · simp only [dite_eq_right hge]
     have h3v : (3 : USize).toNat = 3 :=
       USize.toNat_ofNat_of_lt
         (Nat.lt_of_lt_of_le (by decide) USize.le_size)
@@ -3074,7 +3074,7 @@ private theorem directHeadCandidateCase (data : ByteArray)
       exact USize.le_iff_toNat_le.mpr (by simpa only [h3v] using hh)
     have hnwalk : ¬walk % 512 ≥ 3 :=
       fun hw => hngeN (hprobeM.1.mpr hw)
-    simp only [chainOnePostProbe, lz77ChainIterPPostProbe, dif_neg hnwalk]
+    simp only [chainOnePostProbe, lz77ChainIterPPostProbe, dite_eq_right hnwalk]
     rw [← chainOneRun_eq]
     exact directHeadLiteralRaw_continue data dataSizeU hds hsz hfit n ih
       headsN headsP eheads hheadsSizeN hheadsBoundN prevN posU acc freqs
@@ -3103,7 +3103,7 @@ private theorem directHeadNoCandidateCase (data : ByteArray)
     intro hw
     have hz := hzero.mpr hw
     omega
-  simp only [chainOnePostProbe, lz77ChainIterPPostProbe, dif_neg hnwalk]
+  simp only [chainOnePostProbe, lz77ChainIterPPostProbe, dite_eq_right hnwalk]
   rw [← chainOneRun_eq]
   exact directHeadLiteralRaw_continue data dataSizeU hds hsz hfit n ih
     headsN headsP eheads hheadsSizeN hheadsBoundN prevN posU acc freqs
@@ -3251,7 +3251,7 @@ private theorem lz77GreedyDirectHeadFNU64_spec_active (data : ByteArray)
           simpa only [heads', Array.size_uset] using hi
         have hset : heads.set! hshU.toNat posU.toNat = heads' := by
           simp only [heads', Array.uset, Array.set!_eq_setIfInBounds,
-            Array.setIfInBounds, dif_pos hb]
+            Array.setIfInBounds, dite_eq_left hb]
         rw [← hset]
         by_cases heq : i = hshU.toNat
         · subst i
@@ -3264,7 +3264,7 @@ private theorem lz77GreedyDirectHeadFNU64_spec_active (data : ByteArray)
         have hc : head.toUSize < posU ∧ posU - head.toUSize ≤ 32768 := by
           simpa only [head, hshU, hashU] using hcRaw
         have hprobeC := hprobeG
-        simp only [dif_pos hc] at hprobeC
+        simp only [dite_eq_left hc] at hprobeC
         have hheadMax : head.toUSize.toNat + maxLenU.toNat ≤ data.size := by
           have hh := USize.lt_iff_toNat_lt.mp hc.1
           omega
@@ -3283,7 +3283,7 @@ private theorem lz77GreedyDirectHeadFNU64_spec_active (data : ByteArray)
             posU - head.toUSize ≤ 32768) := by
           simpa only [head, hshU, hashU] using hcRaw
         have hprobeC := hprobeG
-        simp only [dif_neg hc, USize.toNat_zero] at hprobeC
+        simp only [dite_eq_right hc, USize.toNat_zero] at hprobeC
         change DirectHeadFNU64Result
           (directHeadLiteralRaw data dataSizeU hds hsz hfit heads'
             hheadsSize' hheadsBound' posU acc freqs hltN)
@@ -3441,9 +3441,9 @@ theorem lz77ChainIterPMergedDirectHeadArrayFNU64_eq (data : ByteArray) :
         (tokenFreqsP packed.toArray).2) := by
   unfold lz77ChainIterPMergedDirectHeadArrayFNU64
   by_cases hsmall : data.size < 3
-  · simp only [hsmall, if_pos]
+  · simp only [hsmall, ite_eq_left]
     unfold lz77ChainIterP
-    simp only [hsmall, if_pos]
+    simp only [hsmall, ite_eq_left]
     have haddr : data.size.toUSize.toNat = data.size :=
       toUSize_toNat_of_lt (Nat.lt_of_lt_of_le (by omega) USize.le_size)
     generalize hr : trailingPFU64 data 0 TokenArray.empty initFusedFreqBytes = r
@@ -3456,10 +3456,10 @@ theorem lz77ChainIterPMergedDirectHeadArrayFNU64_eq (data : ByteArray) :
     have hf := fusedFreqBytesToNat_eq freqs
       (trailingPT data 0 TokenArray.empty).toArray hw.2
     rw [hf, hw.1]
-  · simp only [hsmall, if_false]
+  · simp only [hsmall, ite_false]
     by_cases hg : data.size.toUSize.toNat = data.size ∧
         data.size * 512 + 511 < USize.size
-    · simp only [dif_pos hg]
+    · simp only [dite_eq_left hg]
       have hsz : data.size < USize.size := by
         rw [← hg.1]
         exact USize.toNat_lt_two_pow_numBits _
@@ -3490,12 +3490,12 @@ theorem lz77ChainIterPMergedDirectHeadArrayFNU64_eq (data : ByteArray) :
           lz77ChainIterP.mainLoop data 32768 65536 1 0 258 heads prev 0
             (TokenArray.emptyWithCapacity data.size) := hw.1
       unfold lz77ChainIterP
-      simp only [hsmall, if_false]
+      simp only [hsmall, ite_false]
       change
         (wideTokens, (fusedFreqBytesToNat freqs).1,
           (fusedFreqBytesToNat freqs).2) = _
       rw [hf, htok]
-    · simp only [dif_neg hg]
+    · simp only [dite_eq_right hg]
       have hf := congrArg
         (fun r : TokenArray × {a : Array Nat // a.size = 286} ×
             {a : Array Nat // a.size = 30} =>
@@ -3503,7 +3503,7 @@ theorem lz77ChainIterPMergedDirectHeadArrayFNU64_eq (data : ByteArray) :
         (lz77ChainIterPMergedF_eq data 1 32768 0 258)
       rw [lz77ChainIterPMerged_eq] at hf
       unfold lz77ChainIterPMergedF at hf
-      simp only [hsmall, if_false] at hf
+      simp only [hsmall, ite_false] at hf
       exact hf
 
 end Zip.Native.Deflate

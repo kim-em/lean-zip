@@ -204,11 +204,11 @@ private theorem findTableCode_go_of_first_match
         have hgt := hmatch h_next
         have hb1' : baseTable[idx + 1]'h_next = baseTable[idx + 1]! :=
           (getElem!_pos baseTable (idx + 1) h_next).symm
-        rw [dif_pos h_next, hb1', if_pos hgt,
+        rw [dite_eq_left h_next, hb1', ite_eq_left hgt,
             getElem!_pos extraTable idx (by omega),
             getElem!_pos baseTable idx hidx]
       · -- Last entry
-        rw [dif_neg h_next, dif_pos hidx,
+        rw [dite_eq_right h_next, dite_eq_left hidx,
             getElem!_pos extraTable idx (by omega),
             getElem!_pos baseTable idx hidx]
     · -- Skip: search passes through this index
@@ -216,7 +216,7 @@ private theorem findTableCode_go_of_first_match
       obtain ⟨h_next_i, h_le_i⟩ := hskip i hlt_idx
       have hb1' : baseTable[i + 1]'h_next_i = baseTable[i + 1]! :=
         (getElem!_pos baseTable (i + 1) h_next_i).symm
-      rw [dif_pos h_next_i, hb1', if_neg (by omega : ¬ baseTable[i + 1]!.toNat > value)]
+      rw [dite_eq_left h_next_i, hb1', ite_eq_right (by omega : ¬ baseTable[i + 1]!.toNat > value)]
       exact ih (i + 1) (by omega : i + 1 ≤ idx) (by omega)
 
 /-! ## findLengthCode / findDistCode agreement -/

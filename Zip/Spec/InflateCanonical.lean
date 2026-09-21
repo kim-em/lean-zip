@@ -72,11 +72,11 @@ theorem bitReverse_testBit (x n i : Nat) (hi : i < n) :
       rw [bitReverse_acc, Nat.zero_mul, Nat.zero_add, Nat.mul_comm (x % 2) (2 ^ n)]
     rw [hR, Nat.testBit_two_pow_mul_add _ (bitReverse_lt (x / 2) n)]
     rcases Nat.lt_or_ge i n with hlt | hge
-    · rw [if_pos hlt, ih (x / 2) i hlt, ← Nat.testBit_succ]
+    · rw [ite_eq_left hlt, ih (x / 2) i hlt, ← Nat.testBit_succ]
       congr 1; omega
     · have hin : i = n := by omega
       subst hin
-      rw [if_neg (by omega), Nat.sub_self, show i + 1 - 1 - i = 0 from by omega,
+      rw [ite_eq_right (by omega), Nat.sub_self, show i + 1 - 1 - i = 0 from by omega,
           Nat.testBit_zero, Nat.testBit_zero, show x % 2 % 2 = x % 2 from by omega]
 
 /-! ## `cwOf` / `bitReverse` bridge
@@ -175,7 +175,7 @@ theorem fillSlots_getElem_ne (packed : Array UInt32) (base stride count idx : Na
     rw [Array.set!_eq_setIfInBounds]
     by_cases hlt : idx < packed.size
     · rw [getElem!_pos _ idx (by rw [Array.size_setIfInBounds]; exact hlt),
-          getElem!_pos _ idx hlt, Array.getElem_setIfInBounds hlt, if_neg (Ne.symm hb)]
+          getElem!_pos _ idx hlt, Array.getElem_setIfInBounds hlt, ite_eq_right (Ne.symm hb)]
     · rw [getElem!_neg _ idx (by rw [Array.size_setIfInBounds]; exact hlt),
           getElem!_neg _ idx hlt]
 
@@ -268,7 +268,7 @@ theorem tableEntry_go_of_hasLeaf (t : HuffTree) (bits depth len : Nat) (sym : UI
     | leaf s => nomatch h
     | empty => nomatch h
     | node z o =>
-      rw [tableEntry.go, if_neg (show ¬ depth ≥ fastBits by omega),
+      rw [tableEntry.go, ite_eq_right (show ¬ depth ≥ fastBits by omega),
         show depth + (n + 1) = (depth + 1) + n from by omega]
       split
       · rename_i hbit
@@ -353,15 +353,15 @@ theorem tableEntry_go_len_zero (t : HuffTree) :
     rw [tableEntry.go]
     rw [tableEntry.go] at h
     by_cases hge : depth ≥ fastBits
-    · rw [if_pos hge]
-    · rw [if_neg hge]; rw [if_neg hge] at h
+    · rw [ite_eq_left hge]
+    · rw [ite_eq_right hge]; rw [ite_eq_right hge] at h
       have hd' : depth + 1 ≤ fastBits := by simp only [fastBits] at hge ⊢; omega
       split
       · rename_i hbit
-        rw [if_pos hbit] at h
+        rw [ite_eq_left hbit] at h
         exact ihz (bits / 2) (depth + 1) (Or.inl (by omega)) hd' h
       · rename_i hbit
-        rw [if_neg hbit] at h
+        rw [ite_eq_right hbit] at h
         exact iho (bits / 2) (depth + 1) (Or.inl (by omega)) hd' h
 
 /-! ## `fromLengths` succeeds under `ValidLengths` -/
@@ -742,17 +742,17 @@ theorem nextCodesFast_go_eq (count : Array Nat) (maxBits : Nat) :
   | zero =>
     intro bits code arr hn
     rw [HuffTree.nextCodesFast.go, Huffman.Spec.nextCodes.go,
-        dif_neg (show ¬ bits ≤ maxBits by omega), dif_pos (show bits > maxBits by omega)]
+        dite_eq_right (show ¬ bits ≤ maxBits by omega), dite_eq_left (show bits > maxBits by omega)]
   | succ n ih =>
     intro bits code arr hn
     rw [HuffTree.nextCodesFast.go, Huffman.Spec.nextCodes.go]
     by_cases hb : bits ≤ maxBits
-    · rw [dif_pos hb, dif_neg (show ¬ bits > maxBits by omega)]
+    · rw [dite_eq_left hb, dite_eq_right (show ¬ bits > maxBits by omega)]
       simp only []
       rw [Array.set!_eq_setIfInBounds, Array.set!_eq_setIfInBounds,
           ← Array.map_setIfInBounds]
       exact ih (bits + 1) _ (arr.setIfInBounds bits _) (by omega)
-    · rw [dif_neg hb, dif_pos (show bits > maxBits by omega)]
+    · rw [dite_eq_right hb, dite_eq_left (show bits > maxBits by omega)]
 
 /-- The fast histogram equals the spec `countLengths` on the mapped lengths. -/
 theorem countLengthsFast_go_eq (lengths : Array UInt8) (maxBits : Nat) :
@@ -766,13 +766,13 @@ theorem countLengthsFast_go_eq (lengths : Array UInt8) (maxBits : Nat) :
   | zero =>
     intro i count hn
     have hge : ¬ i < lengths.size := by omega
-    rw [HuffTree.countLengthsFast.go, dif_neg hge,
+    rw [HuffTree.countLengthsFast.go, dite_eq_right hge,
         List.drop_eq_nil_of_le (by rw [List.length_map, Array.length_toList]; omega)]
     rfl
   | succ n ih =>
     intro i count hn
     by_cases hlt : i < lengths.size
-    · rw [HuffTree.countLengthsFast.go, dif_pos hlt]
+    · rw [HuffTree.countLengthsFast.go, dite_eq_left hlt]
       have hidx : i < (lengths.toList.map UInt8.toNat).length := by
         rw [List.length_map, Array.length_toList]; exact hlt
       rw [List.drop_eq_getElem_cons hidx, List.foldl_cons]
@@ -784,11 +784,11 @@ theorem countLengthsFast_go_eq (lengths : Array UInt8) (maxBits : Nat) :
           = (if 0 < lengths[i].toNat ∧ lengths[i].toNat ≤ maxBits then
               count.set! lengths[i].toNat (count[lengths[i].toNat]! + 1) else count) := by
         by_cases hc : 0 < lengths[i].toNat ∧ lengths[i].toNat ≤ maxBits
-        · rw [if_pos hc, if_neg (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
-        · rw [if_neg hc, if_pos (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
+        · rw [ite_eq_left hc, ite_eq_right (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
+        · rw [ite_eq_right hc, ite_eq_left (by simp only [Bool.or_eq_true, beq_iff_eq, decide_eq_true_eq]; omega)]
       rw [hstep]
       exact ih (i + 1) _ (by omega)
-    · rw [HuffTree.countLengthsFast.go, dif_neg hlt,
+    · rw [HuffTree.countLengthsFast.go, dite_eq_right hlt,
           List.drop_eq_nil_of_le (by rw [List.length_map, Array.length_toList]; omega)]
       rfl
 

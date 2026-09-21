@@ -83,7 +83,7 @@ protected theorem readCLCodeLengths_complete (br : ZipCommon.BitReader)
       unfold Zip.Native.Inflate.readCLCodeLengths
       have h_clo_sz : Zip.Native.Inflate.codeLengthOrder.size = 19 := by decide
       have h_i : i < Zip.Native.Inflate.codeLengthOrder.size := by omega
-      simp only [if_pos hi, dif_pos h_i, bind, Except.bind]
+      simp only [ite_eq_left hi, dite_eq_left h_i, bind, Except.bind]
       -- readBits 3 succeeds
       rw [hrb_nat]
       rw [getElem!_pos Zip.Native.Inflate.codeLengthOrder i h_i |>.symm]
@@ -259,7 +259,7 @@ protected theorem decodeCLSymbols_complete (clTree : Zip.Native.HuffTree)
                   rw [beq_eq_false_iff_ne]; omega
                 simp only [hidx_ne0, Bool.false_eq_true, ↓reduceIte, pure, Except.pure]
                 have h_cl : idx - 1 < codeLengths.size := by omega
-                simp only [dif_pos h_cl]
+                simp only [dite_eq_left h_cl]
                 rw [hrd_nat]
                 have hrep_toNat : rep.toUInt32.toNat = rep :=
                   Nat.mod_eq_of_lt (by omega)

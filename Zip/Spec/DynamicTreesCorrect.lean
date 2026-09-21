@@ -111,7 +111,7 @@ protected theorem readCLCodeLengths_size (br : ZipCommon.BitReader)
   | succ n ih =>
     have hi : i < numCodeLen := by omega
     unfold Zip.Native.Inflate.readCLCodeLengths at h
-    simp only [if_pos hi] at h
+    simp only [ite_eq_left hi] at h
     split at h
     · rename_i h_i
       simp only [bind, Except.bind] at h
@@ -276,14 +276,14 @@ private theorem readCLCodeLengths_correct (br : ZipCommon.BitReader)
     -- i ≥ numCodeLen, so native returns immediately
     have hge : ¬(i < numCodeLen) := by omega
     unfold Zip.Native.Inflate.readCLCodeLengths at h
-    simp only [if_neg hge, Except.ok.injEq, Prod.mk.injEq] at h
+    simp only [ite_eq_right hge, Except.ok.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, rfl⟩ := h
     exact ⟨br.toBits, by rfl, rfl⟩
   | succ n ih =>
     -- i < numCodeLen
     have hi : i < numCodeLen := by omega
     unfold Zip.Native.Inflate.readCLCodeLengths at h
-    simp only [if_pos hi] at h
+    simp only [ite_eq_left hi] at h
     split at h
     · rename_i h_i
       dsimp only [bind, Except.bind] at h
@@ -378,7 +378,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
     have heq : idx = totalCodes := by omega
     rw [heq]
     unfold Deflate.Spec.decodeDynamicTables.decodeCLSymbols
-    simp only [if_pos (show totalCodes ≤
+    simp only [ite_eq_left (show totalCodes ≤
         (List.map UInt8.toNat (codeLengths.extract 0 totalCodes).toList).length from by
         simp only [List.length_map, Array.length_toList, Array.size_extract]; omega)]
   · -- idx < totalCodes: decode a symbol
@@ -462,7 +462,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                     simp only [Nat.min_eq_left hle]; omega
                   simpa only [h_rd, hprev_eq, hacc_len,
                     List.length_append, List.length_replicate,
-                    if_neg hne0, if_pos hguard2,
+                    ite_eq_right hne0, ite_eq_left hguard2,
                     getElem!_pos codeLengths (idx - 1) h_cl] using hspec_rec
             · exact nomatch h
         · -- sym ≠ 16
@@ -498,7 +498,7 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                   simp only [Nat.min_eq_left hle]; omega
                 simpa only [h_rd, hacc_len,
                   List.length_append, List.length_replicate,
-                  if_neg (show ¬(false = true) from nofun), if_pos hguard,
+                  ite_eq_right (show ¬(false = true) from nofun), ite_eq_left hguard,
                   show (0 : UInt8).toNat = 0 from rfl] using hspec_rec
           · -- sym ≠ 17
             rename_i hsym_ne17
@@ -534,9 +534,9 @@ private theorem decodeCLSymbols_correct (clTree : Zip.Native.HuffTree)
                     simp only [Nat.min_eq_left hle]; omega
                   simpa only [h_rd, hacc_len,
                     List.length_append, List.length_replicate,
-                    if_neg (show ¬(false = true) from nofun),
-                    if_pos (show ((18 : Nat) == 18) = true from rfl),
-                    if_pos hguard,
+                    ite_eq_right (show ¬(false = true) from nofun),
+                    ite_eq_left (show ((18 : Nat) == 18) = true from rfl),
+                    ite_eq_left hguard,
                     show (0 : UInt8).toNat = 0 from rfl] using hspec_rec
             · -- sym ∉ {16,17,18}: throw, contradicts .ok
               exact nomatch h

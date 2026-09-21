@@ -103,7 +103,7 @@ private theorem writeBits64_packCodeEntry_eq (bw : BitWriter)
         omega), show (64 : UInt32).toNat = 64 by decide] at hgeN
     omega
   unfold BitWriter.writeBits64
-  rw [if_neg hguard]
+  rw [ite_eq_right hguard]
   change bw.writeRevCode
       ((BitWriter.reverse16 e.1).toUInt64 >>> (16 - e.2.toUInt64)).toUInt16 e.2 =
     bw.writeHuffCode e.1 e.2
@@ -478,7 +478,7 @@ private theorem emitRefWithCodesPTFlatStep_spec (fbw rbw : BitWriter)
                 (le.2.toUInt32 + en.toUInt32).toUInt64)) := by
     unfold emitRefWithCodesPTFlat
     simp only [len, dist, hei, hdi]
-    rw [dif_pos hlT, dif_pos hdT]
+    rw [dite_eq_left hlT, dite_eq_left hdT]
     simp only [len, dist, packCodeTab, Array.getElem_map, flat_packCodeEntry_len32,
       flat_codeExtra32, hee, hde, hcv, hdv, le, de, lextra, dextra]
   have hrefStep :
@@ -487,7 +487,7 @@ private theorem emitRefWithCodesPTFlatStep_spec (fbw rbw : BitWriter)
           den dev) := by
     rw [flat_emitRefWithCodesPT_eq]
     unfold emitRefWithCodesP
-    simp only [len, dist, hei, hee, hcv, hdi, hde, hdv, hl, hd, dif_pos, le, de]
+    simp only [len, dist, hei, hee, hcv, hdi, hde, hdv, hl, hd, dite_eq_left, le, de]
   have hw1 := BitWriter.writeHuffCode_wf rbw le.1 le.2 hrwf
     (by simpa only [le] using hllen)
   have hb1 := BitWriter.writeHuffCode_toBits rbw le.1 le.2 hrwf
@@ -575,7 +575,7 @@ private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt
     UInt8.toNat_toUInt32 _
   unfold flatWriteBits64Fast BitWriter.writeBits64
   by_cases hpre : bw.bitCount.toUInt32 + n ≥ (64 : UInt32)
-  · rw [if_pos hpre, if_pos hpre]
+  · rw [ite_eq_left hpre, ite_eq_left hpre]
     unfold BitWriter.drainPendingBytes BitWriter.writeBits64Small
     dsimp only
     have hk0 : bw.bitCount.toUInt32 >>> 3 < (8 : UInt32) := by
@@ -588,7 +588,7 @@ private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt
       omega
     rw [show BitWriter.dropBytesU bw.bitBuf (bw.bitCount.toUInt32 >>> 3) =
         bw.bitBuf >>> ((bw.bitCount.toUInt32 >>> 3).toUInt64 <<< 3) by
-      simp only [BitWriter.dropBytesU, if_pos hk0]]
+      simp only [BitWriter.dropBytesU, ite_eq_left hk0]]
     let bc0 := bw.bitCount.toUInt32 &&& 7
     have hbc0 : bc0.toNat ≤ 7 := by
       dsimp only [bc0]
@@ -608,7 +608,7 @@ private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt
       rw [UInt32.toNat_add, Nat.mod_eq_of_lt]
       omega
     by_cases hflush : bc0 + n ≥ (32 : UInt32)
-    · rw [if_pos hflush, if_pos hflush]
+    · rw [ite_eq_left hflush, ite_eq_left hflush]
       have hk : (bc0 + n) >>> 3 < (8 : UInt32) := by
         apply UInt32.lt_iff_toNat_lt.mpr
         rw [UInt32.toNat_shiftRight, htotal]
@@ -622,10 +622,10 @@ private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt
             (val <<< bc0.toUInt64)) ((bc0 + n) >>> 3) =
           ((bw.bitBuf >>> ((bw.bitCount.toUInt32 >>> 3).toUInt64 <<< 3)) |||
             (val <<< bc0.toUInt64)) >>> (((bc0 + n) >>> 3).toUInt64 <<< 3) by
-        simp only [BitWriter.dropBytesU, if_pos hk]]
-    · rw [if_neg hflush, if_neg hflush]
+        simp only [BitWriter.dropBytesU, ite_eq_left hk]]
+    · rw [ite_eq_right hflush, ite_eq_right hflush]
 
-  · rw [if_neg hpre, if_neg hpre]
+  · rw [ite_eq_right hpre, ite_eq_right hpre]
     unfold BitWriter.writeBits64Small
     dsimp only
     have hbc64 : bw.bitCount.toUInt32.toUInt64 = bw.bitCount.toUInt64 := by
@@ -637,7 +637,7 @@ private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt
       rw [UInt32.toNat_add, hbc32, Nat.mod_eq_of_lt]
       omega
     by_cases hflush : bw.bitCount.toUInt32 + n ≥ (32 : UInt32)
-    · rw [if_pos hflush, if_pos hflush]
+    · rw [ite_eq_left hflush, ite_eq_left hflush]
       have hk : (bw.bitCount.toUInt32 + n) >>> 3 < (8 : UInt32) := by
         apply UInt32.lt_iff_toNat_lt.mpr
         rw [UInt32.toNat_shiftRight, htotal]
@@ -656,8 +656,8 @@ private theorem flatWriteBits64Fast_eq (bw : BitWriter) (n : UInt32) (val : UInt
             ((bw.bitCount.toUInt32 + n) >>> 3) =
           (bw.bitBuf ||| (val <<< bw.bitCount.toUInt64)) >>>
             (((bw.bitCount.toUInt32 + n) >>> 3).toUInt64 <<< 3) by
-        simp only [BitWriter.dropBytesU, if_pos hk]]
-    · rw [if_neg hflush, if_neg hflush]
+        simp only [BitWriter.dropBytesU, ite_eq_left hk]]
+    · rw [ite_eq_right hflush, ite_eq_right hflush]
 
 /-- No-pre-drain scalar transition used for a literal, whose at-most-15-bit
     code cannot approach bit 64 from a well-formed pending state. -/
@@ -688,7 +688,7 @@ private theorem flatWriteBits64FastLiteral_eq (bw : BitWriter)
   calc
     flatWriteBits64FastLiteral bw n val = flatWriteBits64Fast bw n val := by
       unfold flatWriteBits64FastLiteral flatWriteBits64Fast
-      rw [if_neg hpre]
+      rw [ite_eq_right hpre]
     _ = bw.writeBits64 n val := flatWriteBits64Fast_eq bw n val hwf (by omega)
 
 /-- The production reference arm flattens the distance-code and distance-extra
@@ -799,7 +799,7 @@ private theorem emitRefWithCodesPTFlatFast_eq (bw : BitWriter)
     omega
   unfold emitRefWithCodesPTFlatFast emitRefWithCodesPTFlat
   simp only [len, dist, hei, hdi]
-  rw [dif_pos hlT, dif_pos hdT, dif_pos hlT, dif_pos hdT]
+  rw [dite_eq_left hlT, dite_eq_left hdT, dite_eq_left hlT, dite_eq_left hdT]
   simp only [len, dist, packCodeTab, Array.getElem_map, flat_packCodeEntry_len32,
     flat_codeExtra32, hee, hde, hcv, hdv, le, de, lenTotal]
   rw [flat_ref_bits_reassoc _ _ _ _ _ hshift]
@@ -937,7 +937,7 @@ theorem emitTokensWithCodesTAPTFlatFastLoopU_eq
       omega
     by_cases hi : i < tokens.size
     · have hiU := hiIff.mpr hi
-      simp only [hiU, hi, dif_pos]
+      simp only [hiU, hi, dite_eq_left]
       have hb : off.toNat + 4 ≤ tokens.bytes.size := by
         rw [hoff, hbytesMul]
         omega
@@ -963,7 +963,7 @@ theorem emitTokensWithCodesTAPTFlatFastLoopU_eq
           hstep rfl
       simp only [hw, hcont, Array.uget, UInt8.toNat_toUSize]
     · have hiU : ¬off < endU := fun h => hi (hiIff.mp h)
-      rw [dif_neg hiU, dif_neg hi]
+      rw [dite_eq_right hiU, dite_eq_right hi]
 
 /-- The guarded zero-entry cursor wrapper is exactly the previous scalar
     zero-entry implementation, including its non-addressable fallback. -/
@@ -1030,7 +1030,7 @@ theorem emitTokensWithCodesTAPTFlatFastLoop_eq (bw : BitWriter)
   | _ n ih =>
     unfold emitTokensWithCodesTAPTFlatFastLoop emitTokensWithCodesTAPTFlatLoop
     by_cases hi : i < tokens.size
-    · simp only [hi, dif_pos]
+    · simp only [hi, dite_eq_left]
       let w := tokens.get i hi
       by_cases hc : w &&& ((1 : UInt32) <<< 31) = 0
       · simp only [w, hc, ↓reduceIte]
@@ -1106,7 +1106,7 @@ private theorem emitTokensWithCodesTAPTFlatLoop_spec (fbw rbw : BitWriter)
   | _ n ih =>
     unfold emitTokensWithCodesTAPTFlatLoop emitTokensWithCodesTAPT
     by_cases hi : i < tokens.size
-    · simp only [hi, dif_pos]
+    · simp only [hi, dite_eq_left]
       let w := tokens.get i hi
       by_cases hc : w &&& ((1 : UInt32) <<< 31) = 0
       · simp only [w, hc, ↓reduceIte]
@@ -1148,7 +1148,7 @@ private theorem emitTokensWithCodesTAPTFlatLoop_spec (fbw rbw : BitWriter)
             (packCodeTab litCodes) (packCodeTab distCodes) hlitT hdistT (i + 1)
           fwOut.toBits = rwOut.toBits ∧ fwOut.wf ∧ rwOut.wf
         exact ih _ (by omega) fw' rw' (i + 1) hs.1 hs.2.1 hs.2.2 rfl
-    · simp only [hi, dif_neg, flat_writer_reconstruct]
+    · simp only [hi, dite_eq_right, flat_writer_reconstruct]
       exact ⟨hbits, hfwf, hrwf⟩
 
 /-- Public observational contract for the flat emitter at canonical packed

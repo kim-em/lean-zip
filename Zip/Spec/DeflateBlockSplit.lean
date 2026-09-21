@@ -147,10 +147,10 @@ theorem emitChunkBlock_decode (data : ByteArray) (pos j : Nat) (level : UInt8)
       litLens distLens headerBits (symBits ++ rest) hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
     rw [← List.append_assoc] at hheader
     cases isFinal
-    · simp only [Bool.false_eq_true, if_false]
+    · simp only [Bool.false_eq_true, ite_false]
       exact Deflate.Spec.decode_go_dynBlock_nonfinal _ _ acc litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
-    · simp only [if_true]
+    · simp only [ite_true]
       exact Deflate.Spec.decode_go_dynBlock_final _ _ acc litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
   · -- decode.goR
@@ -159,10 +159,10 @@ theorem emitChunkBlock_decode (data : ByteArray) (pos j : Nat) (level : UInt8)
       litLens distLens headerBits (symBits ++ rest) hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
     rw [← List.append_assoc] at hheader
     cases isFinal
-    · simp only [Bool.false_eq_true, if_false]
+    · simp only [Bool.false_eq_true, ite_false]
       exact Deflate.Spec.decode_goR_dynBlock_nonfinal _ _ acc litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
-    · simp only [if_true]
+    · simp only [ite_true]
       exact Deflate.Spec.decode_goR_dynBlock_final _ _ acc litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hresolve hvalid
 
@@ -221,13 +221,13 @@ theorem emitChunkBlocks_decode (data : ByteArray) (chunkSize : Nat) (level : UIn
           emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
             (decide (min (pos + max chunkSize 1) data.size ≥ data.size)) := by
         conv => lhs; unfold emitChunkBlocks
-        simp only [if_pos hend]
+        simp only [ite_eq_left hend]
       refine ⟨blockBits, ?_, ?_, ?_⟩
       · rw [hstep]; exact htoBits
       · rw [hstep]; exact hwfblk
       · intro acc tail
         have hd := hdecblk acc tail
-        rw [if_pos (decide_eq_true hend), hjeq] at hd
+        rw [ite_eq_left (decide_eq_true hend), hjeq] at hd
         exact hd
     · -- Non-final block: recurse on the next chunk.
       have hbw' : (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
@@ -237,7 +237,7 @@ theorem emitChunkBlocks_decode (data : ByteArray) (chunkSize : Nat) (level : UIn
             (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
               (decide (min (pos + max chunkSize 1) data.size ≥ data.size))) := by
         conv => lhs; unfold emitChunkBlocks
-        simp only [if_neg hend]
+        simp only [ite_eq_right hend]
       obtain ⟨B', htoBits', hwf', hdec'⟩ :=
         ih (min (pos + max chunkSize 1) data.size) _ (by omega) (by omega) hbw'
       refine ⟨blockBits ++ B', ?_, ?_, ?_⟩
@@ -246,7 +246,7 @@ theorem emitChunkBlocks_decode (data : ByteArray) (chunkSize : Nat) (level : UIn
       · intro acc tail
         rw [List.append_assoc]
         have hd := hdecblk acc (B' ++ tail)
-        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [ite_eq_right (by simp only [decide_eq_true_eq]; exact hend)] at hd
         rw [hd, hdec' (acc ++ (data.extract pos (min (pos + max chunkSize 1) data.size)).data.toList) tail,
           List.append_assoc,
           extract_data_append data pos (min (pos + max chunkSize 1) data.size) data.size
@@ -279,13 +279,13 @@ theorem emitChunkBlocks_decodeR (data : ByteArray) (chunkSize : Nat) (level : UI
           emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
             (decide (min (pos + max chunkSize 1) data.size ≥ data.size)) := by
         conv => lhs; unfold emitChunkBlocks
-        simp only [if_pos hend]
+        simp only [ite_eq_left hend]
       refine ⟨blockBits, ?_, ?_, ?_⟩
       · rw [hstep]; exact htoBits
       · rw [hstep]; exact hwfblk
       · intro acc tail
         have hd := hdecblk acc tail
-        rw [if_pos (decide_eq_true hend), hjeq] at hd
+        rw [ite_eq_left (decide_eq_true hend), hjeq] at hd
         exact hd
     · have hbw' : (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
           (decide (min (pos + max chunkSize 1) data.size ≥ data.size))).wf := hwfblk
@@ -294,7 +294,7 @@ theorem emitChunkBlocks_decodeR (data : ByteArray) (chunkSize : Nat) (level : UI
             (emitChunkBlock bw data pos (min (pos + max chunkSize 1) data.size) level
               (decide (min (pos + max chunkSize 1) data.size ≥ data.size))) := by
         conv => lhs; unfold emitChunkBlocks
-        simp only [if_neg hend]
+        simp only [ite_eq_right hend]
       obtain ⟨B', htoBits', hwf', hdec'⟩ :=
         ih (min (pos + max chunkSize 1) data.size) _ (by omega) (by omega) hbw'
       refine ⟨blockBits ++ B', ?_, ?_, ?_⟩
@@ -303,7 +303,7 @@ theorem emitChunkBlocks_decodeR (data : ByteArray) (chunkSize : Nat) (level : UI
       · intro acc tail
         rw [List.append_assoc]
         have hd := hdecblk acc (B' ++ tail)
-        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [ite_eq_right (by simp only [decide_eq_true_eq]; exact hend)] at hd
         rw [hd, hdec' (acc ++ (data.extract pos (min (pos + max chunkSize 1) data.size)).data.toList) tail,
           List.append_assoc,
           extract_data_append data pos (min (pos + max chunkSize 1) data.size) data.size
@@ -352,10 +352,10 @@ theorem emitSharedBlock_decode (data : ByteArray) (group : Array LZ77Token)
       litLens distLens headerBits (symBits ++ rest) hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
     rw [← List.append_assoc] at hheader
     cases isFinal
-    · simp only [Bool.false_eq_true, if_false]
+    · simp only [Bool.false_eq_true, ite_false]
       exact Deflate.Spec.decode_go_dynBlock_nonfinal_acc _ out accOut litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hres hvalid
-    · simp only [if_true]
+    · simp only [ite_true]
       exact Deflate.Spec.decode_go_dynBlock_final_acc _ out accOut litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hres hvalid
   · intro rest
@@ -363,10 +363,10 @@ theorem emitSharedBlock_decode (data : ByteArray) (group : Array LZ77Token)
       litLens distLens headerBits (symBits ++ rest) hb1 hb2 ⟨hge1, hle1⟩ ⟨hge2, hle2⟩ hlv hdv htrees
     rw [← List.append_assoc] at hheader
     cases isFinal
-    · simp only [Bool.false_eq_true, if_false]
+    · simp only [Bool.false_eq_true, ite_false]
       exact Deflate.Spec.decode_goR_dynBlock_nonfinal_acc _ out accOut litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hres hvalid
-    · simp only [if_true]
+    · simp only [ite_true]
       exact Deflate.Spec.decode_goR_dynBlock_final_acc _ out accOut litLens distLens
         headerBits symBits rest hlv hdv hheader hsyms hres hvalid
 
@@ -458,13 +458,13 @@ theorem emitSharedBlocks_decode (data : ByteArray) (toks : Array LZ77Token) (tok
           emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
             (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size)) := by
         conv => lhs; unfold emitSharedBlocks
-        simp only [if_pos hend]
+        simp only [ite_eq_left hend]
       refine ⟨blockBits, ?_, ?_, ?_⟩
       · rw [hstep]; exact htoBits
       · rw [hstep]; exact hwfblk
       · intro tail
         have hd := hdecblk tail
-        rw [if_pos (decide_eq_true hend)] at hd
+        rw [ite_eq_left (decide_eq_true hend)] at hd
         rw [hd, hwo]
     · -- Non-final block: recurse on the next token group.
       have hbw' : (emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
@@ -474,7 +474,7 @@ theorem emitSharedBlocks_decode (data : ByteArray) (toks : Array LZ77Token) (tok
             (emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
               (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size))) := by
         conv => lhs; unfold emitSharedBlocks
-        simp only [if_neg hend]
+        simp only [ite_eq_right hend]
       obtain ⟨B', htoBits', hwf', hdec'⟩ :=
         ih (min (pos + max tokChunk 1) toks.size) out' wholeOut _ (by omega) (by omega) hbw' hout'2
       refine ⟨blockBits ++ B', ?_, ?_, ?_⟩
@@ -483,7 +483,7 @@ theorem emitSharedBlocks_decode (data : ByteArray) (toks : Array LZ77Token) (tok
       · intro tail
         rw [List.append_assoc]
         have hd := hdecblk (B' ++ tail)
-        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [ite_eq_right (by simp only [decide_eq_true_eq]; exact hend)] at hd
         rw [hd]; exact hdec' tail
 
 /-- `decode.goR` variant of `emitSharedBlocks_decode`: the remaining bits after
@@ -560,13 +560,13 @@ theorem emitSharedBlocks_decodeR (data : ByteArray) (toks : Array LZ77Token) (to
           emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
             (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size)) := by
         conv => lhs; unfold emitSharedBlocks
-        simp only [if_pos hend]
+        simp only [ite_eq_left hend]
       refine ⟨blockBits, ?_, ?_, ?_⟩
       · rw [hstep]; exact htoBits
       · rw [hstep]; exact hwfblk
       · intro tail
         have hd := hdecblk tail
-        rw [if_pos (decide_eq_true hend)] at hd
+        rw [ite_eq_left (decide_eq_true hend)] at hd
         rw [hd, hwo]
     · have hbw' : (emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
           (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size))).wf := hwfblk
@@ -575,7 +575,7 @@ theorem emitSharedBlocks_decodeR (data : ByteArray) (toks : Array LZ77Token) (to
             (emitSharedBlock bw data (toks.extract pos (min (pos + max tokChunk 1) toks.size))
               (decide (min (pos + max tokChunk 1) toks.size ≥ toks.size))) := by
         conv => lhs; unfold emitSharedBlocks
-        simp only [if_neg hend]
+        simp only [ite_eq_right hend]
       obtain ⟨B', htoBits', hwf', hdec'⟩ :=
         ih (min (pos + max tokChunk 1) toks.size) out' wholeOut _ (by omega) (by omega) hbw' hout'2
       refine ⟨blockBits ++ B', ?_, ?_, ?_⟩
@@ -584,7 +584,7 @@ theorem emitSharedBlocks_decodeR (data : ByteArray) (toks : Array LZ77Token) (to
       · intro tail
         rw [List.append_assoc]
         have hd := hdecblk (B' ++ tail)
-        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [ite_eq_right (by simp only [decide_eq_true_eq]; exact hend)] at hd
         rw [hd]; exact hdec' tail
 
 /-- Block-splitting roundtrip: decoding the self-contained chunk-block stream
@@ -993,13 +993,13 @@ theorem emitSharedBlocksAt_decode (data : ByteArray) (toks : Array LZ77Token)
             (toks.extract pos (min (max (cuts.headD toks.size) (pos + 1)) toks.size))
             (decide (min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size)) := by
         conv => lhs; unfold emitSharedBlocksAt
-        simp only [if_pos hend]
+        simp only [ite_eq_left hend]
       refine ⟨blockBits, ?_, ?_, ?_⟩
       · rw [hstep]; exact htoBits
       · rw [hstep]; exact hwfblk
       · intro tail
         have hd := hdecblk tail
-        rw [if_pos (decide_eq_true hend)] at hd
+        rw [ite_eq_left (decide_eq_true hend)] at hd
         rw [hd, hwo]
     · -- Non-final block: recurse on the next token group.
       have hbw' : (emitSharedBlock bw data
@@ -1012,7 +1012,7 @@ theorem emitSharedBlocksAt_decode (data : ByteArray) (toks : Array LZ77Token)
               (toks.extract pos (min (max (cuts.headD toks.size) (pos + 1)) toks.size))
               (decide (min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size))) := by
         conv => lhs; unfold emitSharedBlocksAt
-        simp only [if_neg hend]
+        simp only [ite_eq_right hend]
       obtain ⟨B', htoBits', hwf', hdec'⟩ :=
         ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) cuts.tail out' wholeOut _
           (by omega) (by omega) hbw' hout'2
@@ -1022,7 +1022,7 @@ theorem emitSharedBlocksAt_decode (data : ByteArray) (toks : Array LZ77Token)
       · intro tail
         rw [List.append_assoc]
         have hd := hdecblk (B' ++ tail)
-        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [ite_eq_right (by simp only [decide_eq_true_eq]; exact hend)] at hd
         rw [hd]; exact hdec' tail
 
 /-- `decode.goR` variant of `emitSharedBlocksAt_decode`: the remaining bits after
@@ -1109,13 +1109,13 @@ theorem emitSharedBlocksAt_decodeR (data : ByteArray) (toks : Array LZ77Token)
             (toks.extract pos (min (max (cuts.headD toks.size) (pos + 1)) toks.size))
             (decide (min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size)) := by
         conv => lhs; unfold emitSharedBlocksAt
-        simp only [if_pos hend]
+        simp only [ite_eq_left hend]
       refine ⟨blockBits, ?_, ?_, ?_⟩
       · rw [hstep]; exact htoBits
       · rw [hstep]; exact hwfblk
       · intro tail
         have hd := hdecblk tail
-        rw [if_pos (decide_eq_true hend)] at hd
+        rw [ite_eq_left (decide_eq_true hend)] at hd
         rw [hd, hwo]
     · have hbw' : (emitSharedBlock bw data
           (toks.extract pos (min (max (cuts.headD toks.size) (pos + 1)) toks.size))
@@ -1127,7 +1127,7 @@ theorem emitSharedBlocksAt_decodeR (data : ByteArray) (toks : Array LZ77Token)
               (toks.extract pos (min (max (cuts.headD toks.size) (pos + 1)) toks.size))
               (decide (min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size))) := by
         conv => lhs; unfold emitSharedBlocksAt
-        simp only [if_neg hend]
+        simp only [ite_eq_right hend]
       obtain ⟨B', htoBits', hwf', hdec'⟩ :=
         ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) cuts.tail out' wholeOut _
           (by omega) (by omega) hbw' hout'2
@@ -1137,7 +1137,7 @@ theorem emitSharedBlocksAt_decodeR (data : ByteArray) (toks : Array LZ77Token)
       · intro tail
         rw [List.append_assoc]
         have hd := hdecblk (B' ++ tail)
-        rw [if_neg (by simp only [decide_eq_true_eq]; exact hend)] at hd
+        rw [ite_eq_right (by simp only [decide_eq_true_eq]; exact hend)] at hd
         rw [hd]; exact hdec' tail
 
 /-- Cut-list shared-window roundtrip: decoding the heuristic-partition block
@@ -1959,8 +1959,8 @@ private theorem sharedPartitionSized_fst_fuel (toks : Array LZ77Token) :
     conv => lhs; unfold sharedPartitionSized
     conv => rhs; unfold sharedPartitionBits
     by_cases hend : min (max (cuts.headD toks.size) (pos + 1)) toks.size ≥ toks.size
-    · simp only [if_pos hend, sizedTrees]
-    · simp only [if_neg hend, sizedTrees]
+    · simp only [ite_eq_left hend, sizedTrees]
+    · simp only [ite_eq_right hend, sizedTrees]
       rw [ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega)]
 
 /-- Component 1 of `sharedPartitionSized` is exactly `sharedPartitionBits`. -/
@@ -1988,11 +1988,11 @@ private theorem emitSharedBlocksAtSized_eq_fuel (data : ByteArray) (toks : Array
             (tokenFreqs (toks.extract pos
               (min (max (cuts.headD toks.size) (pos + 1)) toks.size))).2] := by
         conv => lhs; unfold sharedPartitionSized
-        simp only [if_pos hend]
+        simp only [ite_eq_left hend]
       rw [hsnd]
       conv => lhs; unfold emitSharedBlocksAtSized
       conv => rhs; unfold emitSharedBlocksAt
-      simp only [if_pos hend, emitSharedBlock, sizedTrees]
+      simp only [ite_eq_left hend, emitSharedBlock, sizedTrees]
       rfl
     · have hsnd : (sharedPartitionSized toks cuts pos).2 =
           sizedTrees
@@ -2003,11 +2003,11 @@ private theorem emitSharedBlocksAtSized_eq_fuel (data : ByteArray) (toks : Array
           (sharedPartitionSized toks cuts.tail
             (min (max (cuts.headD toks.size) (pos + 1)) toks.size)).2 := by
         conv => lhs; unfold sharedPartitionSized
-        simp only [if_neg hend]
+        simp only [ite_eq_right hend]
       rw [hsnd]
       conv => lhs; unfold emitSharedBlocksAtSized
       conv => rhs; unfold emitSharedBlocksAt
-      simp only [if_neg hend, List.headD_cons, List.tail_cons, emitSharedBlock, sizedTrees]
+      simp only [ite_eq_right hend, List.headD_cons, List.tail_cons, emitSharedBlock, sizedTrees]
       exact ih (min (max (cuts.headD toks.size) (pos + 1)) toks.size) (by omega) cuts.tail _
 
 /-- The tree-taking emitter over the sizing pass's trees equals the reference
@@ -2032,7 +2032,7 @@ theorem deflateDynamicBlocksSharedSized_eq (data : ByteArray) (toks : Array LZ77
       sharedPartitionSized_fst]
     by_cases hlt : sharedPartitionBits toks (chooseSplitsHeuristic toks) 0 <
         sharedPartitionBits toks (fixedCadenceCuts sharedTokChunk toks.size) 0
-    · simp only [if_pos hlt, emitSharedBlocksAtSized_eq]
-    · simp only [if_neg hlt, emitSharedBlocksAtSized_eq]
+    · simp only [ite_eq_left hlt, emitSharedBlocksAtSized_eq]
+    · simp only [ite_eq_right hlt, emitSharedBlocksAtSized_eq]
 
 end Zip.Native.Deflate

@@ -130,8 +130,8 @@ private theorem dite_getElem_toUInt32 (data : ByteArray) (i : Nat) :
     (if h : i < data.size then (data[i]'h).toUInt32 else (0 : UInt32))
       = (if i < data.size then data[i]!.toUInt32 else (0 : UInt32)) := by
   by_cases h : i < data.size
-  · rw [dif_pos h, if_pos h, getElem!_pos data i h]
-  · rw [dif_neg h, if_neg h]
+  · rw [dite_eq_left h, ite_eq_left h, getElem!_pos data i h]
+  · rw [dite_eq_right h, ite_eq_right h]
 
 /-- `peekFast` in `ite`/`getElem!` form. `peekFast` itself reads each byte with a
     proven-bounds `dite` guard; this restates it with the panicking `!` reads so
@@ -188,7 +188,7 @@ theorem peekFast_testBit (br : BitReader) (j : Nat)
     hmask, Bool.and_true, hshift, UInt32.toNat_or, UInt32.toNat_or, Nat.testBit_or,
     Nat.testBit_or,
     show (if br.pos < br.data.size then br.data[br.pos]!.toUInt32 else (0 : UInt32)).toNat
-        = br.data[br.pos]!.toNat from by rw [if_pos hpos, UInt8.toNat_toUInt32],
+        = br.data[br.pos]!.toNat from by rw [ite_eq_left hpos, UInt8.toNat_toUInt32],
     UInt32.toNat_shiftLeft, show (8 : UInt32).toNat % 32 = 8 from by decide, hb1eq,
     Nat.mod_eq_of_lt (by rw [Nat.shiftLeft_eq, show (2 : Nat) ^ 8 = 256 from by decide,
       show (2 : Nat) ^ 32 = 4294967296 from by decide]; omega),
@@ -211,7 +211,7 @@ theorem peekFast_testBit (br : BitReader) (j : Nat)
       have e8 : decide (br.bitOff + j ≥ 8) = true := by simp only [decide_eq_true_eq]; omega
       have e16 : decide (br.bitOff + j ≥ 16) = false := by simp only [decide_eq_false_iff_not]; omega
       have hif1 : (if br.pos + 1 < br.data.size then br.data[br.pos + 1]!.toNat else 0)
-          = br.data[br.pos + 1]!.toNat := if_pos (by omega)
+          = br.data[br.pos + 1]!.toNat := ite_eq_left (by omega)
       have hdiv : (br.pos * 8 + br.bitOff + j) / 8 = br.pos + 1 := by omega
       have hmod : (br.pos * 8 + br.bitOff + j) % 8 = br.bitOff + j - 8 := by omega
       simp only [hb0, e8, e16, Bool.true_and, Bool.false_and, Bool.false_or, Bool.or_false,
@@ -228,7 +228,7 @@ theorem peekFast_testBit (br : BitReader) (j : Nat)
       have e8 : decide (br.bitOff + j ≥ 8) = true := by simp only [decide_eq_true_eq]; omega
       have e16 : decide (br.bitOff + j ≥ 16) = true := by simp only [decide_eq_true_eq]; omega
       have hif2 : (if br.pos + 2 < br.data.size then br.data[br.pos + 2]!.toNat else 0)
-          = br.data[br.pos + 2]!.toNat := if_pos (by omega)
+          = br.data[br.pos + 2]!.toNat := ite_eq_left (by omega)
       have hdiv : (br.pos * 8 + br.bitOff + j) / 8 = br.pos + 2 := by omega
       have hmod : (br.pos * 8 + br.bitOff + j) % 8 = br.bitOff + j - 16 := by omega
       simp only [hb0, hb1, e8, e16, Bool.true_and, Bool.false_or, hif2, hdiv, hmod]
@@ -250,9 +250,9 @@ theorem cwOf_peekFast_eq_take (br : BitReader) (len : Nat)
     have hps : br.pos < br.data.size := by
       rcases Nat.lt_or_ge br.pos br.data.size with h | h
       · exact h
-      · simp only [bitsAvail, if_pos h] at havail; omega
+      · simp only [bitsAvail, ite_eq_left h] at havail; omega
     have hgj : br.pos * 8 + br.bitOff + j < br.data.size * 8 := by
-      simp only [bitsAvail, if_neg (Nat.not_le.mpr hps)] at havail; omega
+      simp only [bitsAvail, ite_eq_right (Nat.not_le.mpr hps)] at havail; omega
     rw [List.getElem?_eq_getElem (by rw [cwOf_length]; exact hj), cwOf_getElem _ _ _ hj,
       List.getElem?_take_of_lt hj,
       show br.toBits = (Deflate.Spec.bytesToBits br.data).drop (br.pos * 8 + br.bitOff) from rfl,
@@ -456,7 +456,7 @@ theorem decodeWithTable_eq (tree : HuffTree) (br : BitReader) :
       have hpossize : br.pos < br.data.size := by
         rcases Nat.lt_or_ge br.pos br.data.size with h | h
         · exact h
-        · exfalso; simp only [bitsAvail, if_pos h] at havail; omega
+        · exfalso; simp only [bitsAvail, ite_eq_left h] at havail; omega
       have hgoeq : tableEntry.go tree (peekFast br).toNat 0 = (sym, lenB) := by
         rw [← hentry]; rfl
       have hlenfast : lenB.toNat ≤ fastBits :=
@@ -480,7 +480,7 @@ theorem decodeWithTable_eq (tree : HuffTree) (br : BitReader) :
       have hposle' : br'.pos ≤ br'.data.size := decode_go_pos_le tree br 0 sym br' hgo (by omega)
       have hk : br.pos * 8 + br.bitOff + lenB.toNat ≤ br.data.size * 8 := by
         have h1 : lenB.toNat + br.bitOff ≤ (br.data.size - br.pos) * 8 := by
-          simp only [bitsAvail, if_neg (Nat.not_le.mpr hpossize)] at havail; omega
+          simp only [bitsAvail, ite_eq_right (Nat.not_le.mpr hpossize)] at havail; omega
         have h2 : (br.data.size - br.pos) * 8 = br.data.size * 8 - br.pos * 8 := Nat.sub_mul _ _ _
         omega
       -- The explicit advanced reader equals `br'` (heavy reasoning isolated).

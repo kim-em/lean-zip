@@ -195,30 +195,30 @@ theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List N
       simp only [beq_self_eq_true, ↓reduceIte]
       by_cases hge11 : 1 + countRun 0 xs >= 11
       · -- code 18: repeat zero 11-138
-        rw [if_pos (by omega : 1 + countRun 0 xs ≥ 11), Deflate.Spec.rlDecode_go_code18]
+        rw [ite_eq_left (by omega : 1 + countRun 0 xs ≥ 11), Deflate.Spec.rlDecode_go_code18]
         rw [show min (1 + countRun 0 xs) 138 - 11 + 11 = min (1 + countRun 0 xs) 138 from by omega]
         rw [rlDecodeLengths_go_rlEncodeLengths_go _ _ (drop_subset_valid hxs_valid)]
         simp only [List.append_assoc]
         exact congrArg (fun z => some (acc ++ z))
           (replicate_drop_eq_cons_zero xs _ (by omega) (by omega))
-      · rw [if_neg (by omega)]
+      · rw [ite_eq_right (by omega)]
         by_cases hge3 : 1 + countRun 0 xs >= 3
         · -- code 17: repeat zero 3-10
-          rw [if_pos (by omega : 1 + countRun 0 xs ≥ 3), Deflate.Spec.rlDecode_go_code17]
+          rw [ite_eq_left (by omega : 1 + countRun 0 xs ≥ 3), Deflate.Spec.rlDecode_go_code17]
           rw [show 1 + countRun 0 xs - 3 + 3 = 1 + countRun 0 xs from by omega]
           rw [rlDecodeLengths_go_rlEncodeLengths_go _ _ (drop_subset_valid hxs_valid)]
           simp only [List.append_assoc]
           exact congrArg (fun z => some (acc ++ z))
             (replicate_drop_eq_cons_zero xs _ (by omega) (by omega))
         · -- literal 0
-          rw [if_neg (by omega), Deflate.Spec.rlDecode_go_literal 0 0 _ _ (by omega)]
+          rw [ite_eq_right (by omega), Deflate.Spec.rlDecode_go_literal 0 0 _ _ (by omega)]
           rw [rlDecodeLengths_go_rlEncodeLengths_go xs (acc ++ [0]) hxs_valid]
           simp only [List.append_assoc, List.cons_append, List.nil_append]
     · simp only [show (x == 0) = false from beq_eq_false_iff_ne.mpr hx0,
                   Bool.false_eq_true, ↓reduceIte]
       by_cases hge3 : countRun x xs >= 3
       · -- literal + code 16: repeat previous 3-6
-        rw [if_pos (by omega : countRun x xs ≥ 3)]
+        rw [ite_eq_left (by omega : countRun x xs ≥ 3)]
         rw [Deflate.Spec.rlDecode_go_literal x 0 _ _ hx_valid, Deflate.Spec.rlDecode_go_code16 _ _ _ (by
           simp only [List.length_append, List.length_cons, List.length_nil, Nat.zero_add, gt_iff_lt,
             Nat.zero_lt_succ])]
@@ -231,7 +231,7 @@ theorem rlDecodeLengths_go_rlEncodeLengths_go (lengths : List Nat) (acc : List N
         exact congrArg (fun z => some (acc ++ z))
           (singleton_replicate_drop_eq_cons x xs _ (Nat.min_le_left _ _))
       · -- literal (no repeat)
-        rw [if_neg (by omega), Deflate.Spec.rlDecode_go_literal x 0 _ _ hx_valid]
+        rw [ite_eq_right (by omega), Deflate.Spec.rlDecode_go_literal x 0 _ _ hx_valid]
         rw [rlDecodeLengths_go_rlEncodeLengths_go xs (acc ++ [x]) hxs_valid]
         simp only [List.append_assoc, List.cons_append, List.nil_append]
 termination_by lengths.length
@@ -268,23 +268,23 @@ theorem rlEncodeLengths_go_valid (lengths : List Nat)
     · subst hx0
       simp only [beq_self_eq_true, ↓reduceIte]
       by_cases hge11 : 1 + countRun 0 xs ≥ 11
-      · rw [if_pos (by omega : 1 + countRun 0 xs ≥ 11)]
+      · rw [ite_eq_left (by omega : 1 + countRun 0 xs ≥ 11)]
         intro entry hmem
         simp only [List.mem_cons] at hmem
         cases hmem with
         | inl h => subst h; right; right; right; constructor <;> omega
         | inr h =>
           exact rlEncodeLengths_go_valid _ (drop_subset_valid hxs_valid) entry h
-      · rw [if_neg (by omega)]
+      · rw [ite_eq_right (by omega)]
         by_cases hge3 : 1 + countRun 0 xs ≥ 3
-        · rw [if_pos (by omega : 1 + countRun 0 xs ≥ 3)]
+        · rw [ite_eq_left (by omega : 1 + countRun 0 xs ≥ 3)]
           intro entry hmem
           simp only [List.mem_cons] at hmem
           cases hmem with
           | inl h => subst h; right; right; left; constructor <;> omega
           | inr h =>
             exact rlEncodeLengths_go_valid _ (drop_subset_valid hxs_valid) entry h
-        · rw [if_neg (by omega)]
+        · rw [ite_eq_right (by omega)]
           intro entry hmem
           simp only [List.mem_cons] at hmem
           cases hmem with
@@ -294,7 +294,7 @@ theorem rlEncodeLengths_go_valid (lengths : List Nat)
     · simp only [show (x == 0) = false from beq_eq_false_iff_ne.mpr hx0,
                   Bool.false_eq_true, ↓reduceIte]
       by_cases hge3 : countRun x xs ≥ 3
-      · rw [if_pos (by omega : countRun x xs ≥ 3)]
+      · rw [ite_eq_left (by omega : countRun x xs ≥ 3)]
         intro entry hmem
         simp only [List.mem_cons] at hmem
         cases hmem with
@@ -304,7 +304,7 @@ theorem rlEncodeLengths_go_valid (lengths : List Nat)
           | inl h => subst h; right; left; constructor <;> omega
           | inr h =>
             exact rlEncodeLengths_go_valid _ (drop_subset_valid hxs_valid) entry h
-      · rw [if_neg (by omega)]
+      · rw [ite_eq_right (by omega)]
         intro entry hmem
         simp only [List.mem_cons] at hmem
         cases hmem with

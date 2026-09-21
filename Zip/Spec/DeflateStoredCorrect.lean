@@ -394,7 +394,7 @@ private theorem deflateStoredPure_eq_final (data : ByteArray) (pos : Nat)
       storedBlockHdr (data.size - pos) true ++ data.extract pos data.size := by
   unfold deflateStoredPure storedBlockHdr
   simp only [show min (data.size - pos) 65535 = data.size - pos from by omega]
-  rw [dif_pos (show pos + (data.size - pos) ≥ data.size from by omega)]
+  rw [dite_eq_left (show pos + (data.size - pos) ≥ data.size from by omega)]
   simp only [show pos + (data.size - pos) = data.size from by omega, ↓reduceIte]
 
 /-- In the non-final case, deflateStoredPure produces header ++ 65535-byte block ++ rest. -/
@@ -406,7 +406,7 @@ private theorem deflateStoredPure_eq_nonfinal (data : ByteArray) (pos : Nat)
   conv => lhs; unfold deflateStoredPure
   have hneg : ¬(pos + 65535 ≥ data.size) := by omega
   simp only [show min (data.size - pos) 65535 = 65535 from by omega,
-    dif_neg hneg, storedBlockHdr, Bool.false_eq_true, ↓reduceIte]
+    dite_eq_right hneg, storedBlockHdr, Bool.false_eq_true, ↓reduceIte]
 
 /-! ## Main roundtrip theorem -/
 

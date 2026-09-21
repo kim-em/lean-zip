@@ -42,7 +42,7 @@ theorem encodeSymbol_fixed_isSome (lengths : List Nat) (maxBits : Nat)
       ((Huffman.Spec.allCodes lengths maxBits).map fun (s, cw) => (cw, s))
       sym).isSome = true := by
   have hcf : Huffman.Spec.codeFor lengths maxBits sym ≠ none := by
-    simp only [Huffman.Spec.codeFor, dif_pos hsym]
+    simp only [Huffman.Spec.codeFor, dite_eq_left hsym]
     rw [getElem!_pos lengths sym hsym] at hlen hmb
     simp only [gt_iff_lt, Bool.or_eq_true, beq_iff_eq, hlen, decide_eq_true_eq, false_or, ne_eq,
       ite_eq_left_iff, Nat.not_lt, hmb, reduceCtorEq, imp_false, not_true_eq_false,
@@ -124,7 +124,7 @@ private theorem findLengthCode.go_isSome_of_covered (len i : Nat)
     (hle : len ≤ 258) :
     (findLengthCode.go len i).isSome = true := by
   unfold findLengthCode.go
-  simp only [show ¬(i ≥ lengthBase.size) from by omega, dif_neg, not_false_eq_true]
+  simp only [show ¬(i ≥ lengthBase.size) from by omega, dite_eq_right, not_false_eq_true]
   by_cases hbucket : (decide (lengthBase[i] ≤ len) && decide (len < (lengthBase[i + 1]?.getD 259))) = true
   · simp only [hbucket, ↓reduceIte, Option.isSome_some]
   · simp only [hbucket, Bool.false_eq_true, ↓reduceIte]
@@ -192,7 +192,7 @@ private theorem findDistCode.go_isSome_of_covered (dist i : Nat)
     (hle : dist ≤ 32768) :
     (findDistCode.go dist i).isSome = true := by
   unfold findDistCode.go
-  simp only [show ¬(i ≥ distBase.size) from by omega, dif_neg, not_false_eq_true]
+  simp only [show ¬(i ≥ distBase.size) from by omega, dite_eq_right, not_false_eq_true]
   by_cases hbucket : (decide (distBase[i] ≤ dist) && decide (dist < (distBase[i + 1]?.getD 32769))) = true
   · simp only [hbucket, ↓reduceIte, Option.isSome_some]
   · simp only [hbucket, Bool.false_eq_true, ↓reduceIte]

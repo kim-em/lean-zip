@@ -470,12 +470,12 @@ decreasing_by omega
 theorem blKraftFrom_unfold (bl : Array Nat) (maxBits b : Nat) (hb : b ≤ maxBits) :
     blKraftFrom bl maxBits b =
       bl.getD b 0 * 2 ^ (maxBits - b) + blKraftFrom bl maxBits (b + 1) := by
-  rw [blKraftFrom]; exact if_neg (by omega)
+  rw [blKraftFrom]; exact ite_eq_right (by omega)
 
 /-- `blKraftFrom` past `maxBits` is zero. -/
 theorem blKraftFrom_gt (bl : Array Nat) (maxBits b : Nat) (hb : b > maxBits) :
     blKraftFrom bl maxBits b = 0 := by
-  rw [blKraftFrom]; exact if_pos hb
+  rw [blKraftFrom]; exact ite_eq_left hb
 
 /-- Partial sums of `blKraft`'s range-fold telescope into `blKraftFrom`. -/
 private theorem blKraftFrom_eq_aux (bl : Array Nat) (maxBits : Nat) :
@@ -506,24 +506,24 @@ theorem blKraftFrom_set (bl : Array Nat) (maxBits l v b : Nat)
     blKraftFrom (bl.set! l v) maxBits b + (if b ≤ l then bl.getD l 0 * 2 ^ (maxBits - l) else 0)
       = blKraftFrom bl maxBits b + (if b ≤ l then v * 2 ^ (maxBits - l) else 0) := by
   if hb : b > maxBits then
-    rw [blKraftFrom_gt _ _ _ hb, blKraftFrom_gt _ _ _ hb, if_neg (by omega), if_neg (by omega)]
+    rw [blKraftFrom_gt _ _ _ hb, blKraftFrom_gt _ _ _ hb, ite_eq_right (by omega), ite_eq_right (by omega)]
   else
     have hbM : b ≤ maxBits := by omega
     rw [blKraftFrom_unfold (bl.set! l v) maxBits b hbM, blKraftFrom_unfold bl maxBits b hbM]
     have ih := blKraftFrom_set bl maxBits l v (b + 1) hl hlM
     if hbl : b = l then
       subst hbl
-      rw [if_neg (show ¬ b + 1 ≤ b from by omega), if_neg (show ¬ b + 1 ≤ b from by omega)] at ih
-      rw [getD0_set!_self bl b v hl, if_pos (Nat.le_refl b), if_pos (Nat.le_refl b)]
+      rw [ite_eq_right (show ¬ b + 1 ≤ b from by omega), ite_eq_right (show ¬ b + 1 ≤ b from by omega)] at ih
+      rw [getD0_set!_self bl b v hl, ite_eq_left (Nat.le_refl b), ite_eq_left (Nat.le_refl b)]
       omega
     else
       rw [getD0_set!_ne bl l b v hbl]
       by_cases hlt : b ≤ l
-      · rw [if_pos hlt, if_pos hlt]
-        rw [if_pos (show b + 1 ≤ l from by omega), if_pos (show b + 1 ≤ l from by omega)] at ih
+      · rw [ite_eq_left hlt, ite_eq_left hlt]
+        rw [ite_eq_left (show b + 1 ≤ l from by omega), ite_eq_left (show b + 1 ≤ l from by omega)] at ih
         omega
-      · rw [if_neg hlt, if_neg hlt]
-        rw [if_neg (show ¬ b + 1 ≤ l from by omega), if_neg (show ¬ b + 1 ≤ l from by omega)] at ih
+      · rw [ite_eq_right hlt, ite_eq_right hlt]
+        rw [ite_eq_right (show ¬ b + 1 ≤ l from by omega), ite_eq_right (show ¬ b + 1 ≤ l from by omega)] at ih
         omega
 termination_by maxBits + 1 - b
 decreasing_by omega
@@ -535,7 +535,7 @@ theorem blKraft_set_dec (bl : Array Nat) (maxBits l : Nat)
     blKraft (bl.set! l (bl.getD l 0 - 1)) maxBits + 2 ^ (maxBits - l) = blKraft bl maxBits := by
   rw [blKraft_eq_from, blKraft_eq_from]
   have hset := blKraftFrom_set bl maxBits l (bl.getD l 0 - 1) 1 hsz hlM
-  rw [if_pos hl1, if_pos hl1] at hset
+  rw [ite_eq_left hl1, ite_eq_left hl1] at hset
   have hcw : (bl.getD l 0 - 1) * 2 ^ (maxBits - l) + 2 ^ (maxBits - l)
       = bl.getD l 0 * 2 ^ (maxBits - l) := by
     obtain ⟨c, hc⟩ : ∃ c, bl.getD l 0 = c + 1 := ⟨bl.getD l 0 - 1, by omega⟩
@@ -548,7 +548,7 @@ theorem blKraft_set_inc2 (bl : Array Nat) (maxBits l : Nat)
     blKraft (bl.set! l (bl.getD l 0 + 2)) maxBits = blKraft bl maxBits + 2 * 2 ^ (maxBits - l) := by
   rw [blKraft_eq_from, blKraft_eq_from]
   have hset := blKraftFrom_set bl maxBits l (bl.getD l 0 + 2) 1 hsz hlM
-  rw [if_pos hl1, if_pos hl1] at hset
+  rw [ite_eq_left hl1, ite_eq_left hl1] at hset
   have hcw : (bl.getD l 0 + 2) * 2 ^ (maxBits - l)
       = bl.getD l 0 * 2 ^ (maxBits - l) + 2 * 2 ^ (maxBits - l) := by rw [Nat.add_mul]
   omega
@@ -602,7 +602,7 @@ theorem findBelow_zero (bl : Array Nat) (start : Nat) (h : findBelow bl start = 
   induction start with
   | zero => intro k hk1 hk0; omega
   | succ s ih =>
-    rw [findBelow, if_neg (by omega)] at h
+    rw [findBelow, ite_eq_right (by omega)] at h
     split at h
     · omega
     · rename_i hnpos
@@ -616,16 +616,16 @@ theorem findBelow_zero (bl : Array Nat) (start : Nat) (h : findBelow bl start = 
 theorem findBelow_pos (bl : Array Nat) (start : Nat) (h : findBelow bl start ≠ 0) :
     1 ≤ findBelow bl start ∧ findBelow bl start ≤ start ∧ 1 ≤ bl.getD (findBelow bl start) 0 := by
   induction start with
-  | zero => exact absurd (by rw [findBelow]; exact if_pos rfl) h
+  | zero => exact absurd (by rw [findBelow]; exact ite_eq_left rfl) h
   | succ s ih =>
-    rw [findBelow, if_neg (by omega)]
-    rw [findBelow, if_neg (by omega)] at h
+    rw [findBelow, ite_eq_right (by omega)]
+    rw [findBelow, ite_eq_right (by omega)] at h
     split at h
     · rename_i hpos
-      rw [if_pos hpos]
+      rw [ite_eq_left hpos]
       exact ⟨by omega, Nat.le_refl _, hpos⟩
     · rename_i hnpos
-      rw [if_neg hnpos, Nat.add_sub_cancel]
+      rw [ite_eq_right hnpos, Nat.add_sub_cancel]
       rw [Nat.add_sub_cancel] at h
       obtain ⟨h1, h2, h3⟩ := ih h
       exact ⟨h1, Nat.le_succ_of_le h2, h3⟩
@@ -662,17 +662,17 @@ decreasing_by omega
 theorem blKraftFrom_scale (bl : Array Nat) (m b : Nat) (hm : 1 ≤ m) :
     blKraftFrom bl m b = 2 * blKraftFrom bl (m - 1) b + (if b ≤ m then bl.getD m 0 else 0) := by
   if hb : b > m then
-    rw [blKraftFrom_gt bl m b hb, blKraftFrom_gt bl (m - 1) b (by omega), if_neg (by omega)]
+    rw [blKraftFrom_gt bl m b hb, blKraftFrom_gt bl (m - 1) b (by omega), ite_eq_right (by omega)]
   else
     have hbm : b ≤ m := by omega
-    rw [blKraftFrom_unfold bl m b hbm, if_pos hbm]
+    rw [blKraftFrom_unfold bl m b hbm, ite_eq_left hbm]
     have ih := blKraftFrom_scale bl m (b + 1) hm
     rcases (by omega : b = m ∨ b < m) with heq | hlt
     · subst heq
       rw [blKraftFrom_gt bl b (b + 1) (by omega), blKraftFrom_gt bl (b - 1) b (by omega),
         Nat.sub_self, Nat.pow_zero]
       omega
-    · rw [if_pos (show b + 1 ≤ m by omega)] at ih
+    · rw [ite_eq_left (show b + 1 ≤ m by omega)] at ih
       rw [blKraftFrom_unfold bl (m - 1) b (by omega)]
       have hpow : 2 ^ (m - b) = 2 * 2 ^ ((m - 1) - b) := by
         rw [show m - b = ((m - 1) - b) + 1 by omega, Nat.pow_succ, Nat.mul_comm]
@@ -695,11 +695,11 @@ decreasing_by omega
 
 theorem blCountFrom_unfold (bl : Array Nat) (maxBits b : Nat) (hb : b ≤ maxBits) :
     blCountFrom bl maxBits b = bl.getD b 0 + blCountFrom bl maxBits (b + 1) := by
-  rw [blCountFrom]; exact if_neg (by omega)
+  rw [blCountFrom]; exact ite_eq_right (by omega)
 
 theorem blCountFrom_gt (bl : Array Nat) (maxBits b : Nat) (hb : b > maxBits) :
     blCountFrom bl maxBits b = 0 := by
-  rw [blCountFrom]; exact if_pos hb
+  rw [blCountFrom]; exact ite_eq_left hb
 
 private theorem blCountFrom_eq_aux (bl : Array Nat) (maxBits : Nat) :
     ∀ j, j ≤ maxBits →
@@ -727,24 +727,24 @@ theorem blCountFrom_set (bl : Array Nat) (maxBits l v b : Nat)
     blCountFrom (bl.set! l v) maxBits b + (if b ≤ l then bl.getD l 0 else 0)
       = blCountFrom bl maxBits b + (if b ≤ l then v else 0) := by
   if hb : b > maxBits then
-    rw [blCountFrom_gt _ _ _ hb, blCountFrom_gt _ _ _ hb, if_neg (by omega), if_neg (by omega)]
+    rw [blCountFrom_gt _ _ _ hb, blCountFrom_gt _ _ _ hb, ite_eq_right (by omega), ite_eq_right (by omega)]
   else
     have hbM : b ≤ maxBits := by omega
     rw [blCountFrom_unfold (bl.set! l v) maxBits b hbM, blCountFrom_unfold bl maxBits b hbM]
     have ih := blCountFrom_set bl maxBits l v (b + 1) hl hlM
     if hbl : b = l then
       subst hbl
-      rw [if_neg (show ¬ b + 1 ≤ b from by omega), if_neg (show ¬ b + 1 ≤ b from by omega)] at ih
-      rw [getD0_set!_self bl b v hl, if_pos (Nat.le_refl b), if_pos (Nat.le_refl b)]
+      rw [ite_eq_right (show ¬ b + 1 ≤ b from by omega), ite_eq_right (show ¬ b + 1 ≤ b from by omega)] at ih
+      rw [getD0_set!_self bl b v hl, ite_eq_left (Nat.le_refl b), ite_eq_left (Nat.le_refl b)]
       omega
     else
       rw [getD0_set!_ne bl l b v hbl]
       by_cases hlt : b ≤ l
-      · rw [if_pos hlt, if_pos hlt]
-        rw [if_pos (show b + 1 ≤ l from by omega), if_pos (show b + 1 ≤ l from by omega)] at ih
+      · rw [ite_eq_left hlt, ite_eq_left hlt]
+        rw [ite_eq_left (show b + 1 ≤ l from by omega), ite_eq_left (show b + 1 ≤ l from by omega)] at ih
         omega
-      · rw [if_neg hlt, if_neg hlt]
-        rw [if_neg (show ¬ b + 1 ≤ l from by omega), if_neg (show ¬ b + 1 ≤ l from by omega)] at ih
+      · rw [ite_eq_right hlt, ite_eq_right hlt]
+        rw [ite_eq_right (show ¬ b + 1 ≤ l from by omega), ite_eq_right (show ¬ b + 1 ≤ l from by omega)] at ih
         omega
 termination_by maxBits + 1 - b
 decreasing_by omega
@@ -755,7 +755,7 @@ theorem blCount_set_dec (bl : Array Nat) (maxBits l : Nat)
     blCountSum (bl.set! l (bl.getD l 0 - 1)) maxBits + 1 = blCountSum bl maxBits := by
   rw [blCount_eq_from, blCount_eq_from]
   have hset := blCountFrom_set bl maxBits l (bl.getD l 0 - 1) 1 hsz hlM
-  rw [if_pos hl1, if_pos hl1] at hset
+  rw [ite_eq_left hl1, ite_eq_left hl1] at hset
   omega
 
 /-- Adding two leaves at level `l` raises `blCountSum` by 2. -/
@@ -764,7 +764,7 @@ theorem blCount_set_inc2 (bl : Array Nat) (maxBits l : Nat)
     blCountSum (bl.set! l (bl.getD l 0 + 2)) maxBits = blCountSum bl maxBits + 2 := by
   rw [blCount_eq_from, blCount_eq_from]
   have hset := blCountFrom_set bl maxBits l (bl.getD l 0 + 2) 1 hsz hlM
-  rw [if_pos hl1, if_pos hl1] at hset
+  rw [ite_eq_left hl1, ite_eq_left hl1] at hset
   omega
 
 /-- Any single level's count is bounded by the total leaf count. -/
@@ -859,7 +859,7 @@ theorem repairBl_loop (maxBits : Nat) (hmb : 1 ≤ maxBits) :
     -- Step 2a: while over-subscribed, the top level `maxBits` holds a leaf.
     have hpos_top : 1 ≤ bl.getD maxBits 0 := by
       have hscale := blKraftFrom_scale bl maxBits 1 hmb
-      rw [if_pos hmb] at hscale
+      rw [ite_eq_left hmb] at hscale
       rw [blKraft_eq_from] at hconserv
       have hfeasm := hfeas (maxBits - 1) (by omega)
       have hpoweq : 2 * 2 ^ (maxBits - 1) = 2 ^ maxBits := by
@@ -931,7 +931,7 @@ theorem repairBl_count_loop (maxBits : Nat) (hmb : 1 ≤ maxBits) :
     intro bl hsize hfeas hleaf hconserv
     have hpos_top : 1 ≤ bl.getD maxBits 0 := by
       have hscale := blKraftFrom_scale bl maxBits 1 hmb
-      rw [if_pos hmb] at hscale
+      rw [ite_eq_left hmb] at hscale
       rw [blKraft_eq_from] at hconserv
       have hfeasm := hfeas (maxBits - 1) (by omega)
       have hpoweq : 2 * 2 ^ (maxBits - 1) = 2 ^ maxBits := by
@@ -1068,12 +1068,12 @@ private theorem blKraftFrom_set_inc (bl : Array Nat) (M l : Nat)
       = blKraftFrom bl M 1 + (if l ≤ M then 2 ^ (M - l) else 0) := by
   by_cases hlM : l ≤ M
   · have hset := blKraftFrom_set bl M l (bl.getD l 0 + 1) 1 hsz hlM
-    rw [if_pos hl1, if_pos hl1] at hset
-    rw [if_pos hlM]
+    rw [ite_eq_left hl1, ite_eq_left hl1] at hset
+    rw [ite_eq_left hlM]
     have : (bl.getD l 0 + 1) * 2 ^ (M - l) = bl.getD l 0 * 2 ^ (M - l) + 2 ^ (M - l) := by
       rw [Nat.add_mul, Nat.one_mul]
     omega
-  · rw [blKraftFrom_set_above bl M l (bl.getD l 0 + 1) 1 (by omega), if_neg hlM, Nat.add_zero]
+  · rw [blKraftFrom_set_above bl M l (bl.getD l 0 + 1) 1 (by omega), ite_eq_right hlM, Nat.add_zero]
 
 /-- Incrementing an in-range level's count by one raises `blCountSum` by one. -/
 private theorem blCount_set_inc (bl : Array Nat) (maxBits l : Nat)
@@ -1081,7 +1081,7 @@ private theorem blCount_set_inc (bl : Array Nat) (maxBits l : Nat)
     blCountSum (bl.set! l (bl.getD l 0 + 1)) maxBits = blCountSum bl maxBits + 1 := by
   rw [blCount_eq_from, blCount_eq_from]
   have hset := blCountFrom_set bl maxBits l (bl.getD l 0 + 1) 1 hsz hlM
-  rw [if_pos hl1, if_pos hl1] at hset
+  rw [ite_eq_left hl1, ite_eq_left hl1] at hset
   omega
 
 /-- List-level Kraft sum of a depth list against normalization `M`, after capping each
@@ -1107,7 +1107,7 @@ private theorem cappedKraftSum_zero_of_above (maxBits M : Nat) (ds : List (Nat �
   induction ds with
   | nil => rfl
   | cons p rest ih =>
-    rw [cappedKraftSum, if_neg (by have := h p (List.mem_cons_self ..); omega),
+    rw [cappedKraftSum, ite_eq_right (by have := h p (List.mem_cons_self ..); omega),
       ih (fun q hq => h q (List.mem_cons_of_mem _ hq))]
 
 /-- **Binary-tree prefix-Kraft feasibility.** For any level `b < maxBits`, the level-`b`
@@ -1124,9 +1124,9 @@ theorem cappedKraftSum_tree_le (t : BuildTree) (maxBits b : Nat) (hbm : b < maxB
     by_cases hc : min d maxBits ≤ b
     · rcases Nat.lt_or_ge d maxBits with hlt | hge
       · rw [Nat.min_eq_left (Nat.le_of_lt hlt)] at hc ⊢
-        rw [if_pos hc, Nat.add_zero]; exact Nat.le_refl _
+        rw [ite_eq_left hc, Nat.add_zero]; exact Nat.le_refl _
       · rw [Nat.min_eq_right hge] at hc; omega
-    · rw [if_neg hc, Nat.zero_add]; exact Nat.zero_le _
+    · rw [ite_eq_right hc, Nat.zero_add]; exact Nat.zero_le _
   | node w l r ihl ihr =>
     intro d
     rw [BuildTree.depths, cappedKraftSum_append]
@@ -1153,7 +1153,7 @@ theorem cappedKraftSum_tree_ge (t : BuildTree) (maxBits : Nat) :
   induction t with
   | leaf w s =>
     intro d
-    rw [BuildTree.depths, cappedKraftSum, cappedKraftSum, if_pos (Nat.min_le_right d maxBits),
+    rw [BuildTree.depths, cappedKraftSum, cappedKraftSum, ite_eq_left (Nat.min_le_right d maxBits),
       Nat.add_zero]
     have := Nat.min_le_left d maxBits
     exact Nat.pow_le_pow_right (by omega) (by omega)
@@ -1714,7 +1714,7 @@ private theorem filter_set_perm (l : List Nat) (i v : Nat)
       subst hx
       simp only [List.set_cons_zero, List.filter_cons, bne_self_eq_false, Bool.false_eq_true,
         ↓reduceIte]
-      rw [if_pos (by simpa using hv)]
+      rw [ite_eq_left (by simpa using hv)]
       rw [← List.singleton_append]
       exact List.perm_append_comm
     | succ j =>
@@ -1724,9 +1724,9 @@ private theorem filter_set_perm (l : List Nat) (i v : Nat)
       rw [List.set_cons_succ]
       simp only [List.filter_cons]
       by_cases hx0 : (x != 0) = true
-      · rw [if_pos hx0, if_pos hx0, List.cons_append]
+      · rw [ite_eq_left hx0, ite_eq_left hx0, List.cons_append]
         exact ihj.cons x
-      · rw [if_neg hx0, if_neg hx0]
+      · rw [ite_eq_right hx0, ite_eq_right hx0]
         exact ihj
 
 /-- **Filtering `assignLengths` recovers the length multiset.** Folding `set` over distinct,
@@ -1747,7 +1747,7 @@ private theorem foldl_set_filter_perm (ps : List (Nat × Nat)) (acc : List Nat)
     obtain ⟨hnotin, hnd⟩ := List.nodup_cons.mp hnodup
     simp only [List.foldl_cons]
     have hp_len : p.1 < acc.length := hlen p (List.mem_cons_self ..)
-    rw [if_pos hp_len]
+    rw [ite_eq_left hp_len]
     have hp_zero : acc[p.1]! = 0 := hzero p (List.mem_cons_self ..)
     have hp_pos : 0 < p.2 := hpos p (List.mem_cons_self ..)
     have hlen' : ∀ q ∈ ps, q.1 < (acc.set p.1 p.2).length := by
@@ -1885,7 +1885,7 @@ theorem computeCodeLengths_nonzero (freqs : List (Nat × Nat)) (numSymbols maxBi
   have hne : ¬(freqs.filter (fun x => decide (x.2 > 0))).isEmpty := by
     intro h; rw [List.isEmpty_iff_length_eq_zero] at h
     exact absurd (List.length_pos_of_mem hs_nz) (by omega)
-  rw [if_neg hne]
+  rw [ite_eq_right hne]
   -- Abbreviate the nonzero list
   let nz := freqs.filter (fun x => decide (x.2 > 0))
   split
@@ -2004,7 +2004,7 @@ theorem fixKraftList_limitedPairs_id (nz : List (Nat × Nat)) (numSymbols maxBit
     fixKraftList (assignLengths (limitedPairs nz maxBits) numSymbols) maxBits
       = assignLengths (limitedPairs nz maxBits) numSymbols := by
   simp only [fixKraftList]
-  rw [if_pos (Nat.le_of_eq
+  rw [ite_eq_left (Nat.le_of_eq
     (assignLengths_limitedPairs_kraft nz numSymbols maxBits hmb h2 hle hnodup hrange))]
 
 /-- **`computeCodeLengths` completeness.** For frequencies with at least two distinct
@@ -2035,7 +2035,7 @@ theorem computeCodeLengths_complete (freqs : List (Nat × Nat)) (numSymbols maxB
   simp only [computeCodeLengths]
   have hne : ¬(freqs.filter (fun x => decide (x.2 > 0))).isEmpty := by
     intro h; rw [List.isEmpty_iff_length_eq_zero] at h; omega
-  rw [if_neg hne]
+  rw [ite_eq_right hne]
   split
   · rename_i hlen1; simp only [beq_iff_eq] at hlen1; omega
   · -- Abstract the nonzero list as `nz`; reduce hypotheses accordingly.
@@ -2045,7 +2045,7 @@ theorem computeCodeLengths_complete (freqs : List (Nat × Nat)) (numSymbols maxB
       hnz_range
     -- `fixKraftList` is the identity here (its overflow branch is proven dead).
     simp only [fixKraftList]
-    rw [if_pos (Nat.le_of_eq hkraft)]
+    rw [ite_eq_left (Nat.le_of_eq hkraft)]
     exact hkraft
 
 /-- Non-vacuity check: the completeness hypotheses are satisfiable on a concrete DEFLATE-shaped

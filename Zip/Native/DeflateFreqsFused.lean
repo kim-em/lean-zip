@@ -931,7 +931,7 @@ def lz77GreedyDirectHeadFNU64 (data : ByteArray)
         simpa only [heads', Array.size_uset] using hi
       have hset : heads.set! hshU.toNat posU.toNat = heads' := by
         simp only [heads', Array.uset, Array.set!_eq_setIfInBounds,
-          Array.setIfInBounds, dif_pos hb]
+          Array.setIfInBounds, dite_eq_left hb]
       rw [← hset]
       by_cases heq : i = hshU.toNat
       · subst i

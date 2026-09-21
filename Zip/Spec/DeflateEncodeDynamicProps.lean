@@ -252,7 +252,7 @@ private theorem encodeCLEntries_decodeCLSymbols_go
         -- Case split on the code type
         by_cases hle : code ≤ 15
         · -- Literal code (0-15): no extra bits
-          rw [if_pos (show code < 16 from by omega)]
+          rw [ite_eq_left (show code < 16 from by omega)]
           -- encodeCLExtra for code ≤ 15 is []
           have h16f : (code == 16) = false := by simp only [beq_eq_false_iff_ne, ne_eq]; omega
           have h17f : (code == 17) = false := by simp only [beq_eq_false_iff_ne, ne_eq]; omega
@@ -265,7 +265,7 @@ private theorem encodeCLEntries_decodeCLSymbols_go
           exact ih restBits (acc ++ [code]) hrestBits hvalid_rest hdec
             (by simp only [List.length_append, List.length_cons, List.length_nil, Nat.zero_add]; omega)
         · -- Repeat codes (16, 17, 18)
-          rw [if_neg (show ¬(code < 16) from by omega)]
+          rw [ite_eq_right (show ¬(code < 16) from by omega)]
           -- From hentry and ¬(code ≤ 15), code must be 16, 17, or 18
           cases hentry with
           | inl h => exact absurd h.1 (by omega)
@@ -639,15 +639,15 @@ private theorem clFreqFoldl_mono (entries : List CLEntry) (code : Nat)
     simp only [List.foldl_cons, clFreqFoldl]
     obtain ⟨c', _⟩ := entry
     by_cases hc'lt : c' < acc.length
-    · rw [if_pos hc'lt]
+    · rw [ite_eq_left hc'lt]
       apply ih
       · rw [List.length_set]; exact hacc
       · rw [List.getD_eq_getElem?_getD, List.getElem?_set]
         by_cases hc'code : c' = code
         · subst hc'code
-          rw [if_pos rfl, if_pos hc'lt]; simp only [Option.getD_some]; omega
-        · rw [if_neg hc'code, ← List.getD_eq_getElem?_getD]; exact hpos
-    · rw [if_neg hc'lt]; exact ih acc hacc hpos
+          rw [ite_eq_left rfl, ite_eq_left hc'lt]; simp only [Option.getD_some]; omega
+        · rw [ite_eq_right hc'code, ← List.getD_eq_getElem?_getD]; exact hpos
+    · rw [ite_eq_right hc'lt]; exact ih acc hacc hpos
 
 /-- The foldl produces a positive entry at `code` if `(code, _)` appears
     in the entries and `code < acc.length`. Generalized over accumulator. -/
@@ -665,16 +665,16 @@ private theorem clFreqFoldl_pos (entries : List CLEntry) (code extra : Nat)
     | inl heq =>
       have hc_eq : c = code := heq.1.symm
       have hclt_acc : c < acc.length := by omega
-      rw [if_pos hclt_acc]; subst hc_eq
+      rw [ite_eq_left hclt_acc]; subst hc_eq
       apply clFreqFoldl_mono
       · rw [List.length_set]; exact hacc
       · rw [List.getD_eq_getElem?_getD, List.getElem?_set]
-        rw [if_pos rfl, if_pos hclt_acc]; simp only [Option.getD_some]; omega
+        rw [ite_eq_left rfl, ite_eq_left hclt_acc]; simp only [Option.getD_some]; omega
     | inr hmem_rest =>
       by_cases hclt : c < acc.length
-      · rw [if_pos hclt]
+      · rw [ite_eq_left hclt]
         exact ih _ (by rw [List.length_set]; exact hacc) hmem_rest
-      · rw [if_neg hclt]
+      · rw [ite_eq_right hclt]
         exact ih acc hacc hmem_rest
 
 /-- `clSymbolFreqs` always returns a list of length 19. -/

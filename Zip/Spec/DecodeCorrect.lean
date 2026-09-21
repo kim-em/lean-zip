@@ -757,7 +757,7 @@ theorem decodeHuffman_correct
                 some (.literal sym.toNat.toUInt8 :: syms, rest) := by
               unfold Deflate.Spec.decodeSymbols
               simp only [bind, Option.bind, hlit_dec]
-              rw [dif_pos hlen_shorter, show rest₁ = br₁.toBits from hrest₁.symm, hds]
+              rw [dite_eq_left hlen_shorter, show rest₁ = br₁.toBits from hrest₁.symm, hds]
               dsimp only [pure, Pure.pure]
             -- resolveLZ77 (.literal :: syms) output = some output'
             have hlz' : Deflate.Spec.resolveLZ77
@@ -923,7 +923,7 @@ theorem decodeHuffman_correct
                                 rest₄) := by
                               unfold Deflate.Spec.decodeLitLen
                               simp only [bind, Option.bind, hspec_sym,
-                                if_neg (show ¬(sym.toNat < 256) from by omega)]
+                                ite_eq_right (show ¬(sym.toNat < 256) from by omega)]
                               have hne256 : (sym.toNat == 256) = false := by
                                 rw [beq_eq_false_iff_ne]; omega
                               simp only [hne256, Bool.false_eq_true, ↓reduceIte]
@@ -954,7 +954,7 @@ theorem decodeHuffman_correct
                                   :: syms, rest) := by
                               unfold Deflate.Spec.decodeSymbols
                               simp only [bind, Option.bind, hlit_dec]
-                              rw [dif_pos hlen_shorter₄,
+                              rw [dite_eq_left hlen_shorter₄,
                                 show rest₄ = br₄.toBits from hrest₄.symm, hds]
                               dsimp only [pure, Pure.pure]
                             refine ⟨_, rest, hds', ?_, hbr, hwf', hpos'⟩

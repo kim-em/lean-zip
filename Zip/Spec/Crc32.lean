@@ -146,7 +146,7 @@ theorem crcByteTable_mkTable_eq_crcByte (crc : UInt32) (byte : UInt8) :
   simp only [crcByteTable]
   have hlt : ((crc ^^^ UInt32.ofNat byte.toNat) &&& 0xFF).toNat < mkTable.size := by
     rw [mkTable_size]; exact and_0xFF_toNat_lt _
-  rw [dif_pos hlt, mkTable_getElem _ hlt, UInt32.ofNat_toNat]
+  rw [dite_eq_left hlt, mkTable_getElem _ hlt, UInt32.ofNat_toNat]
   simp only [crcByte]
   rw [crcBits8_split (crc ^^^ UInt32.ofNat byte.toNat), xor_byte_shr8]
 
@@ -165,7 +165,7 @@ theorem checksum_singleton (b : UInt8) :
   have hb32 : b.toNat < UInt32.size := Nat.lt_trans b.toNat_lt (by decide)
   have hlt : ((((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat) <
       mkTable.size := by rw [mkTable_size]; exact and_0xFF_toNat_lt _
-  rw [dif_pos hlt]
+  rw [dite_eq_left hlt]
   -- The internal `crcByteTable` index equals the simpler `0xFF ^^^ b.toNat`.
   have hidx :
       (((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b.toNat) &&& 0xFF).toNat =
@@ -202,7 +202,7 @@ theorem checksum_pair (b₁ b₂ : UInt8) :
   have hb1 : b₁.toNat < UInt32.size := Nat.lt_trans b₁.toNat_lt (by decide)
   have hlt₁ : ((((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b₁.toNat) &&& 0xFF).toNat) <
       mkTable.size := by rw [mkTable_size]; exact and_0xFF_toNat_lt _
-  rw [dif_pos hlt₁]
+  rw [dite_eq_left hlt₁]
   -- Simplify the inner index to `0xFF ^^^ b₁.toNat`.
   have hidx₁ :
       (((0xFFFFFFFF : UInt32) ^^^ UInt32.ofNat b₁.toNat) &&& 0xFF).toNat =
@@ -223,6 +223,6 @@ theorem checksum_pair (b₁ b₂ : UInt8) :
       mkTable[0xFF ^^^ b₁.toNat]'(by exact xor_ff_byte_lt_mkTable_size b₁) ^^^
       UInt32.ofNat b₂.toNat) &&& 0xFF).toNat) < mkTable.size := by
     rw [mkTable_size]; exact and_0xFF_toNat_lt _
-  rw [dif_pos hlt₂]
+  rw [dite_eq_left hlt₂]
 
 end Crc32.Spec

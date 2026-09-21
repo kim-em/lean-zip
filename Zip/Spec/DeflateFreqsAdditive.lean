@@ -61,19 +61,19 @@ theorem litDeltaP_256 (ws : Array UInt32) (i : Nat) : litDeltaP ws i 256 = 0 := 
   | _ n ih =>
     unfold litDeltaP
     by_cases hi : i < ws.size
-    · rw [dif_pos hi, if_neg (litBumpIdxP_ne_256 _), Nat.zero_add]
+    · rw [dite_eq_left hi, ite_eq_right (litBumpIdxP_ne_256 _), Nat.zero_add]
       exact ih (ws.size - (i + 1)) (by omega) (i + 1) rfl
-    · rw [dif_neg hi]
+    · rw [dite_eq_right hi]
 
 /-- Single-step unfold of `litDeltaP` at a valid index. -/
 theorem litDeltaP_succ (ws : Array UInt32) (i k : Nat) (h : i < ws.size) :
     litDeltaP ws i k = (if litBumpIdxP ws[i] = k then 1 else 0) + litDeltaP ws (i + 1) k := by
-  rw [litDeltaP, dif_pos h]
+  rw [litDeltaP, dite_eq_left h]
 
 /-- `litDeltaP` past the end is zero. -/
 theorem litDeltaP_of_ge (ws : Array UInt32) (i k : Nat) (h : ¬ i < ws.size) :
     litDeltaP ws i k = 0 := by
-  rw [litDeltaP, dif_neg h]
+  rw [litDeltaP, dite_eq_right h]
 
 /-- Words counted from `a.size + j` in `a ++ b` are exactly `b`'s words from `j`. -/
 theorem litDeltaP_shift (a b : Array UInt32) (j k : Nat) :
@@ -114,12 +114,12 @@ theorem distDeltaP_succ (ws : Array UInt32) (i k : Nat) (h : i < ws.size) :
       (if ws[i] &&& ((1 : UInt32) <<< 31) = 0 then 0
        else if codeIdx (distCodeWord ((ws[i] &&& 0xFFFF).toNat)) = k then 1 else 0)
       + distDeltaP ws (i + 1) k := by
-  rw [distDeltaP, dif_pos h]
+  rw [distDeltaP, dite_eq_left h]
 
 /-- `distDeltaP` past the end is zero. -/
 theorem distDeltaP_of_ge (ws : Array UInt32) (i k : Nat) (h : ¬ i < ws.size) :
     distDeltaP ws i k = 0 := by
-  rw [distDeltaP, dif_neg h]
+  rw [distDeltaP, dite_eq_right h]
 
 /-- Distance-bump analogue of `litDeltaP_shift`. -/
 theorem distDeltaP_shift (a b : Array UInt32) (j k : Nat) :
@@ -172,14 +172,14 @@ theorem tokenFreqsP_go_lit (ws : Array UInt32) (lf : {a : Array Nat // a.size = 
         have hidx : ws[i].toUInt8.toNat < lf.val.size := by
           have := UInt8.toNat_lt ws[i].toUInt8; rw [lf.property]; omega
         have hbump : litBumpIdxP ws[i] = ws[i].toUInt8.toNat := by
-          unfold litBumpIdxP; rw [if_pos hc]
+          unfold litBumpIdxP; rw [ite_eq_left hc]
         simp only [bumpLitFreqP, hbump]
         by_cases hk : k = ws[i].toUInt8.toNat
         · subst hk
           rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos lf.val _ hidx,
-            if_pos rfl]
+            ite_eq_left rfl]
           omega
-        · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk), if_neg (fun h => hk h.symm)]
+        · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk), ite_eq_right (fun h => hk h.symm)]
           omega
       · simp only [hc, ↓reduceIte]
         rw [ih (ws.size - (i + 1)) (by omega) _ _ _ rfl]
@@ -192,16 +192,16 @@ theorem tokenFreqsP_go_lit (ws : Array UInt32) (lf : {a : Array Nat // a.size = 
           rw [lf.property]; omega
         have hbump : litBumpIdxP ws[i] =
             codeIdx (lenCodeWord (((ws[i] >>> 16) &&& 0x7FFF).toNat)) + 257 := by
-          unfold litBumpIdxP; rw [if_neg hc]
+          unfold litBumpIdxP; rw [ite_eq_right hc]
         simp only [bumpRefLitFreqP, hbump]
         by_cases hk : k = codeIdx (lenCodeWord (((ws[i] >>> 16) &&& 0x7FFF).toNat)) + 257
         · subst hk
           rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos lf.val _ hidx,
-            if_pos rfl]
+            ite_eq_left rfl]
           omega
-        · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk), if_neg (fun h => hk h.symm)]
+        · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk), ite_eq_right (fun h => hk h.symm)]
           omega
-    · rw [dif_neg hi, litDeltaP_of_ge _ _ _ hi]
+    · rw [dite_eq_right hi, litDeltaP_of_ge _ _ _ hi]
       simp
 
 /-- Distance analogue of `tokenFreqsP_go_lit`. -/
@@ -231,11 +231,11 @@ theorem tokenFreqsP_go_dist (ws : Array UInt32) (lf : {a : Array Nat // a.size =
         by_cases hk : k = codeIdx (distCodeWord ((ws[i] &&& 0xFFFF).toNat))
         · subst hk
           rw [Array.getElem!_set!_self _ _ _ hidx, ← getElem!_pos df.val _ hidx,
-            if_pos rfl]
+            ite_eq_left rfl]
           omega
-        · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk), if_neg (fun h => hk h.symm)]
+        · rw [Array.getElem!_set!_ne _ _ _ _ (Ne.symm hk), ite_eq_right (fun h => hk h.symm)]
           omega
-    · rw [dif_neg hi, distDeltaP_of_ge _ _ _ hi]
+    · rw [dite_eq_right hi, distDeltaP_of_ge _ _ _ hi]
       simp
 
 /-- `tokenFreqsP.go` preserves the histogram sizes. -/
@@ -250,7 +250,7 @@ theorem tokenFreqsP_go_size (ws : Array UInt32) (lf : {a : Array Nat // a.size =
       by_cases hc : ws[i] &&& ((1 : UInt32) <<< 31) = 0
       · simp only [hc, ↓reduceIte]; exact ih (ws.size - (i + 1)) (by omega) _ _ _ rfl
       · simp only [hc, ↓reduceIte]; exact ih (ws.size - (i + 1)) (by omega) _ _ _ rfl
-    · rw [dif_neg hi]; exact ⟨lf.property, df.property⟩
+    · rw [dite_eq_right hi]; exact ⟨lf.property, df.property⟩
 
 /-- `tokenFreqsP` produces histograms of size 286 and 30. -/
 theorem tokenFreqsP_size (ws : Array UInt32) :
@@ -268,8 +268,8 @@ theorem initLit_get (k : Nat) :
     ((Array.replicate 286 (0 : Nat)).set! 256 1)[k]! = if k = 256 then 1 else 0 := by
   by_cases hk : k = 256
   · subst hk
-    rw [Array.getElem!_set!_self _ _ _ (by rw [Array.size_replicate]; omega), if_pos rfl]
-  · rw [Array.getElem!_set!_ne _ _ _ _ (fun h => hk h.symm), if_neg hk, replicate_zero_get]
+    rw [Array.getElem!_set!_self _ _ _ (by rw [Array.size_replicate]; omega), ite_eq_left rfl]
+  · rw [Array.getElem!_set!_ne _ _ _ _ (fun h => hk h.symm), ite_eq_right hk, replicate_zero_get]
 
 /-- Whole-stream lit/len count at `k`: EOB pre-count plus the words that bump `k`. -/
 theorem tokenFreqsP_lit (ws : Array UInt32) (k : Nat) :
@@ -323,7 +323,7 @@ theorem tokenFreqsP_append (a b : Array UInt32) :
       · rw [Array.getElem!_set!_ne _ _ _ _ (fun h => hk256 h.symm),
           zipWithAdd_get _ _ _ (by rw [hsa.1]; omega) (by rw [hsa.1, hsb.1]),
           tokenFreqsP_lit a k, tokenFreqsP_lit b k]
-        simp only [if_neg hk256]
+        simp only [ite_eq_right hk256]
         omega
   · -- distance component
     apply Array.ext

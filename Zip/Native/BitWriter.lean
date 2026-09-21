@@ -145,11 +145,11 @@ theorem flushAcc_eq (data : ByteArray) (acc : UInt64) (total : Nat) :
   | _ total ih =>
     rw [flushAcc]
     by_cases hge : total ≥ 8
-    · rw [if_pos hge, ih (total - 8) (by omega)]
+    · rw [ite_eq_left hge, ih (total - 8) (by omega)]
       have hdiv : total / 8 = (total - 8) / 8 + 1 := by omega
       have hmod : (total - 8) % 8 = total % 8 := by omega
       rw [hdiv, hmod, flushBytes, dropBytes]
-    · rw [if_neg hge]
+    · rw [ite_eq_right hge]
       have h8 : total / 8 = 0 := by omega
       have hm : total % 8 = total := by omega
       rw [h8, hm, flushBytes, dropBytes]
@@ -289,7 +289,7 @@ theorem flushBatchedU_eq (data : ByteArray) (acc : UInt64) (totalU : UInt32) :
   · have hn : flushThreshold ≤ totalU.toNat := by
       have := UInt32.le_iff_toNat_le.mp h
       simpa [flushThreshold] using this
-    rw [if_pos h, if_pos hn, flushAcc_eq, flushBytesWideU_eq, dropBytesU_eq, hshift]
+    rw [ite_eq_left h, ite_eq_left hn, flushAcc_eq, flushBytesWideU_eq, dropBytesU_eq, hshift]
     congr 1
     apply UInt8.toNat_inj.mp
     rw [UInt32.toNat_toUInt8, UInt32.toNat_and]
@@ -299,7 +299,7 @@ theorem flushBatchedU_eq (data : ByteArray) (acc : UInt64) (totalU : UInt32) :
     rw [h7, hand, Nat.toUInt8_eq, UInt8.toNat_ofNat']
   · have hn : ¬ flushThreshold ≤ totalU.toNat := fun hh =>
       h (UInt32.le_iff_toNat_le.mpr (by simpa [flushThreshold] using hh))
-    rw [if_neg h, if_neg hn]
+    rw [ite_eq_right h, ite_eq_right hn]
     congr 1
 
 /-! ### Wider pre-packed fields
@@ -503,7 +503,7 @@ theorem writeRevCode_noflush (bw : BitWriter) (rev : UInt16) (len : UInt8)
   unfold writeRevCode
   have htot : (bw.bitCount.toUInt32 + len.toUInt32).toNat = bw.bitCount.toNat + len.toNat := by
     rw [UInt32.toNat_add, UInt8.toNat_toUInt32, UInt8.toNat_toUInt32, Nat.mod_eq_of_lt (by omega)]
-  rw [if_neg]
+  rw [ite_eq_right]
   intro hge
   have := UInt32.le_iff_toNat_le.mp hge
   simp only [htot, UInt32.reduceToNat] at this
@@ -538,7 +538,7 @@ theorem writeRevCodeExtra_eq (bw : BitWriter) (rev : UInt16) (len : UInt8)
       rw [UInt32.toNat_toUInt8, UInt32.toNat_add, UInt8.toNat_toUInt32, UInt8.toNat_toUInt32,
         Nat.mod_eq_of_lt (by omega), Nat.mod_eq_of_lt (by omega)]
     unfold flushBatched
-    rw [if_neg (by simp only [hbc', flushThreshold]; omega)]
+    rw [ite_eq_right (by simp only [hbc', flushThreshold]; omega)]
     -- Both sides are `⟨bw.data, acc, count⟩`; match the accumulator and count.
     have hshift : ((bw.bitCount.toUInt32 + len.toUInt32).toUInt8).toUInt64
         = bw.bitCount.toUInt64 + len.toUInt64 := by

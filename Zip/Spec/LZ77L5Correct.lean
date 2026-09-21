@@ -133,7 +133,7 @@ theorem chainWalkPackedUUSeededChecked_toNat (data : ByteArray) (prev : Array Na
   have hold : data.size.toUSize.toNat = data.size ∧ fuel.toUSize.toNat = fuel ∧
       bestLen.toUSize.toNat = bestLen ∧ bestPos.toUSize.toNat = bestPos :=
     ⟨hg.1.2.1, hg.1.2.2.2.2.1, hg.2.1, hg.2.2.1⟩
-  rw [dif_pos hg.1.1, dif_pos hold]
+  rw [dite_eq_left hg.1.1, dite_eq_left hold]
   rw [chainWalkPackedUU2_eq]
   split
   · rw [chainWalkPackedUBelow_eq]
@@ -180,7 +180,7 @@ private theorem noH3SingleLoop_eq (data : ByteArray)
           lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap
             goodMatch niceLen lazyDepth lazy2Steps false c' h3tab' pos' 0 0 0 acc' := by
       exact ih (data.size - pos') (by omega) c' h3tab' pos' acc' rfl
-    simp (config := { zeta := false }) only [h3Seed, Bool.false_eq_true, if_false,
+    simp (config := { zeta := false }) only [h3Seed, Bool.false_eq_true, ite_false,
       updateHashesMergedH3Guarded, hnot, ↓reduceDIte]
     by_cases hlt : pos + 2 < data.size
     · simp (config := { zeta := false }) only [hlt, ↓reduceDIte]
@@ -202,7 +202,7 @@ private theorem noH3SingleLoop_eq (data : ByteArray)
           by_cases h3lt : pos + 3 < data.size
           · simp only [h3lt, ↓reduceDIte]
             by_cases hgood : r % 512 < goodMatch
-            · simp only [hgood, if_pos]
+            · simp only [hgood, ite_eq_left]
               generalize hr2 :
                 chainWalkGuardedPackedU data c2 windowSize (pos + 1)
                   (min 258 (data.size - (pos + 1))) niceLen (by omega)
@@ -214,7 +214,7 @@ private theorem noH3SingleLoop_eq (data : ByteArray)
               by_cases hacc :
                   lazyAcceptCost (r % 512) (pos - r / 512)
                     (r2 % 512) (pos + 1 - r2 / 512) = true
-              · simp only [hacc, if_true]
+              · simp only [hacc, ite_true]
                 by_cases hle2 : pos + 1 + r2 % 512 ≤ data.size
                 · simp only [hle2, ↓reduceDIte]
                   apply ih' <;> omega
