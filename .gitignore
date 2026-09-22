@@ -1,3 +1,10 @@
 /.lake
 /conformance/.lake
 /.direnv
+
+# `lake update` run inside conformance/ writes a lean-toolchain there. The root
+# file is meant to be this repository's only one: a second copy is what Lake
+# picks when building from that directory, so one left at a stale version
+# builds everything on it and still reports a pass. Ignore rather than delete,
+# because deleting it does not stop the next `lake update` re-creating it.
+/conformance/lean-toolchain
