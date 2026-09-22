@@ -57,9 +57,9 @@ LEAN_EXPORT uint32_t lean_zip_uget_u32le(b_lean_obj_arg a, size_t off) {
  *   (a owned, off an unboxed size_t, v an unboxed uint32_t)
  */
 LEAN_EXPORT lean_obj_res lean_zip_uset_u32le(lean_obj_arg a, size_t off, uint32_t v) {
-    lean_obj_res r;
-    if (lean_is_exclusive(a)) r = a;
-    else r = lean_copy_byte_array(a);
+    // `lean_copy_byte_array` was removed in v4.35.0-rc2; this is the idiom
+    // core itself now uses in `lean_byte_array_uset`.
+    lean_obj_res r = lean_sarray_ensure_exclusive(a);
     uint8_t *p = lean_sarray_cptr(r) + off;
     p[0] = (uint8_t)(v);
     p[1] = (uint8_t)(v >> 8);
@@ -95,9 +95,9 @@ LEAN_EXPORT uint64_t lean_zip_uget_u64le(b_lean_obj_arg a, size_t off) {
  * array is copied first, exactly like `lean_byte_array_uset`.
  */
 LEAN_EXPORT lean_obj_res lean_zip_uset_u64le(lean_obj_arg a, size_t off, uint64_t v) {
-    lean_obj_res r;
-    if (lean_is_exclusive(a)) r = a;
-    else r = lean_copy_byte_array(a);
+    // `lean_copy_byte_array` was removed in v4.35.0-rc2; this is the idiom
+    // core itself now uses in `lean_byte_array_uset`.
+    lean_obj_res r = lean_sarray_ensure_exclusive(a);
     uint8_t *p = lean_sarray_cptr(r) + off;
     p[0] = (uint8_t)(v);
     p[1] = (uint8_t)(v >> 8);
