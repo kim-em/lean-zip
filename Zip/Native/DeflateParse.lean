@@ -359,11 +359,17 @@ decreasing_by
     This is the chain that lets `fillRegion`/`scanCands` read the cache slots
     with proven bounds.
 
-    The two proofs below restrict the simp set with `only`. An unrestricted
-    `simp_all` with `zetaDelta := true` still closes both goals, but as of
-    v4.34.0 the proof term it builds is deep enough that the kernel rejects it
-    with "deep recursion detected" (a limit `maxRecDepth` does not raise).
-    Naming the two size lemmas keeps the term small. -/
+    The two proofs below restrict the simp set with `only`. That was forced on
+    v4.34.0, where an unrestricted `simp_all` with `zetaDelta := true` closed
+    both goals but built a proof term the kernel rejected with "deep recursion
+    detected" (a limit `maxRecDepth` does not raise: 512 and 1000000 fail
+    alike). The trigger was the size of a `Nat` literal reaching the kernel
+    through a zetaDelta-inlined `let`, not anything about this recursion, and
+    it is fixed from v4.35.0-rc2 on -- the unrestricted form compiles again.
+
+    The `only` form is kept regardless: naming the lemmas the proof needs is
+    faster and does not silently change meaning when the default simp set
+    does. -/
 private theorem buildCache_fst_size (data : ByteArray) (hashTable prev h3tab : Array Nat)
     (depth slots niceSkip base r j : Nat) (lens dists : Array Nat) :
     (buildCache data hashTable prev h3tab depth slots niceSkip base r j lens dists).1.size = lens.size := by

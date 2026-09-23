@@ -111,7 +111,7 @@ package conformance where
 
 require «lean-zip» from ".."
 
-require «lean-zlib» from git "https://github.com/kim-em/lean-zlib" @ "b6590763445d7a2365b44698c7c9d7d94aa35455"
+require «lean-zlib» from git "https://github.com/kim-em/lean-zlib" @ "270c2daedb55d6c756080254e8a17ae95319790e"
 
 -- The conformance test modules live under the `Conformance.*` module path:
 -- a package cannot add modules under a required dependency's library

@@ -516,7 +516,13 @@ theorem decodeHuffmanFastBR_eq (br : BitReader) (output : ByteArray)
     unfold Inflate.decodeHuffmanFastBR.go Inflate.decodeHuffman.go
     rw [HuffTree.decodeWithTable_eq litTree br]
     cases hlit : litTree.decode br with
-    | error e => rfl
+    -- Reduce the `Except` bind rather than closing by `rfl`. Both sides are
+    -- `bind (.error e) _`, but each `_` still wraps an unreduced unfolding of
+    -- a well-founded `.go` recursion, and `rfl` makes the kernel check that
+    -- defeq the hard way. This single tactic was 21.8 GB of the module's
+    -- 23.4 GB peak on v4.35.0-rc2 (13.4 of 14.1 GB on v4.34.0), enough to be
+    -- OOM-killed on a CI runner; reducing the bind first costs 0.7 GB.
+    | error e => simp only [bind, Except.bind]
     | ok p =>
       obtain ⟨sym, br₁⟩ := p
       simp only [bind, Except.bind]

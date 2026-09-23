@@ -443,6 +443,11 @@ theorem lengthExtra_eq : ∀ i : Fin 29,
     (Zip.Native.Inflate.lengthExtra[i.val]!).toNat =
     (Deflate.Spec.lengthExtra[i.val]!) := by decide_cbv
 
+-- `distBase` is the one table here whose entries reach five figures (24577),
+-- and from v4.35.0-rc2 `decide_cbv` needs more elaborator recursion than the
+-- default to evaluate it. 8192 is not enough; 16384 is. Unlike the kernel's
+-- "deep recursion detected", this limit is the one `maxRecDepth` really sets.
+set_option maxRecDepth 16384 in
 set_option cbv.warning false in
 theorem distBase_eq : ∀ i : Fin 30,
     (Zip.Native.Inflate.distBase[i.val]!).toNat =
