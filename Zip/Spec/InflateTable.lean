@@ -498,7 +498,17 @@ set_option maxHeartbeats 1000000 in
 /-- **Loop lemma.** The table-driven block loop equals the canonical
     `decodeHuffman`: the two `.go` recursions have identical structure once each
     `decodeWithTable` is rewritten to `decode` via `decodeWithTable_eq`. By
-    functional induction on `decodeHuffman.go`. -/
+    functional induction on `decodeHuffman.go`.
+
+    Performance note. The `.error` branch of the `cases` below unfolds `bind`
+    rather than closing by `rfl`, and needs to stay that way. Its goal is
+    `bind (.error e) K₁ = bind (.error e) K₂`, where K₁ and K₂ are the
+    remainders of the two `.go` bodies and differ throughout. Unfolding `bind`
+    collapses both sides to `.error e` without either continuation being looked
+    at; `rfl` instead leaves the kernel comparing K₁ with K₂. That one `rfl`
+    accounted for 21.8 GB of this module's 23.4 GB peak on v4.35.0-rc2, and
+    13.4 of 14.1 GB on v4.34.0 -- enough to be OOM-killed on a CI runner.
+    Unfolding first costs 0.7 GB. -/
 theorem decodeHuffmanFastBR_eq (br : BitReader) (output : ByteArray)
     (litTree distTree : HuffTree) (maxOut : Nat) :
     Inflate.decodeHuffmanFastBR br output litTree distTree maxOut
@@ -516,12 +526,9 @@ theorem decodeHuffmanFastBR_eq (br : BitReader) (output : ByteArray)
     unfold Inflate.decodeHuffmanFastBR.go Inflate.decodeHuffman.go
     rw [HuffTree.decodeWithTable_eq litTree br]
     cases hlit : litTree.decode br with
-    -- Reduce the `Except` bind rather than closing by `rfl`. Both sides are
-    -- `bind (.error e) _`, but each `_` still wraps an unreduced unfolding of
-    -- a well-founded `.go` recursion, and `rfl` makes the kernel check that
-    -- defeq the hard way. This single tactic was 21.8 GB of the module's
-    -- 23.4 GB peak on v4.35.0-rc2 (13.4 of 14.1 GB on v4.34.0), enough to be
-    -- OOM-killed on a CI runner; reducing the bind first costs 0.7 GB.
+    -- `Except.bind` on `.error e` discards its continuation, so unfolding it
+    -- collapses both sides to `.error e`. Do not close this by `rfl` instead;
+    -- see the performance note on the theorem.
     | error e => simp only [bind, Except.bind]
     | ok p =>
       obtain ⟨sym, br₁⟩ := p
