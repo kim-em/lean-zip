@@ -293,7 +293,10 @@ private theorem packCodeEntry_write (bw : BitWriter) (e : UInt16 × UInt8) :
     unfold packCodeEntry
     -- Reduce the `(c, l).snd` the unfolding leaves behind: `bv_decide` no
     -- longer does that projection itself, and abstracts it as an atom
-    -- distinct from the `l` on the right-hand side.
+    -- distinct from the `l` on the right-hand side. Fixed upstream by
+    -- https://github.com/leanprover/lean4/pull/15267 ("fix: make the bv_decide
+    -- pre-processor reduce projections and matches"), which landed after the
+    -- v4.35.0 branch was cut, so this is removable once we are on v4.36.0.
     dsimp only
     generalize BitWriter.reverse16 c = r
     bv_decide
