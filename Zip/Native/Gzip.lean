@@ -70,6 +70,9 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
         -- End of concatenated stream
         return result
       unless cm == 8 do throw "Gzip: unsupported compression method"
+      -- RFC 1952 §2.3.1.2: a reserved FLG bit (5, 6 or 7) could announce a field
+      -- this decoder does not know how to skip, so it must be an error.
+      unless flg &&& 0xE0 == 0 do throw "Gzip: reserved header flag bits set"
       -- Skip MTIME (4), XFL (1), OS (1)
       pos := pos + 10
       -- FEXTRA

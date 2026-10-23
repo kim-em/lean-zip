@@ -6,6 +6,7 @@ import ZipTest.PackedTokens
 import ZipTest.PackedHeads
 import ZipTest.SizeHelpers
 import ZipTest.L7Adaptive
+import ZipTest.GzipFraming
 
 def main : IO Unit := do
   ZipTest.Binary.tests
@@ -18,4 +19,5 @@ def main : IO Unit := do
   ZipTest.PackedHeads.tests
   ZipTest.SizeHelpers.tests
   ZipTest.L7Adaptive.tests
+  ZipTest.GzipFraming.flagTests
   IO.println "\nAll tests passed!"
