@@ -2788,7 +2788,8 @@ decreasing_by all_goals (first | assumption | omega)
     removes the dead `useH3` branch, `h3tab` state, `h3Seed`, and pair-valued
     interior-update path from the generated hot loop.  The public entry below
     remains definitionally the generic `useH3 := false` matcher for proofs and
-    selects this loop only through `implemented_by`. -/
+    selects this loop through the `@[csimp]` lemma
+    `lz77ChainLazyIterPMergedNoH3_eq_native`, which proves the two equal. -/
 @[specialize useFastLog] def lz77LazyMergedLoopNoH3 (data : ByteArray)
     (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
     (useFastLog : Bool) (c : Array Nat) (pos pLen pMatchPos step : Nat)
@@ -3155,8 +3156,8 @@ def lz77ChainLazyIterPMergedH3Native (data : ByteArray) (maxChain : Nat)
         goodMatch niceLen lazyDepth lazy2Steps c h3tab 0 0 0 0 acc
 
 /-- Proof-facing H3 entry.  Its logical body is the proved generic matcher;
-    generated code uses `lz77ChainLazyIterPMergedH3Native`. -/
-@[implemented_by lz77ChainLazyIterPMergedH3Native]
+    generated code uses `lz77ChainLazyIterPMergedH3Native` through the
+    `@[csimp]` lemma `lz77ChainLazyIterPMergedH3_eq_native`. -/
 def lz77ChainLazyIterPMergedH3 (data : ByteArray) (maxChain : Nat)
     (windowSize : Nat := 32768) (insertCap : Nat := 1000000000)
     (goodMatch : Nat := 259) (niceLen : Nat := 258)
@@ -3185,14 +3186,110 @@ def lz77ChainLazyIterPMergedNoH3Native (data : ByteArray) (maxChain : Nat)
         goodMatch niceLen lazyDepth lazy2Steps c 0 0 0 0 acc
 
 /-- Proof-facing no-H3 entry.  Its logical body is the proved generic matcher;
-    generated code uses `lz77ChainLazyIterPMergedNoH3Native`. -/
-@[implemented_by lz77ChainLazyIterPMergedNoH3Native]
+    generated code uses `lz77ChainLazyIterPMergedNoH3Native` through the
+    `@[csimp]` lemma `lz77ChainLazyIterPMergedNoH3_eq_native`. -/
 def lz77ChainLazyIterPMergedNoH3 (data : ByteArray) (maxChain : Nat)
     (windowSize : Nat := 32768) (insertCap : Nat := 1000000000)
     (goodMatch : Nat := 259) (niceLen : Nat := 258)
     (lazyDepth : Nat := maxChain) (lazy2Steps : Nat := 1) : TokenArray :=
   lz77ChainLazyIterPMerged data maxChain windowSize insertCap goodMatch niceLen
     lazyDepth false lazy2Steps
+
+/-! ### The level-7 matcher specializations are the generic matcher
+
+`lz77LazyMergedLoopNoH3` and `lz77LazyMergedLoopH3` are hand-specialized copies
+of `lz77LazyMergedLoop` at `useH3 := false` and `useH3 := true`. The lemmas
+below prove each equal to the generic loop, so the native entries
+`lz77ChainLazyIterPMerged{NoH3,H3}Native` are proved equal to the proof-facing
+entries and replace them in compiled code through `@[csimp]`; the roundtrip
+theorems therefore cover the matcher the compiled level-7 encoder runs. -/
+
+/-- With `useH3 := false` the fused interior update leaves the hash3 table
+    alone and is the plain merged update. -/
+theorem updateHashesMergedH3Guarded_false (data : ByteArray) (hashSize prevSize : Nat)
+    (c h3tab : Array Nat) (pos j matchLen insertCap : Nat) :
+    updateHashesMergedH3Guarded false data hashSize prevSize c h3tab pos j matchLen insertCap =
+      (updateHashesMergedGuarded data hashSize prevSize c pos j matchLen insertCap, h3tab) :=
+  rfl
+
+/-- The distance-log implementation choice does not change the accept rule. -/
+theorem lazyAcceptCostNative_eq (useFastLog : Bool) (len1 dist1 len2 dist2 : Nat) :
+    lazyAcceptCostNative useFastLog len1 dist1 len2 dist2 =
+      lazyAcceptCost len1 dist1 len2 dist2 := by
+  cases useFastLog <;>
+    simp only [lazyAcceptCostNative, lazyAcceptCostFast_eq, Bool.false_eq_true, ite_false,
+      ite_true]
+
+/-- The no-H3 specialized loop is the generic loop at `useH3 := false`, for any
+    (unused) hash3 table. Strong induction on the loop's termination measure;
+    after one unfolding the two bodies agree branch by branch. -/
+theorem lz77LazyMergedLoopNoH3_eq (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (useFastLog : Bool) :
+    ∀ (n : Nat) (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray),
+    2 * (data.size - pos) + min pLen 1 = n →
+    lz77LazyMergedLoopNoH3 data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen
+      lazyDepth lazy2Steps useFastLog c pos pLen pMatchPos step acc =
+    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen
+      lazyDepth lazy2Steps false c h3tab pos pLen pMatchPos step acc := by
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    intro c h3tab pos pLen pMatchPos step acc hn
+    unfold lz77LazyMergedLoopNoH3 lz77LazyMergedLoop
+    simp only [h3Seed, updateHashesMergedH3Guarded_false, lazyAcceptCostNative_eq,
+      Bool.false_eq_true, ite_false, Nat.zero_mod, Nat.zero_div]
+    repeat' (first
+      | refine dite_congr rfl (fun _ => ?_) (fun _ => ?_)
+      | refine ite_congr rfl (fun _ => ?_) (fun _ => ?_)
+      | (refine ih _ ?_ _ _ _ _ _ _ _ rfl; omega)
+      | rfl)
+
+/-- The H3 specialized loop is the generic loop at `useH3 := true`. -/
+theorem lz77LazyMergedLoopH3_eq (data : ByteArray)
+    (windowSize hashSize prevSize maxChain insertCap goodMatch niceLen lazyDepth lazy2Steps : Nat)
+    (useFastLog : Bool) :
+    ∀ (n : Nat) (c h3tab : Array Nat) (pos pLen pMatchPos step : Nat) (acc : TokenArray),
+    2 * (data.size - pos) + min pLen 1 = n →
+    lz77LazyMergedLoopH3 data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen
+      lazyDepth lazy2Steps useFastLog c h3tab pos pLen pMatchPos step acc =
+    lz77LazyMergedLoop data windowSize hashSize prevSize maxChain insertCap goodMatch niceLen
+      lazyDepth lazy2Steps true c h3tab pos pLen pMatchPos step acc := by
+  intro n
+  induction n using Nat.strongRecOn with
+  | _ n ih =>
+    intro c h3tab pos pLen pMatchPos step acc hn
+    unfold lz77LazyMergedLoopH3 lz77LazyMergedLoop
+    simp only [h3Seed, updateHashesMergedH3GuardedEnabled_eq, lazyAcceptCostNative_eq, ite_true]
+    repeat' (first
+      | refine dite_congr rfl (fun _ => ?_) (fun _ => ?_)
+      | refine ite_congr rfl (fun _ => ?_) (fun _ => ?_)
+      | (refine ih _ ?_ _ _ _ _ _ _ _ rfl; omega)
+      | rfl)
+
+/-- Compiled code runs the no-H3 native entry in place of the proof-facing one. -/
+@[csimp] theorem lz77ChainLazyIterPMergedNoH3_eq_native :
+    @lz77ChainLazyIterPMergedNoH3 = @lz77ChainLazyIterPMergedNoH3Native := by
+  funext data maxChain windowSize insertCap goodMatch niceLen lazyDepth lazy2Steps
+  unfold lz77ChainLazyIterPMergedNoH3 lz77ChainLazyIterPMerged lz77ChainLazyIterPMergedNoH3Native
+  split
+  · rfl
+  · cases decide (h3ProbeMinSize ≤ data.size) <;>
+      simp only [lz77LazyMergedLoopNoH3FastLog, lz77LazyMergedLoopNoH3NatLog, Bool.false_eq_true,
+        ite_true, ite_false] <;>
+      exact (lz77LazyMergedLoopNoH3_eq _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ rfl).symm
+
+/-- Compiled code runs the H3 native entry in place of the proof-facing one. -/
+@[csimp] theorem lz77ChainLazyIterPMergedH3_eq_native :
+    @lz77ChainLazyIterPMergedH3 = @lz77ChainLazyIterPMergedH3Native := by
+  funext data maxChain windowSize insertCap goodMatch niceLen lazyDepth lazy2Steps
+  unfold lz77ChainLazyIterPMergedH3 lz77ChainLazyIterPMerged lz77ChainLazyIterPMergedH3Native
+  split
+  · rfl
+  · cases decide (h3ProbeMinSize ≤ data.size) <;>
+      simp only [lz77LazyMergedLoopH3FastLog, lz77LazyMergedLoopH3NatLog, initialH3Table,
+        Bool.false_eq_true, ite_true, ite_false] <;>
+      exact (lz77LazyMergedLoopH3_eq _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ rfl).symm
 
 /-- Merged-array twin of `lz77ChainIterP.mainLoop` (the greedy tier, levels
     1–3): identical control flow, but the chain state is the single combined

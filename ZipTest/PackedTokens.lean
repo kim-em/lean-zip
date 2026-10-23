@@ -375,8 +375,9 @@ private def checkLargeL5CompiledPath : IO Unit := do
   unless production == established do
     throw (IO.userError "large-L5 pipeline/reference output mismatch")
 
-/-- Direct compiled conformance for the two level-7 `@[implemented_by]`
-    specializations. Calling the proof-facing wrappers exercises their native
+/-- Direct compiled conformance for the two level-7 `@[csimp]`
+    specializations (proved equal to the generic matcher in
+    `Zip.Native.Deflate`). Calling the proof-facing wrappers exercises their native
     implementations in compiled tests, while `lz77ChainLazyIterPMerged` is the
     proved generic/logical reference. Keep the matcher shallow enough for CI
     while retaining H3 updates, interior insertion, lazy lookahead, and rolling
