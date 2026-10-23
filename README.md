@@ -11,9 +11,9 @@ and this proof is certified by the Lean kernel:
 ```lean
 /-- Decompressing the output of `compress` returns the original data,
     for every input and every compression level. -/
-theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
+theorem zlib_decompress_compress (data : ByteArray) (level : UInt8)
     (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
-    ZlibDecode.decompressSingle (ZlibEncode.compress data level) maxOutputSize = .ok data
+    ZlibDecode.decompress (ZlibEncode.compress data level) maxOutputSize = .ok data
 ```
 
 This theorem rests on lower level theorems about the DEFLATE algorithm,

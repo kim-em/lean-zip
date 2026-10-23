@@ -4,6 +4,7 @@ import ZipCommon.Spec.BinaryCorrect
 import Zip.Spec.DeflateSuffix
 import Zip.Spec.InflateComplete
 import Zip.Spec.GzipCorrect
+import Zip.Spec.InflateTreeFreeCorrect
 
 /-!
 # Zlib framing roundtrip (RFC 1950)
@@ -14,6 +15,10 @@ Pure single-stream zlib decoder and roundtrip theorem connecting
 The encoder always sets FDICT=0 and uses a simple 2-byte header, so
 `decompressSingle` only handles that case — it is simpler than the full
 `ZlibDecode.decompress` which uses `let mut pos`.
+
+`ZlibDecode.decompress_ok_iff` shows that the shipped `ZlibDecode.decompress`
+succeeds exactly when `decompressSingle` does, with the same output, so the
+roundtrip transfers to the decoder users call (`zlib_decompress_compress`).
 -/
 
 namespace Zip.Native
@@ -187,5 +192,67 @@ theorem zlib_decompressSingle_compress (data : ByteArray) (level : UInt8)
     ZlibEncode.compress_cinfo data level,
     ZlibEncode.compress_no_fdict data level,
     hinflRaw, hendPos4, hba_eq, hadler]
+
+
+/-- The shipped zlib decoder `ZlibDecode.decompress` succeeds exactly when the
+    proof-facing `ZlibDecode.decompressSingle` does, with the same output. The
+    two differ only in how they are written (`let mut` and bounds-checked reads
+    versus `!` reads) and in the inflater they call: the production tree-free
+    `Inflate.inflateRaw` against the reference `Inflate.inflateRawReference`,
+    which have the same accept set (`Inflate.inflateRaw_ok_iff_reference`).
+    Error messages may differ; only the successful results are claimed equal. -/
+theorem ZlibDecode.decompress_ok_iff (data : ByteArray) (maxOutputSize : Nat)
+    (out : ByteArray) :
+    ZlibDecode.decompress data maxOutputSize = .ok out ↔
+      ZlibDecode.decompressSingle data maxOutputSize = .ok out := by
+  by_cases hSz : data.size < 6
+  · simp only [ZlibDecode.decompress, ZlibDecode.decompressSingle, hSz, dite_true, ite_true,
+      throw, throwThe, MonadExceptOf.throw, bind, Except.bind, reduceCtorEq]
+  · have h0 : 0 < data.size := by omega
+    have h1 : 1 < data.size := by omega
+    -- Either both inflaters succeed with the same result, or both fail.
+    have hinfl : (∃ p, Inflate.inflateRaw data 2 maxOutputSize = .ok p ∧
+          Inflate.inflateRawReference data 2 maxOutputSize = .ok p) ∨
+        (∃ e₁ e₂, Inflate.inflateRaw data 2 maxOutputSize = .error e₁ ∧
+          Inflate.inflateRawReference data 2 maxOutputSize = .error e₂) := by
+      have hiff := Inflate.inflateRaw_ok_iff_reference data 2 maxOutputSize 0 (by omega)
+      cases hA : Inflate.inflateRaw data 2 maxOutputSize with
+      | ok p => exact .inl ⟨p, rfl, (hiff p).mp hA⟩
+      | error e₁ =>
+        cases hB : Inflate.inflateRawReference data 2 maxOutputSize with
+        | ok p =>
+          have h := (hiff p).mpr hB
+          rw [hA] at h
+          cases h
+        | error e₂ => exact .inr ⟨e₁, e₂, rfl, rfl⟩
+    rcases hinfl with ⟨⟨dec, ep⟩, hA, hB⟩ | ⟨e₁, e₂, hA, hB⟩
+    · simp only [ZlibDecode.decompress, ZlibDecode.decompressSingle, hSz, dite_false, ite_false,
+        getElem!_pos data 0 h0, getElem!_pos data 1 h1, hA, hB,
+        throw, throwThe, MonadExceptOf.throw, bind, Except.bind, pure, Except.pure]
+      by_cases hT : ep + 4 ≤ data.size
+      · have hT' : ¬ data.size < ep + 4 := by omega
+        simp only [hT', ite_false, getElem!_pos data ep (by omega),
+          getElem!_pos data (ep + 1) (by omega), getElem!_pos data (ep + 2) (by omega),
+          getElem!_pos data (ep + 3) (by omega)]
+        (repeat' split) <;> simp_all only [Except.ok.injEq, Nat.not_lt, UInt8.not_le, beq_iff_eq, bne_iff_ne, ne_eq,
+          Decidable.not_not, not_false_eq_true, not_true_eq_false, BEq.rfl, reduceCtorEq]
+      · have hT' : data.size < ep + 4 := by omega
+        simp only [hT', ite_true, dite_false, hT]
+        (repeat' split) <;> simp_all only [Nat.not_le, UInt8.not_le, beq_iff_eq, bne_iff_ne, ne_eq, Decidable.not_not,
+          not_false_eq_true, not_true_eq_false, BEq.rfl, reduceCtorEq]
+    · simp only [ZlibDecode.decompress, ZlibDecode.decompressSingle, hSz, dite_false, ite_false,
+        getElem!_pos data 0 h0, getElem!_pos data 1 h1, hA, hB,
+        throw, throwThe, MonadExceptOf.throw, bind, Except.bind]
+      (repeat' split) <;> simp_all only [UInt8.not_le, beq_iff_eq, bne_iff_ne, ne_eq, Decidable.not_not,
+        not_false_eq_true, not_true_eq_false, BEq.rfl, reduceCtorEq]
+
+/-- Zlib roundtrip through the shipped decoder: `ZlibDecode.decompress` inverts
+    `ZlibEncode.compress` for every input and level, whenever the input fits
+    under the decoder's `maxOutputSize` cap. -/
+theorem zlib_decompress_compress (data : ByteArray) (level : UInt8)
+    (maxOutputSize : Nat) (hsize : data.size ≤ maxOutputSize) :
+    ZlibDecode.decompress (ZlibEncode.compress data level) maxOutputSize = .ok data :=
+  (ZlibDecode.decompress_ok_iff _ _ _).mpr
+    (zlib_decompressSingle_compress data level maxOutputSize hsize)
 
 end Zip.Native
