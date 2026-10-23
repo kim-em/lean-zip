@@ -390,12 +390,38 @@ theorem advReader_eq (br br' : BitReader) (k : Nat)
     8–23, after shifting off the length byte). -/
 @[simp] theorem unpackSym_packEntry (sym : UInt16) (len : UInt8) :
     unpackSym (packEntry sym len) = sym := by
-  simp only [unpackSym, packEntry]; bv_decide
+  -- Bitwise extensionality instead of `bv_decide`, so the decoder correctness
+  -- theorems that use this lemma stay free of native-evaluation axioms.
+  simp only [unpackSym, packEntry]
+  apply UInt16.eq_of_toBitVec_eq
+  apply BitVec.eq_of_getLsbD_eq
+  intro i hi
+  simp only [UInt32.toBitVec_toUInt16, UInt32.toBitVec_shiftRight, UInt32.toBitVec_or,
+    UInt8.toBitVec_toUInt32, UInt32.toBitVec_shiftLeft, UInt16.toBitVec_toUInt32,
+    UInt32.toBitVec_ofNat, BitVec.ofNat_eq_ofNat, BitVec.reduceMod, BitVec.shiftLeft_eq',
+    BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod, BitVec.ushiftRight_eq',
+    BitVec.getLsbD_setWidth, BitVec.getLsbD_ushiftRight, BitVec.getLsbD_or, Nat.le_add_right,
+    BitVec.getLsbD_of_ge, Bool.and_false, BitVec.getLsbD_shiftLeft, Nat.add_sub_cancel_left,
+    Bool.false_or]
+  have h2 : 8 + i < 32 := by omega
+  have h3 : ¬ (8 + i < 8) := by omega
+  have h4 : i < 32 := by omega
+  simp only [hi, h2, h3, h4, decide_true, decide_false, Bool.not_false, Bool.true_and]
 
 /-- `unpackLen` recovers the codeword length packed by `packEntry`. -/
 @[simp] theorem unpackLen_packEntry (sym : UInt16) (len : UInt8) :
     unpackLen (packEntry sym len) = len := by
-  simp only [unpackLen, packEntry]; bv_decide
+  -- Bitwise extensionality instead of `bv_decide` (see `unpackSym_packEntry`).
+  simp only [unpackLen, packEntry]
+  apply UInt8.eq_of_toBitVec_eq
+  apply BitVec.eq_of_getLsbD_eq
+  intro i hi
+  simp only [UInt32.toUInt8_or, UInt8.toUInt8_toUInt32, UInt8.toBitVec_or,
+    UInt32.toBitVec_toUInt8, UInt32.toBitVec_shiftLeft, UInt16.toBitVec_toUInt32,
+    UInt32.toBitVec_ofNat, BitVec.ofNat_eq_ofNat, BitVec.reduceMod, BitVec.shiftLeft_eq',
+    BitVec.toNat_ofNat, Nat.reducePow, Nat.reduceMod, Nat.reduceLeDiff,
+    BitVec.setWidth_shiftLeft_of_le, BitVec.setWidth_setWidth_of_le, Std.le_refl,
+    BitVec.shiftLeft_eq_zero, BitVec.or_zero]
 
 /-- The packed entry of `buildTable` at a valid index is `packEntry` of the
     `(sym, len)` reached by `tableEntry` — the single packed array projects back
