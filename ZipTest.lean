@@ -5,6 +5,7 @@ import ZipTest.InflateTable
 import ZipTest.PackedTokens
 import ZipTest.PackedHeads
 import ZipTest.SizeHelpers
+import ZipTest.GzipMemberLimit
 import ZipTest.L7Adaptive
 
 def main : IO Unit := do
@@ -17,5 +18,6 @@ def main : IO Unit := do
   ZipTest.PackedTokens.tests
   ZipTest.PackedHeads.tests
   ZipTest.SizeHelpers.tests
+  ZipTest.GzipMemberLimit.tests
   ZipTest.L7Adaptive.tests
   IO.println "\nAll tests passed!"

@@ -140,6 +140,10 @@ def decompress (data : ByteArray) (maxOutputSize : Nat := 1024 * 1024 * 1024) :
         throw "Gzip: total output exceeds maximum size"
     else
       throw "Gzip: truncated header"
+  -- The bounded loop checks for end-of-input at the start of each
+  -- iteration. Check once more after the final permitted iteration so
+  -- exactly 1000 complete members are accepted, while a 1001st is rejected.
+  if pos ≥ data.size then return result
   throw "Gzip: too many concatenated members"
 
 end GzipDecode
